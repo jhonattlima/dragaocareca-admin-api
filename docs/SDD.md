@@ -98,6 +98,31 @@ Feed admin (protected unless backend bypass):
 - `GET /v1/feed/preview`
 - `GET /v1/feed/status`
 
+Episode media upload (protected unless backend bypass):
+- `POST /v1/episodes/:episodeId/audio`
+- `POST /v1/episodes/:episodeId/trailer`
+- `POST /v1/episodes/:episodeId/cover`
+- `POST /v1/episodes/:episodeId/cover-webp`
+- `DELETE /v1/episodes/:episodeId/audio`
+- `DELETE /v1/episodes/:episodeId/trailer`
+- `DELETE /v1/episodes/:episodeId/cover`
+- `DELETE /v1/episodes/:episodeId/cover-webp`
+
+Media storage defaults:
+- episodes: `data/media/episodes`
+- episodes staging: `data/media/episodes/staging`
+- trailers: `data/media/trailers`
+- trailers staging: `data/media/trailers/staging`
+- covers: `data/media/images`
+- covers staging: `data/media/images/staging`
+- cover low: `data/media/images/low`
+- cover low staging: `data/media/images/low/staging`
+
+Upload flow:
+- uploads land in staging folders first
+- save/update promotes staged files into the hot folders
+- delete removes staged or promoted files for the current episode ID
+
 Docs:
 - `GET /docs`
 - `GET /docs.json`
@@ -112,6 +137,15 @@ Docs:
 - `JWT_EXPIRES_IN`
 - `ALLOWED_GOOGLE_EMAILS`
 - `AUTH_BYPASS`
+- `MEDIA_STORAGE_ROOT`
+- `MEDIA_EPISODES_DIR`
+- `MEDIA_EPISODES_STAGING_DIR`
+- `MEDIA_TRAILERS_DIR`
+- `MEDIA_TRAILERS_STAGING_DIR`
+- `MEDIA_COVERS_DIR`
+- `MEDIA_COVERS_STAGING_DIR`
+- `MEDIA_COVERS_LOW_DIR`
+- `MEDIA_COVERS_LOW_STAGING_DIR`
 - `FEED_*` static feed metadata vars
 
 ### 8.2 Frontend environment

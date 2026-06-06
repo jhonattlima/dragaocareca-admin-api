@@ -1,3 +1,4 @@
+import path from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -53,5 +54,99 @@ export const config = {
     itunesCategoryPrimarySub: process.env.FEED_ITUNES_CATEGORY_PRIMARY_SUB ?? "Improv",
     itunesCategorySecondary: process.env.FEED_ITUNES_CATEGORY_SECONDARY ?? "Leisure",
     itunesCategorySecondarySub: process.env.FEED_ITUNES_CATEGORY_SECONDARY_SUB ?? "Games",
+  },
+  media: {
+    storageRoot: process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
+    backupRoot:
+      process.env.MEDIA_BACKUP_ROOT ??
+      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+    episodesDir:
+      process.env.MEDIA_EPISODES_DIR ??
+      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "episodes"),
+    episodesStagingDir:
+      process.env.MEDIA_EPISODES_STAGING_DIR ??
+      path.resolve(
+        process.env.MEDIA_EPISODES_DIR ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "episodes"),
+        "staging"
+      ),
+    trailersDir:
+      process.env.MEDIA_TRAILERS_DIR ??
+      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "trailers"),
+    trailersStagingDir:
+      process.env.MEDIA_TRAILERS_STAGING_DIR ??
+      path.resolve(
+        process.env.MEDIA_TRAILERS_DIR ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "trailers"),
+        "staging"
+      ),
+    coversDir:
+      process.env.MEDIA_COVERS_DIR ??
+      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "images"),
+    coversStagingDir:
+      process.env.MEDIA_COVERS_STAGING_DIR ??
+      path.resolve(
+        process.env.MEDIA_COVERS_DIR ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "images"),
+        "staging"
+      ),
+    coversLowDir:
+      process.env.MEDIA_COVERS_LOW_DIR ??
+      path.resolve(
+        process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
+        "images",
+        "low"
+      ),
+    coversLowStagingDir:
+      process.env.MEDIA_COVERS_LOW_STAGING_DIR ??
+      path.resolve(
+        process.env.MEDIA_COVERS_LOW_DIR ??
+          path.resolve(
+            process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
+            "images",
+            "low"
+          ),
+        "staging"
+      ),
+    backupEpisodesDir:
+      process.env.MEDIA_BACKUP_EPISODES_DIR ??
+      path.resolve(
+        process.env.MEDIA_BACKUP_ROOT ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+        "episodes"
+      ),
+    backupEpisodesAudioDir:
+      process.env.MEDIA_BACKUP_EPISODES_AUDIO_DIR ??
+      path.resolve(
+        process.env.MEDIA_BACKUP_ROOT ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+        "episodes",
+        "audio"
+      ),
+    backupEpisodesTrailersDir:
+      process.env.MEDIA_BACKUP_EPISODES_TRAILERS_DIR ??
+      path.resolve(
+        process.env.MEDIA_BACKUP_ROOT ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+        "episodes",
+        "trailers"
+      ),
+    backupEpisodesCoversDir:
+      process.env.MEDIA_BACKUP_EPISODES_COVERS_DIR ??
+      path.resolve(
+        process.env.MEDIA_BACKUP_ROOT ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+        "episodes",
+        "images"
+      ),
+    backupEpisodesCoversLowDir:
+      process.env.MEDIA_BACKUP_EPISODES_COVERS_LOW_DIR ??
+      path.resolve(
+        process.env.MEDIA_BACKUP_ROOT ??
+          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
+        "episodes",
+        "images",
+        "low"
+      ),
   },
 };

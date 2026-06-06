@@ -178,6 +178,98 @@ export const swaggerSpec = swaggerJsdoc({
           responses: { "200": { description: "Updated" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
         },
       },
+      "/v1/episodes/{episodeId}/audio": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Upload episode audio file",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
+      "/v1/episodes/{episodeId}/trailer": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Upload episode trailer file",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
+      "/v1/episodes/{episodeId}/cover": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Upload episode cover image",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
+      "/v1/episodes/{episodeId}/cover-webp": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Upload episode cover image in webp",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
     },
   },
   apis: [],
