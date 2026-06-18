@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+npm-debug.log*
+*.log
+
+# Local data artifacts
+data/
+remote-norm.xml
+local-norm.xml
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode/
