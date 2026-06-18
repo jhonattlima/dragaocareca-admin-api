@@ -26,6 +26,7 @@ export const config = {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     chatId: process.env.TELEGRAM_CHAT_ID ?? "",
     apiBaseUrl: process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org",
+    pollIntervalMs: Number(process.env.TELEGRAM_POLL_INTERVAL_MS ?? 60000),
   },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),
