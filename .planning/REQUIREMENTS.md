@@ -42,14 +42,14 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EPISODE-01 | Phase 1 | Pending |
-| EPISODE-02 | Phase 1 | Pending |
-| EPISODE-03 | Phase 1 | Pending |
-| TGRAM-01 | Phase 2 | Pending |
-| TGRAM-02 | Phase 2 | Pending |
-| OPS-01 | Phase 3 | Pending |
-| OPS-02 | Phase 3 | Pending |
-| OPS-03 | Phase 3 | Pending |
+| EPISODE-01 | Phase 1 | Done |
+| EPISODE-02 | Phase 1 | Done |
+| EPISODE-03 | Phase 1 | Done |
+| TGRAM-01 | Phase 2 | Done |
+| TGRAM-02 | Phase 2 | Done |
+| OPS-01 | Phase 3 | Done |
+| OPS-02 | Phase 3 | Done |
+| OPS-03 | Phase 3 | Done |
 
 **Coverage:**
 - v1 requirements: 8 total

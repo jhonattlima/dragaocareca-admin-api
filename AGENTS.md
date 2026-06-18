@@ -11,3 +11,10 @@
   - backend `.env`: `AUTH_BYPASS`
   - frontend env: `authBypass`
 - Prefer minimal-scope changes and verify with `npm run typecheck` / `npm run build`.
+- Telegram launch notifications live in the backend service:
+  - queue + dedupe in `src/services/launch-notification.service.ts`
+  - delivery in `src/services/telegram.service.ts`
+  - startup worker in `src/workers/launch-notification.worker.ts`
+- Use the WSL workspace layout:
+  - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
+  - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`

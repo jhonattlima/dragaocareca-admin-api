@@ -3,6 +3,7 @@
 ## What This Is
 
 An admin API service for Dragao Careca that already manages podcast episodes and generates the public feed. The next step is to integrate the `dona-sonja-turbo` bot behavior into this backend so it can notify a specific Telegram group when a new episode is published.
+This has now been implemented in the backend: episode launch detection, Telegram delivery, and the startup worker all live inside `dragaocareca-admin-api`.
 
 ## Core Value
 
@@ -12,14 +13,13 @@ Notify the right Telegram group quickly and reliably whenever a new podcast epis
 
 ### Validated
 
-(None yet — ship to validate)
+- Episode launch detection is implemented and queued from the backend episode lifecycle.
+- Telegram delivery and the startup worker are implemented and configuration-driven.
 
 ### Active
 
-- [ ] Detect new podcast episode launches without duplicate notifications.
-- [ ] Send a Telegram message to the configured group when a new episode is detected.
-- [ ] Run the bot logic as part of the `dragaocareca-admin-api` backend process on the VPS.
-- [ ] Allow bot and Telegram configuration to be set through the service environment or config.
+- [ ] Verify the VPS deployment wiring and production runtime behavior.
+- [ ] Confirm notification delivery path against the live Telegram group.
 
 ### Out of Scope
 
@@ -42,8 +42,8 @@ This project integrates the existing `dona-sonja-turbo` bot behavior into `draga
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Treat `dragaocareca-admin-api` as the project root | The integration is being added to that service | — Pending |
-| Keep notification scope to one Telegram group | Matches the stated need and limits complexity | — Pending |
+| Treat `dragaocareca-admin-api` as the project root | The integration is now implemented inside this service | Done |
+| Keep notification scope to one Telegram group | Matches the stated need and limits complexity | Done |
 
 ---
 *Last updated: 2026-06-17 after Linux workspace alignment*

@@ -4,8 +4,8 @@
 This document captures the **minimum high-value project context** for AI-assisted development with low token usage.
 
 Scope:
-- Backend: `E:\Jhonatt\Development\Projects\node\dragaocareca-admin-api`
-- Frontend: `E:\Jhonatt\Development\Projects\angular\dragaocareca-admin-web`
+- Backend: `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
+- Frontend: `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`
 
 ## 2. System Overview
 The old client-heavy Angular + PHP flow was replaced by:
@@ -28,8 +28,11 @@ Main modules:
 - `src/models/Episode.ts`: Mongo schema
 - `src/routes/*.routes.ts`: auth/feed/episode routes
 - `src/services/feed.service.ts`: RSS feed generation
+- `src/services/launch-notification.service.ts`: launch queue and Telegram delivery workflow
+- `src/services/telegram.service.ts`: Telegram Bot API sender
 - `src/middleware/auth.middleware.ts`: JWT auth + dev bypass
 - `src/scripts/import-legacy-episodes.ts`: legacy data import
+- `src/workers/launch-notification.worker.ts`: startup poller for pending launch notifications
 
 ### 3.2 Frontend (`dragaocareca-admin-web`)
 Stack:
@@ -137,6 +140,10 @@ Docs:
 - `JWT_EXPIRES_IN`
 - `ALLOWED_GOOGLE_EMAILS`
 - `AUTH_BYPASS`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_API_BASE_URL`
+- `TELEGRAM_POLL_INTERVAL_MS`
 - `MEDIA_STORAGE_ROOT`
 - `MEDIA_EPISODES_DIR`
 - `MEDIA_EPISODES_STAGING_DIR`
@@ -187,10 +194,11 @@ Use this block in future sessions:
 
 ```text
 Project: Dragao Careca Admin Platform
-Backend: E:\Jhonatt\Development\Projects\node\dragaocareca-admin-api
-Frontend: E:\Jhonatt\Development\Projects\angular\dragaocareca-admin-web
+Backend: /home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api
+Frontend: /home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web
 Read docs/SDD.md first.
 Respect env toggles: backend AUTH_BYPASS, frontend authBypass.
 Do not reintroduce client-side feed generation.
 Prefer backend-first logic changes and keep frontend as API client.
+Telegram launch notifications live inside the backend service.
 ```

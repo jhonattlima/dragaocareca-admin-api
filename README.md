@@ -12,6 +12,11 @@ Workspace layout:
 - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
 - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`
 
+Telegram launch notifications:
+- queueing/deduping happens in the backend episode lifecycle
+- delivery uses `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
+- the worker polls pending launches on startup and every `TELEGRAM_POLL_INTERVAL_MS`
+
 ## Setup
 
 1. Copy `.env.example` to `.env` and set values.
@@ -58,3 +63,15 @@ npm run import:episodes -- "/home/jhonatt/repos/jhonatt_projects/dragaocareca-ad
 ```
 
 The importer supports both array and object JSON shapes and upserts by `episodeId`.
+
+## Telegram Bot
+
+Required env vars:
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_API_BASE_URL` (optional, defaults to `https://api.telegram.org`)
+- `TELEGRAM_POLL_INTERVAL_MS` (optional, defaults to `60000`; set `0` to disable the worker)
+
+Notes:
+- keep launch notifications backend-side only
+- do not move feed or scheduling rules into the frontend
