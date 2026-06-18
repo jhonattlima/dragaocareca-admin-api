@@ -22,6 +22,11 @@ export const config = {
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+    chatId: process.env.TELEGRAM_CHAT_ID ?? "",
+    apiBaseUrl: process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org",
+  },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),
     audioBase: required(process.env.FEED_AUDIO_BASE, "FEED_AUDIO_BASE"),
