@@ -1,7 +1,14 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-dotenv.config();
+const envFile =
+  process.env.NODE_ENV === "production"
+    ? ".env.production"
+    : process.env.NODE_ENV === "development"
+      ? ".env.dev"
+      : ".env";
+
+dotenv.config({ path: envFile });
 
 const required = (value: string | undefined, name: string): string => {
   if (!value) throw new Error(`Missing required env var: ${name}`);
@@ -11,7 +18,8 @@ const required = (value: string | undefined, name: string): string => {
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
-  mongodbUri: required(process.env.MONGODB_URI, "MONGODB_URI"),
+  sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "dragaocareca-admin.sqlite"),
+  sqliteReset: (process.env.SQLITE_RESET ?? "false").toLowerCase() === "true",
   auth: {
     bypassInDev: (process.env.AUTH_BYPASS ?? "false").toLowerCase() === "true",
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -27,6 +35,15 @@ export const config = {
     chatId: process.env.TELEGRAM_CHAT_ID ?? "",
     apiBaseUrl: process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org",
     pollIntervalMs: Number(process.env.TELEGRAM_POLL_INTERVAL_MS ?? 60000),
+  },
+  spotify: {
+    enabled: (process.env.SPOTIFY_METRICS_ENABLED ?? "false").toLowerCase() === "true",
+    podcastId: process.env.SPOTIFY_PODCAST_ID ?? "",
+    clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
+    spDc: process.env.SPOTIFY_SP_DC ?? "",
+    spKey: process.env.SPOTIFY_SP_KEY ?? "",
+    baseUrl: process.env.SPOTIFY_METRICS_BASE_URL ?? "https://generic.wg.spotify.com/podcasters/v0",
+    timeoutMs: Number(process.env.SPOTIFY_METRICS_TIMEOUT_MS ?? 15000),
   },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),

@@ -1,6 +1,6 @@
 import { create } from "xmlbuilder2";
 import { config } from "../config/env";
-import { EpisodeDocument } from "../models/Episode";
+import type { EpisodeRow } from "../repositories/episode.repository";
 
 const toRfc822 = (d: Date): string => d.toUTCString();
 const toSaoPauloIso = (d: Date): string => {
@@ -28,8 +28,8 @@ const imageUrl = (coverFileName: string | undefined, episodeId: number): string 
   return `${config.feed.imageBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
 };
 
-export const buildFeedXml = (episodes: EpisodeDocument[]): string => {
-  const latest = episodes[0]?.pubDate ?? new Date();
+export const buildFeedXml = (episodes: EpisodeRow[]): string => {
+  const latest = episodes[0]?.pubDate ? new Date(episodes[0].pubDate) : new Date();
   const cover = config.feed.defaultImage || imageUrl(episodes[0]?.coverFileName, episodes[0]?.episodeId ?? 1);
 
   const root = create({ version: "1.0", encoding: "UTF-8" })
@@ -112,7 +112,7 @@ export const buildFeedXml = (episodes: EpisodeDocument[]): string => {
     item.ele("description").txt(ep.summary ?? "").up();
     item.ele("guid").txt(audioUrl(ep.fileName, ep.episodeId)).up();
     item.ele("link").txt(`${config.feed.baseLink}${ep.episodeId}`).up();
-    item.ele("pubDate").txt(toRfc822(ep.pubDate)).up();
+    item.ele("pubDate").txt(toRfc822(new Date(ep.pubDate))).up();
     if (config.feed.itunesAuthor) item.ele("itunes:author").txt(config.feed.itunesAuthor).up();
     item.ele("itunes:summary").txt(ep.summary ?? "").up();
     item.ele("itunes:episode").txt(String(ep.episodeId)).up();

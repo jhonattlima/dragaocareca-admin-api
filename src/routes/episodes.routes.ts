@@ -3,10 +3,10 @@ import path from "node:path";
 import multer from "multer";
 import { Router } from "express";
 import { config } from "../config/env";
-import { EpisodeModel } from "../models/Episode";
 import { episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
+import { episodeRepository } from "../repositories/episode.repository";
 
 export const episodesRouter = Router();
 
@@ -213,8 +213,8 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
         return;
       }
 
-      const episode = await EpisodeModel.findOne({ episodeId });
-      const currentFileName = episode?.[spec.field] || spec.buildFileName(episodeId);
+      const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
+      const currentFileName = (currentEpisode as any)?.[spec.field] || spec.buildFileName(episodeId);
       const finalPath = path.join(spec.directory, currentFileName);
       const stagingPath = path.join(spec.stagingDirectory, currentFileName);
       const backupPath = path.join(
@@ -228,24 +228,21 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
         currentFileName
       );
 
-      if (!episode && !(await findExistingFile([finalPath, stagingPath]))) {
+      if (!currentEpisode && !(await findExistingFile([finalPath, stagingPath]))) {
         res.status(404).json({ message: "Episode not found" });
         return;
       }
 
       const movedToBackup = await moveExistingFileToBackup(finalPath, stagingPath, backupPath);
 
-      if (!episode) {
+      if (!currentEpisode) {
         res.json({ episodeId, [spec.field]: movedToBackup ? "" : undefined });
         return;
       }
 
-      const updated = await EpisodeModel.findOneAndUpdate(
-        { episodeId },
-        { $unset: { [spec.field]: "" } },
-        { returnDocument: "after" }
-      ).lean();
-
+      const updated = episodeRepository.updateMedia(episodeId, {
+        [spec.field]: null,
+      });
       if (!updated) {
         res.status(404).json({ message: "Episode not found" });
         return;
@@ -292,7 +289,7 @@ makeDeleteRoute("cover-webp", uploadSpecs.coverLow);
 
 episodesRouter.get("/", requireAuth, async (_req, res, next) => {
   try {
-    const episodes = await EpisodeModel.find().sort({ pubDate: -1, episodeId: -1 }).lean();
+    const episodes = episodeRepository.listAll();
     res.json(episodes);
   } catch (error) {
     next(error);
@@ -302,7 +299,7 @@ episodesRouter.get("/", requireAuth, async (_req, res, next) => {
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
-    const episode = await EpisodeModel.findOne({ episodeId }).lean();
+    const episode = episodeRepository.findByEpisodeId(episodeId);
     if (!episode) {
       res.status(404).json({ message: "Episode not found" });
       return;
@@ -316,23 +313,13 @@ episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
 episodesRouter.post("/", requireAuth, async (req, res, next) => {
   try {
     const payload = episodeSchema.parse(req.body);
-    const created = await EpisodeModel.create(payload);
+    const created = episodeRepository.create(payload);
     const mediaUpdates = await promoteStagedMedia(created.episodeId);
     await queueLaunchNotification(created.episodeId);
-    if (Object.keys(mediaUpdates).length === 0) {
-      const finalDoc = await EpisodeModel.findOne({ episodeId: created.episodeId }).lean();
-      res.status(201).json(finalDoc ?? created);
-      return;
-    }
-
-    const updated = await EpisodeModel.findOneAndUpdate(
-      { episodeId: created.episodeId },
-      mediaUpdates,
-      { returnDocument: "after" }
-    ).lean();
-
-    const finalDoc = await EpisodeModel.findOne({ episodeId: created.episodeId }).lean();
-    res.status(201).json(finalDoc ?? updated ?? created);
+    const finalDoc = Object.keys(mediaUpdates).length === 0
+      ? episodeRepository.findByEpisodeId(created.episodeId)
+      : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
+    res.status(201).json(finalDoc ?? created);
   } catch (error) {
     next(error);
   }
@@ -342,11 +329,7 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const routeId = Number(req.params.episodeId);
     const payload = episodeSchema.parse({ ...req.body, episodeId: routeId });
-    const updated = await EpisodeModel.findOneAndUpdate(
-      { episodeId: routeId },
-      payload,
-      { returnDocument: "after", upsert: false }
-    ).lean();
+    const updated = episodeRepository.update(routeId, payload);
 
     if (!updated) {
       res.status(404).json({ message: "Episode not found" });
@@ -355,20 +338,10 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
 
     const mediaUpdates = await promoteStagedMedia(routeId);
     await queueLaunchNotification(routeId);
-    if (Object.keys(mediaUpdates).length === 0) {
-      const finalDoc = await EpisodeModel.findOne({ episodeId: routeId }).lean();
-      res.json(finalDoc ?? updated);
-      return;
-    }
-
-    const synced = await EpisodeModel.findOneAndUpdate(
-      { episodeId: routeId },
-      mediaUpdates,
-      { returnDocument: "after" }
-    ).lean();
-
-    const finalDoc = await EpisodeModel.findOne({ episodeId: routeId }).lean();
-    res.json(finalDoc ?? synced ?? updated);
+    const finalDoc = Object.keys(mediaUpdates).length === 0
+      ? episodeRepository.findByEpisodeId(routeId)
+      : episodeRepository.updateMedia(routeId, mediaUpdates);
+    res.json(finalDoc ?? updated);
   } catch (error) {
     next(error);
   }
@@ -382,17 +355,17 @@ episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
       return;
     }
 
-    const episode = await EpisodeModel.findOne({ episodeId });
+    const episode = episodeRepository.findByEpisodeId(episodeId);
     if (!episode) {
       res.status(404).json({ message: "Episode not found" });
       return;
     }
 
     const snapshotPath = path.join(backupDirectories.episodes, `episode_${episodeId}.json`);
-    await fs.promises.writeFile(snapshotPath, JSON.stringify(episode.toObject(), null, 2), "utf8");
+    await fs.promises.writeFile(snapshotPath, JSON.stringify(episode, null, 2), "utf8");
 
     for (const spec of Object.values(uploadSpecs)) {
-      const currentFileName = episode[spec.field] || spec.buildFileName(episodeId);
+      const currentFileName = (episode as any)[spec.field] || spec.buildFileName(episodeId);
       const finalPath = path.join(spec.directory, currentFileName);
       const stagingPath = path.join(spec.stagingDirectory, currentFileName);
       const backupDir =
@@ -407,7 +380,7 @@ episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
       await moveExistingFileToBackup(finalPath, stagingPath, backupPath);
     }
 
-    await EpisodeModel.deleteOne({ episodeId });
+    episodeRepository.delete(episodeId);
     res.json({ episodeId, message: "Episode deleted" });
   } catch (error) {
     next(error);

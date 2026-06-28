@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { config } from "../config/env";
 import { connectDb } from "../db/connect";
-import { EpisodeModel } from "../models/Episode";
+import { episodeRepository } from "../repositories/episode.repository";
 import { episodeSchema } from "../schemas/episode";
 
 type LegacyEpisode = {
@@ -101,15 +100,16 @@ const run = async (): Promise<void> => {
   let upserted = 0;
   for (const record of records) {
     const mapped = mapLegacyEpisode(record);
-    await EpisodeModel.updateOne(
-      { episodeId: mapped.episodeId },
-      { $set: mapped },
-      { upsert: true }
-    );
+    const current = episodeRepository.findByEpisodeId(mapped.episodeId);
+    if (current) {
+      episodeRepository.update(mapped.episodeId, mapped);
+    } else {
+      episodeRepository.create(mapped);
+    }
     upserted += 1;
   }
 
-  console.log(`Imported/updated ${upserted} episodes into MongoDB (${config.mongodbUri}).`);
+  console.log(`Imported/updated ${upserted} episodes into SQLite.`);
   process.exit(0);
 };
 

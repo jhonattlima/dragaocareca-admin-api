@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { EpisodeModel } from "../models/Episode";
+import { episodeRepository } from "../repositories/episode.repository";
 import { requireAuth } from "../middleware/auth.middleware";
 import { buildFeedXml } from "../services/feed.service";
 
@@ -8,9 +8,7 @@ export const feedRouter = Router();
 feedRouter.get("/", async (_req, res, next) => {
   try {
     const now = new Date();
-    const episodes = await EpisodeModel.find({ pubDate: { $lte: now } })
-      .sort({ pubDate: -1, episodeId: -1 })
-      .lean();
+    const episodes = episodeRepository.listPublished(now);
 
     const xml = buildFeedXml(episodes as never[]);
     res.type("application/rss+xml").send(xml);
@@ -21,9 +19,7 @@ feedRouter.get("/", async (_req, res, next) => {
 
 feedRouter.get("/preview", requireAuth, async (_req, res, next) => {
   try {
-    const episodes = await EpisodeModel.find()
-      .sort({ pubDate: -1, episodeId: -1 })
-      .lean();
+    const episodes = episodeRepository.listPreview();
 
     const xml = buildFeedXml(episodes as never[]);
     res.type("application/rss+xml").send(xml);
@@ -35,11 +31,9 @@ feedRouter.get("/preview", requireAuth, async (_req, res, next) => {
 feedRouter.get("/status", requireAuth, async (_req, res, next) => {
   try {
     const now = new Date();
-    const [publishedCount, scheduledCount, nextScheduled] = await Promise.all([
-      EpisodeModel.countDocuments({ pubDate: { $lte: now } }),
-      EpisodeModel.countDocuments({ pubDate: { $gt: now } }),
-      EpisodeModel.findOne({ pubDate: { $gt: now } }).sort({ pubDate: 1, episodeId: 1 }).lean(),
-    ]);
+    const publishedCount = episodeRepository.countPublished(now);
+    const scheduledCount = episodeRepository.countScheduled(now);
+    const nextScheduled = episodeRepository.findNextScheduled(now);
 
     res.json({
       generatedAt: now.toISOString(),

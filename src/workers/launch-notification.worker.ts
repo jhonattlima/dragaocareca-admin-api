@@ -29,6 +29,11 @@ export const startLaunchNotificationWorker = async (): Promise<() => void> => {
     return () => undefined;
   }
 
+  if (!config.telegram.botToken || !config.telegram.chatId) {
+    console.log("Launch notification worker disabled because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing");
+    return () => undefined;
+  }
+
   await runOnce();
   pollTimer = setInterval(() => {
     void runOnce().catch((error: unknown) => {
@@ -43,4 +48,3 @@ export const startLaunchNotificationWorker = async (): Promise<() => void> => {
     }
   };
 };
-

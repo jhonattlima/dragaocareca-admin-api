@@ -66,6 +66,50 @@ export const swaggerSpec = swaggerJsdoc({
             coverCredits: { type: "array", items: { type: "string" } },
           },
         },
+        HealthStatus: {
+          type: "object",
+          required: ["status", "uptime", "bot"],
+          properties: {
+            status: { type: "string", example: "ok" },
+            uptime: { type: "number", example: 1234.56 },
+            bot: {
+              type: "object",
+              required: ["enabled", "running", "pendingLaunchNotifications", "nextPendingEpisode"],
+              properties: {
+                enabled: { type: "boolean" },
+                running: { type: "boolean" },
+                reason: { type: "string", nullable: true, example: "Missing or disabled Telegram config: TELEGRAM_BOT_TOKEN" },
+                pendingLaunchNotifications: { type: "integer", example: 2 },
+                lastQueuedAt: { type: "string", format: "date-time", nullable: true },
+                nextPendingEpisode: {
+                  oneOf: [
+                    { type: "null" },
+                    {
+                      type: "object",
+                      required: ["episodeId", "title", "pubDate"],
+                      properties: {
+                        episodeId: { type: "integer", example: 321 },
+                        title: { type: "string", example: "Episode title" },
+                        pubDate: { type: "string", format: "date-time" },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        SpotifyMetricsSnapshot: {
+          type: "object",
+          properties: {
+            source: { type: "string", example: "spotify-connector" },
+            fetchedAt: { type: "string", format: "date-time" },
+            metadata: { type: "object", additionalProperties: true },
+            aggregate: { type: "object", additionalProperties: true },
+            episodes: { type: "array", items: { type: "object", additionalProperties: true } },
+            samplePerformance: { type: "object", nullable: true, additionalProperties: true },
+          },
+        },
       },
     },
     paths: {
@@ -73,7 +117,16 @@ export const swaggerSpec = swaggerJsdoc({
         get: {
           tags: ["System"],
           summary: "Health check",
-          responses: { "200": { description: "OK" } },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/HealthStatus" },
+                },
+              },
+            },
+          },
         },
       },
       "/v1/auth/google": {
@@ -130,6 +183,25 @@ export const swaggerSpec = swaggerJsdoc({
           summary: "Feed counters and next scheduled episode",
           security: [{ bearerAuth: [] }],
           responses: { "200": { description: "Status" }, "401": { description: "Unauthorized" } },
+        },
+      },
+      "/v1/metrics/spotify": {
+        get: {
+          tags: ["Metrics"],
+          summary: "Spotify podcast analytics snapshot",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": {
+              description: "Snapshot",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/SpotifyMetricsSnapshot" },
+                },
+              },
+            },
+            "400": { description: "Connector unavailable or misconfigured" },
+            "401": { description: "Unauthorized" },
+          },
         },
       },
       "/v1/episodes": {

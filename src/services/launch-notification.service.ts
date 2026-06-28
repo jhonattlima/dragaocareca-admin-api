@@ -1,17 +1,21 @@
-import { EpisodeDocument, EpisodeModel } from "../models/Episode";
+import { episodeRepository } from "../repositories/episode.repository";
 import { sendLaunchTelegramNotification } from "./telegram.service";
 
-type LaunchNotificationCandidate = Pick<EpisodeDocument, "episodeId" | "pubDate" | "launchNotificationState">;
+type LaunchNotificationCandidate = {
+  episodeId: number;
+  pubDate: string;
+  launchNotificationState?: "idle" | "pending" | "sent";
+};
 
 const isLaunchable = (episode: LaunchNotificationCandidate, now = new Date()): boolean => {
-  return episode.pubDate <= now && episode.launchNotificationState !== "sent";
+  return new Date(episode.pubDate) <= now && episode.launchNotificationState !== "sent";
 };
 
 export const queueLaunchNotification = async (
   episodeId: number
 ): Promise<{ queued: boolean; alreadyQueued: boolean }> => {
   const now = new Date();
-  const episode = await EpisodeModel.findOne({ episodeId });
+  const episode = episodeRepository.findByEpisodeId(episodeId);
 
   if (!episode) {
     return { queued: false, alreadyQueued: false };
@@ -25,25 +29,19 @@ export const queueLaunchNotification = async (
     return { queued: false, alreadyQueued: true };
   }
 
-  episode.launchNotificationState = "pending";
-  episode.launchNotificationQueuedAt = now;
-  episode.launchNotificationError = undefined;
-  await episode.save();
+  episodeRepository.queueLaunchNotification(episodeId);
 
   return { queued: true, alreadyQueued: false };
 };
 
-export const getPendingLaunchNotifications = async (): Promise<EpisodeDocument[]> => {
-  return EpisodeModel.find({
-    pubDate: { $lte: new Date() },
-    launchNotificationState: "pending",
-  }).sort({ pubDate: 1, episodeId: 1 });
+export const getPendingLaunchNotifications = async (): Promise<LaunchNotificationCandidate[]> => {
+  return episodeRepository.getPendingLaunchNotifications();
 };
 
 export const deliverPendingLaunchNotification = async (
   episodeId: number
 ): Promise<{ delivered: boolean; alreadySent: boolean }> => {
-  const episode = await EpisodeModel.findOne({ episodeId });
+  const episode = episodeRepository.findByEpisodeId(episodeId);
   if (!episode) {
     return { delivered: false, alreadySent: false };
   }
@@ -58,14 +56,10 @@ export const deliverPendingLaunchNotification = async (
 
   try {
     await sendLaunchTelegramNotification(episode);
-    episode.launchNotificationState = "sent";
-    episode.launchNotificationSentAt = new Date();
-    episode.launchNotificationError = undefined;
-    await episode.save();
+    episodeRepository.markLaunchSent(episodeId);
     return { delivered: true, alreadySent: false };
   } catch (error) {
-    episode.launchNotificationError = error instanceof Error ? error.message : "Unknown telegram error";
-    await episode.save();
+    episodeRepository.markLaunchError(episodeId, error instanceof Error ? error.message : "Unknown telegram error");
     throw error;
   }
 };
