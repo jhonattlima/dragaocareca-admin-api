@@ -6,9 +6,16 @@ import { config } from "../config/env";
 import { episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
-import { episodeRepository } from "../repositories/episode.repository";
+import { refreshCoverMosaicBackground } from "../services/cover-mosaic.service";
+import { episodeRepository } from "../database/repositories/episode.repository";
 
 export const episodesRouter = Router();
+
+const queueCoverMosaicRefresh = (): void => {
+  void refreshCoverMosaicBackground().catch((error: unknown) => {
+    console.warn("Cover mosaic refresh failed", error instanceof Error ? error.message : String(error));
+  });
+};
 
 const mediaDirectories = {
   audio: config.media.episodesDir,
@@ -248,6 +255,7 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
         return;
       }
 
+      queueCoverMosaicRefresh();
       res.json(updated);
     } catch (error) {
       next(error);
@@ -296,6 +304,15 @@ episodesRouter.get("/", requireAuth, async (_req, res, next) => {
   }
 });
 
+episodesRouter.get("/references", requireAuth, async (_req, res, next) => {
+  try {
+    const catalog = episodeRepository.listStructuredEntryCatalog();
+    res.json(catalog);
+  } catch (error) {
+    next(error);
+  }
+});
+
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
@@ -319,6 +336,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(created.episodeId)
       : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
+    queueCoverMosaicRefresh();
     res.status(201).json(finalDoc ?? created);
   } catch (error) {
     next(error);
@@ -341,6 +359,7 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(routeId)
       : episodeRepository.updateMedia(routeId, mediaUpdates);
+    queueCoverMosaicRefresh();
     res.json(finalDoc ?? updated);
   } catch (error) {
     next(error);
@@ -381,6 +400,7 @@ episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
     }
 
     episodeRepository.delete(episodeId);
+    queueCoverMosaicRefresh();
     res.json({ episodeId, message: "Episode deleted" });
   } catch (error) {
     next(error);

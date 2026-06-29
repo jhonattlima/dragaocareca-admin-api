@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { connectDb } from "../db/connect";
-import { episodeRepository } from "../repositories/episode.repository";
+import { connectDb } from "../database/connect";
+import { episodeRepository } from "../database/repositories/episode.repository";
 import { episodeSchema } from "../schemas/episode";
 
 type LegacyEpisode = {

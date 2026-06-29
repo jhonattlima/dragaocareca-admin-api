@@ -1,5 +1,5 @@
 import { config } from "../config/env";
-import type { EpisodeRow } from "../repositories/episode.repository";
+import type { EpisodeRow } from "../database/repositories/episode.repository";
 
 const requiredTelegramConfig = (): { botToken: string; chatId: string; apiBaseUrl: string } => {
   if (!config.telegram.botToken) {

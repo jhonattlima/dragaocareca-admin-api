@@ -22,6 +22,13 @@
 - Verify the integrated service starts cleanly and keeps notifications running.
 - Completed in backend implementation and committed.
 
+## Phase 4 - Health Menu Status
+
+- Expose bot running state in the admin health menu.
+- Show how many episodes are pending notification.
+- Surface the backend health and launch-queue state without requiring VPS access.
+- Verify the health screen reflects the live bot condition for operators.
+
 ## Traceability
 
 | Requirement | Phase | Status |
@@ -34,6 +41,8 @@
 | OPS-01 | Phase 3 | Done |
 | OPS-02 | Phase 3 | Done |
 | OPS-03 | Phase 3 | Done |
+| HEALTH-01 | Phase 4 | Verify |
+| HEALTH-02 | Phase 4 | Verify |
 
 ---
 *Last updated: 2026-06-17 after Linux workspace alignment*

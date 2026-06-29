@@ -9,23 +9,23 @@ Scope:
 
 ## 2. System Overview
 The old client-heavy Angular + PHP flow was replaced by:
-- Node.js API + MongoDB as source of truth
+- Node.js API + SQLite as source of truth
 - New Angular admin UI consuming API endpoints
 
 Core rule:
-- Feed is generated dynamically by backend from Mongo episodes and release-time rules (`pubDate`).
+- Feed is generated dynamically by backend from SQLite episodes and release-time rules (`pubDate`).
 
 ## 3. Architecture
 ### 3.1 Backend (`dragaocareca-admin-api`)
 Stack:
 - Node.js + TypeScript + Express
-- MongoDB + Mongoose
+- SQLite
 - Zod validation
 - Swagger (`/docs`)
 
 Main modules:
 - `src/config/env.ts`: runtime configuration and feature flags
-- `src/models/Episode.ts`: Mongo schema
+- `src/database/repositories/episode.repository.ts`: episode persistence
 - `src/routes/*.routes.ts`: auth/feed/episode routes
 - `src/services/feed.service.ts`: RSS feed generation
 - `src/services/launch-notification.service.ts`: launch queue and Telegram delivery workflow
@@ -56,7 +56,7 @@ Main modules:
 
 ### 4.2 Local Development Bypass
 Backend flag:
-- `.env`: `AUTH_BYPASS=true` with `NODE_ENV=development`
+- `.env.dev`: `AUTH_BYPASS=true` with `NODE_ENV=development`
 
 Frontend flag:
 - `environment.ts`: `authBypass: true`
@@ -70,9 +70,10 @@ When both are enabled:
 - Feed channel metadata mostly static via env vars (`FEED_*`)
 - Item-level XML can be sourced from legacy `xmlSnapshot` when present
 - Staging logic is internal (no external staging-promotion endpoint)
+- Reference feed snapshots are kept under `data/feed/` for comparison and debugging
 
 ## 6. Data Model (Episode)
-Collection: `episodes`
+Table: `episodes`
 Key fields:
 - `episodeId` (unique)
 - `title`, `summary`, `pubDate`, `explicit`
@@ -100,6 +101,8 @@ Episodes (protected unless backend bypass):
 Feed admin (protected unless backend bypass):
 - `GET /v1/feed/preview`
 - `GET /v1/feed/status`
+- `GET /v1/metrics/spotify`
+- `GET /v1/metrics/youtube`
 
 Episode media upload (protected unless backend bypass):
 - `POST /v1/episodes/:episodeId/audio`
@@ -120,6 +123,7 @@ Media storage defaults:
 - covers staging: `data/media/images/staging`
 - cover low: `data/media/images/low`
 - cover low staging: `data/media/images/low/staging`
+- SQLite database files: `data/database/`
 
 Upload flow:
 - uploads land in staging folders first
@@ -129,12 +133,15 @@ Upload flow:
 Docs:
 - `GET /docs`
 - `GET /docs.json`
+- `GET /v1/assets/cover-mosaic.json`
+- `GET /v1/assets/cover-mosaic.svg`
 
 ## 8. Critical Environment Variables
-### 8.1 Backend `.env`
+### 8.1 Backend `.env.dev` / `.env.production`
 - `NODE_ENV`
 - `PORT`
-- `MONGODB_URI`
+- `SQLITE_PATH`
+- `SQLITE_RESET`
 - `GOOGLE_CLIENT_ID`
 - `JWT_SECRET`
 - `JWT_EXPIRES_IN`
@@ -159,6 +166,27 @@ Docs:
 - `apiBaseUrl`
 - `googleClientId`
 - `authBypass`
+
+### 8.3 Spotify Metrics Connector
+- `SPOTIFY_METRICS_ENABLED`
+- `SPOTIFY_PODCAST_ID`
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_SP_DC`
+- `SPOTIFY_SP_KEY`
+- `SPOTIFY_METRICS_BASE_URL`
+- `SPOTIFY_METRICS_TIMEOUT_MS`
+
+### 8.4 YouTube Metrics Connector
+- `YOUTUBE_METRICS_ENABLED`
+- `YOUTUBE_CLIENT_ID`
+- `YOUTUBE_CLIENT_SECRET`
+- `YOUTUBE_REFRESH_TOKEN`
+- `YOUTUBE_CHANNEL_ID`
+- `YOUTUBE_ANALYTICS_BASE_URL`
+- `YOUTUBE_DATA_BASE_URL`
+- `YOUTUBE_METRICS_TIME_ZONE`
+- `YOUTUBE_METRICS_TIMEOUT_MS`
+- `YOUTUBE_METRICS_SAMPLE_INTERVAL_MS`
 
 ## 9. Local Runbook
 ### 9.1 Backend
@@ -188,6 +216,8 @@ npm run import:episodes -- "E:/Jhonatt/Development/Projects/node/dragaocareca-ad
 - Feed parity with production feed is close but not byte-identical.
 - Some episode item formatting depends on legacy `xmlSnapshot` quality.
 - Frontend layout has been modernized with old-project section structure, but not all legacy subfeatures are reintroduced yet.
+- Spotify metrics are exposed through an authenticated backend snapshot endpoint, not directly from the frontend.
+- YouTube metrics use authenticated YouTube Analytics access plus daily SQLite sampling for range comparisons.
 
 ## 12. AI Prompt Starter (Low Token)
 Use this block in future sessions:

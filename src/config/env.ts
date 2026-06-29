@@ -18,7 +18,7 @@ const required = (value: string | undefined, name: string): string => {
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
-  sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "dragaocareca-admin.sqlite"),
+  sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "database", "dragaocareca-admin.sqlite"),
   sqliteReset: (process.env.SQLITE_RESET ?? "false").toLowerCase() === "true",
   auth: {
     bypassInDev: (process.env.AUTH_BYPASS ?? "false").toLowerCase() === "true",
@@ -44,6 +44,19 @@ export const config = {
     spKey: process.env.SPOTIFY_SP_KEY ?? "",
     baseUrl: process.env.SPOTIFY_METRICS_BASE_URL ?? "https://generic.wg.spotify.com/podcasters/v0",
     timeoutMs: Number(process.env.SPOTIFY_METRICS_TIMEOUT_MS ?? 15000),
+    sampleIntervalMs: Number(process.env.SPOTIFY_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
+  },
+  youtube: {
+    enabled: (process.env.YOUTUBE_METRICS_ENABLED ?? "false").toLowerCase() === "true",
+    clientId: process.env.YOUTUBE_CLIENT_ID ?? "",
+    clientSecret: process.env.YOUTUBE_CLIENT_SECRET ?? "",
+    refreshToken: process.env.YOUTUBE_REFRESH_TOKEN ?? "",
+    channelId: process.env.YOUTUBE_CHANNEL_ID ?? "",
+    baseUrl: process.env.YOUTUBE_ANALYTICS_BASE_URL ?? "https://youtubeanalytics.googleapis.com/v2",
+    dataBaseUrl: process.env.YOUTUBE_DATA_BASE_URL ?? "https://youtube.googleapis.com/youtube/v3",
+    timeZone: process.env.YOUTUBE_METRICS_TIME_ZONE ?? "America/Sao_Paulo",
+    timeoutMs: Number(process.env.YOUTUBE_METRICS_TIMEOUT_MS ?? 15000),
+    sampleIntervalMs: Number(process.env.YOUTUBE_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
   },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),

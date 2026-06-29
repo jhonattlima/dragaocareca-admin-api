@@ -18,8 +18,8 @@ Notify the right Telegram group quickly and reliably whenever a new podcast epis
 
 ### Active
 
-- [ ] Verify the VPS deployment wiring and production runtime behavior.
-- [ ] Confirm notification delivery path against the live Telegram group.
+- [ ] Surface bot running state in the admin health menu.
+- [ ] Show pending launch notifications in the admin health menu.
 
 ### Out of Scope
 
@@ -29,11 +29,11 @@ Notify the right Telegram group quickly and reliably whenever a new podcast epis
 
 ## Context
 
-This project integrates the existing `dona-sonja-turbo` bot behavior into `dragaocareca-admin-api`. The current codebase already stores episodes in MongoDB and serves a feed from the backend, so the new work should hook into that backend lifecycle instead of creating a separate service.
+This project integrates the existing `dona-sonja-turbo` bot behavior into `dragaocareca-admin-api`. The current codebase already stores episodes in SQLite and serves a feed from the backend, so the new work should hook into that backend lifecycle instead of creating a separate service.
 
 ## Constraints
 
-- **Deployment**: Must run on the VPS alongside `dragaocareca-admin-api` — the integration is part of the server deployment model.
+- **Deployment**: Keep the bot inside the backend service; defer VPS subscription work until the project needs deployment verification again.
 - **Messaging**: Telegram notifications must go to a specific group — the target audience is fixed for v1.
 - **Reliability**: Episode detection must avoid duplicate alerts — repeated notifications would reduce trust.
 - **Architecture**: Prefer backend-internal integration over a second standalone service — the repo already owns episode state and publish rules.
@@ -46,4 +46,4 @@ This project integrates the existing `dona-sonja-turbo` bot behavior into `draga
 | Keep notification scope to one Telegram group | Matches the stated need and limits complexity | Done |
 
 ---
-*Last updated: 2026-06-17 after Linux workspace alignment*
+*Last updated: 2026-06-27 after SQLite verification and context refresh*

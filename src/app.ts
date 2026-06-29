@@ -7,10 +7,11 @@ import { ZodError } from "zod";
 import { config } from "./config/env";
 import { swaggerSpec } from "./docs/openapi";
 import { authRouter } from "./routes/auth.routes";
+import { assetsRouter } from "./routes/assets.routes";
 import { episodesRouter } from "./routes/episodes.routes";
 import { feedRouter } from "./routes/feed.routes";
 import { metricsRouter } from "./routes/metrics.routes";
-import { episodeRepository } from "./repositories/episode.repository";
+import { episodeRepository } from "./database/repositories/episode.repository";
 
 export const app = express();
 
@@ -18,6 +19,7 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "4mb" }));
+app.use("/media", express.static(config.media.storageRoot));
 
 app.get("/health", async (_req, res, next) => {
   try {
@@ -58,6 +60,7 @@ app.get("/docs.json", (_req, res) => {
 });
 
 app.use("/v1/auth", authRouter);
+app.use("/v1/assets", assetsRouter);
 app.use("/v1/episodes", episodesRouter);
 app.use("/v1/feed", feedRouter);
 app.use("/v1/metrics", metricsRouter);

@@ -8,7 +8,7 @@
 - Keep feed generation server-side.
 - Do not move scheduling/feed rules to frontend.
 - Respect auth toggles:
-  - backend `.env`: `AUTH_BYPASS`
+  - backend `.env.dev`: `AUTH_BYPASS`
   - frontend env: `authBypass`
 - Prefer minimal-scope changes and verify with `npm run typecheck` / `npm run build`.
 - Telegram launch notifications live in the backend service:

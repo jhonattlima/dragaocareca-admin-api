@@ -1,4 +1,4 @@
-import { episodeRepository } from "../repositories/episode.repository";
+import { episodeRepository } from "../database/repositories/episode.repository";
 import { sendLaunchTelegramNotification } from "./telegram.service";
 
 type LaunchNotificationCandidate = {

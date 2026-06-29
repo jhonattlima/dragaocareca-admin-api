@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { episodeRepository } from "../repositories/episode.repository";
+import { episodeRepository } from "../database/repositories/episode.repository";
 import { requireAuth } from "../middleware/auth.middleware";
 import { buildFeedXml } from "../services/feed.service";
 

@@ -110,6 +110,74 @@ export const swaggerSpec = swaggerJsdoc({
             samplePerformance: { type: "object", nullable: true, additionalProperties: true },
           },
         },
+        YouTubeMetricsSnapshot: {
+          type: "object",
+          properties: {
+            source: { type: "string", example: "youtube-analytics" },
+            fetchedAt: { type: "string", format: "date-time" },
+            range: {
+              type: "object",
+              properties: {
+                requestedDays: { type: "integer" },
+                lookbackDays: { type: "integer" },
+                currentStart: { type: "string", format: "date" },
+                currentEnd: { type: "string", format: "date" },
+                previousStart: { type: "string", format: "date" },
+                previousEnd: { type: "string", format: "date" },
+                timeZone: { type: "string" },
+              },
+            },
+            channel: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                url: { type: "string" },
+              },
+            },
+            series: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  date: { type: "string", format: "date" },
+                  views: { type: "number" },
+                  estimatedMinutesWatched: { type: "number" },
+                  subscribersGained: { type: "number" },
+                  subscribersLost: { type: "number" },
+                  likes: { type: "number" },
+                  comments: { type: "number" },
+                  shares: { type: "number" },
+                },
+              },
+            },
+            totals: {
+              type: "object",
+              properties: {
+                views: { type: "number" },
+                estimatedMinutesWatched: { type: "number" },
+                subscribersGained: { type: "number" },
+                subscribersLost: { type: "number" },
+                netSubscribers: { type: "number" },
+                likes: { type: "number" },
+                comments: { type: "number" },
+                shares: { type: "number" },
+                averageViewDurationSeconds: { type: "number" },
+              },
+            },
+            debug: { type: "object", nullable: true, additionalProperties: true },
+          },
+        },
+        YouTubeMetricsErrorResponse: {
+          type: "object",
+          properties: {
+            source: { type: "string", example: "youtube-analytics" },
+            fetchedAt: { type: "string", format: "date-time" },
+            ok: { type: "boolean", example: false },
+            code: { type: "string", enum: ["disabled", "missing_credentials", "fetch_failed"] },
+            message: { type: "string" },
+            details: { type: "string", nullable: true },
+          },
+        },
       },
     },
     paths: {
@@ -190,12 +258,49 @@ export const swaggerSpec = swaggerJsdoc({
           tags: ["Metrics"],
           summary: "Spotify podcast analytics snapshot",
           security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, default: 30 },
+              description: "Lookback window in days for the current and comparison snapshots.",
+            },
+          ],
           responses: {
             "200": {
               description: "Snapshot",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/SpotifyMetricsSnapshot" },
+                },
+              },
+            },
+            "400": { description: "Connector unavailable or misconfigured" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/v1/metrics/youtube": {
+        get: {
+          tags: ["Metrics"],
+          summary: "YouTube Studio analytics snapshot",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, default: 90 },
+              description: "Current-range window in days; the response includes twice that amount for local range slicing.",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Snapshot",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/YouTubeMetricsSnapshot" },
                 },
               },
             },

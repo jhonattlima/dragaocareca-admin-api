@@ -1,6 +1,6 @@
 import { create } from "xmlbuilder2";
 import { config } from "../config/env";
-import type { EpisodeRow } from "../repositories/episode.repository";
+import type { EpisodeRow } from "../database/repositories/episode.repository";
 
 const toRfc822 = (d: Date): string => d.toUTCString();
 const toSaoPauloIso = (d: Date): string => {

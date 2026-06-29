@@ -188,6 +188,46 @@ CREATE TABLE IF NOT EXISTS episode_references (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS spotify_metric_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  show_id TEXT NOT NULL,
+  sample_date TEXT NOT NULL,
+  network_id TEXT,
+  starts INTEGER NOT NULL,
+  streams INTEGER NOT NULL,
+  listeners INTEGER NOT NULL,
+  followers INTEGER NOT NULL,
+  fetched_at TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(show_id, sample_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spotify_metric_samples_show_date
+  ON spotify_metric_samples(show_id, sample_date);
+
+CREATE TABLE IF NOT EXISTS youtube_metric_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id TEXT NOT NULL,
+  sample_date TEXT NOT NULL,
+  views INTEGER NOT NULL,
+  estimated_minutes_watched REAL NOT NULL,
+  subscribers_gained INTEGER NOT NULL,
+  subscribers_lost INTEGER NOT NULL,
+  likes INTEGER NOT NULL,
+  comments INTEGER NOT NULL,
+  shares INTEGER NOT NULL,
+  fetched_at TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(channel_id, sample_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_metric_samples_channel_date
+  ON youtube_metric_samples(channel_id, sample_date);
+
 CREATE VIEW IF NOT EXISTS v_episode_feed AS
 SELECT
   e.*
@@ -208,9 +248,17 @@ export const getDb = (): DatabaseSync => {
     }
     db = new DatabaseSync(dbPath);
     db.exec(schema);
+    ensureYoutubeMetricSampleColumns(db);
   }
   return db;
 };
 
 export const nowIso = (): string => new Date().toISOString();
 
+const ensureYoutubeMetricSampleColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(youtube_metric_samples)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("subscribers_current")) {
+    database.exec("ALTER TABLE youtube_metric_samples ADD COLUMN subscribers_current INTEGER NOT NULL DEFAULT 0;");
+  }
+};

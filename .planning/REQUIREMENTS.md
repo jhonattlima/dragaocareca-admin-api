@@ -22,6 +22,11 @@
 - [ ] **OPS-02**: Bot runtime configuration is available through environment variables or deployment config.
 - [ ] **OPS-03**: The notification process starts and stops with the backend service.
 
+### Health Menu Status
+
+- [ ] **HEALTH-01**: The admin health menu shows whether the bot process is running.
+- [ ] **HEALTH-02**: The admin health menu shows how many episodes are pending notification.
+
 ## v2 Requirements
 
 ### Expansion
@@ -50,10 +55,12 @@
 | OPS-01 | Phase 3 | Done |
 | OPS-02 | Phase 3 | Done |
 | OPS-03 | Phase 3 | Done |
+| HEALTH-01 | Phase 4 | Verify |
+| HEALTH-02 | Phase 4 | Verify |
 
 **Coverage:**
-- v1 requirements: 8 total
-- Mapped to phases: 8
+- v1 requirements: 10 total
+- Mapped to phases: 10
 - Unmapped: 0 ✓
 
 ---
