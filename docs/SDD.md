@@ -116,19 +116,14 @@ Episode media upload (protected unless backend bypass):
 
 Media storage defaults:
 - episodes: `data/media/episodes`
-- episodes staging: `data/media/episodes/staging`
-- trailers: `data/media/trailers`
-- trailers staging: `data/media/trailers/staging`
-- covers: `data/media/images`
-- covers staging: `data/media/images/staging`
-- cover low: `data/media/images/low`
-- cover low staging: `data/media/images/low/staging`
+- staging: `data/media/staging`
+- episode backups: `data/media/backups`
 - SQLite database files: `data/database/`
 
 Upload flow:
-- uploads land in staging folders first
-- save/update promotes staged files into the hot folders
-- delete removes staged or promoted files for the current episode ID
+- uploads land in episode-scoped staging folders first
+- save/update promotes staged files into `data/media/episodes/<episodeId>/`
+- delete moves staged or promoted files into the episode backup folder
 
 Docs:
 - `GET /docs`
@@ -188,6 +183,14 @@ Docs:
 - `YOUTUBE_METRICS_TIMEOUT_MS`
 - `YOUTUBE_METRICS_SAMPLE_INTERVAL_MS`
 
+### 8.5 Episode Transcription
+- `EPISODE_TRANSCRIPTION_ENABLED`
+- `EPISODE_TRANSCRIPTION_COMMAND`
+- `EPISODE_TRANSCRIPTION_MODEL_PATH`
+- `EPISODE_TRANSCRIPTION_LANGUAGE`
+- `EPISODE_TRANSCRIPTION_TIMEOUT_MS`
+- `EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS`
+
 ## 9. Local Runbook
 ### 9.1 Backend
 ```powershell
@@ -219,7 +222,16 @@ npm run import:episodes -- "E:/Jhonatt/Development/Projects/node/dragaocareca-ad
 - Spotify metrics are exposed through an authenticated backend snapshot endpoint, not directly from the frontend.
 - YouTube metrics use authenticated YouTube Analytics access plus daily SQLite sampling for range comparisons.
 
-## 12. AI Prompt Starter (Low Token)
+## 12. Documentation Layout
+- Master feature registry lives at `docs/FEATURES.md`
+- Feature-specific durable docs live under `docs/features/<NNN-feature-name>/README.md`
+- Feature-specific implementation plans live under `docs/features/<NNN-feature-name>/PLAN.md`
+- Current feature reference:
+  - `docs/features/002-episode-media-layout-refactor/README.md`
+  - `docs/features/003-episode-transcription/README.md`
+  - `docs/features/004-episode-summary-suggestion/README.md`
+
+## 13. AI Prompt Starter (Low Token)
 Use this block in future sessions:
 
 ```text
@@ -232,3 +244,36 @@ Do not reintroduce client-side feed generation.
 Prefer backend-first logic changes and keep frontend as API client.
 Telegram launch notifications live inside the backend service.
 ```
+
+## 14. Episode AI Track Reference
+
+Current implementation and follow-up work for the episode media layout, transcription, and summary tracks is documented in:
+
+- `docs/features/002-episode-media-layout-refactor/PLAN.md`
+- `docs/features/003-episode-transcription/PLAN.md`
+- `docs/features/004-episode-summary-suggestion/PLAN.md`
+
+Use those files as the implementation references for the next feature set.
+
+## 15. VPS Runtime Dependencies
+
+Install these on the VPS before enabling the full stack:
+
+- Node.js 18+ and npm
+- `ffmpeg`
+- `python3`
+- Python package `spotifyconnector` for the Spotify metrics script
+- `whisper.cpp` or a compatible transcription binary exposed through `EPISODE_TRANSCRIPTION_COMMAND`
+- a Whisper model file such as `ggml-small.bin` for `EPISODE_TRANSCRIPTION_MODEL_PATH`
+- a writable filesystem location for `data/database/`, `data/media/`, and `data/generated/`
+
+Optional but recommended for production:
+
+- a process manager such as systemd, PM2, or Docker
+- a dedicated virtual environment for Python dependencies
+
+Bootstrap references:
+
+- [`docs/VPS-SETUP.md`](./VPS-SETUP.md)
+- [`scripts/install-vps-deps.sh`](../scripts/install-vps-deps.sh)
+- [`requirements-vps.txt`](../requirements-vps.txt)

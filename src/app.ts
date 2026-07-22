@@ -11,6 +11,9 @@ import { assetsRouter } from "./routes/assets.routes";
 import { episodesRouter } from "./routes/episodes.routes";
 import { feedRouter } from "./routes/feed.routes";
 import { metricsRouter } from "./routes/metrics.routes";
+import { publicEpisodesRouter } from "./routes/public-episodes.routes";
+import { publicSiteRouter } from "./routes/public-site.routes";
+import { publicSupportersRouter } from "./routes/public-supporters.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
 
 export const app = express();
@@ -61,6 +64,9 @@ app.get("/docs.json", (_req, res) => {
 
 app.use("/v1/auth", authRouter);
 app.use("/v1/assets", assetsRouter);
+app.use("/v1/public/episodes", publicEpisodesRouter);
+app.use("/v1/public", publicSiteRouter);
+app.use("/v1/public/supporters", publicSupportersRouter);
 app.use("/v1/episodes", episodesRouter);
 app.use("/v1/feed", feedRouter);
 app.use("/v1/metrics", metricsRouter);

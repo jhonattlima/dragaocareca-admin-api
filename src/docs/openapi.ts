@@ -66,6 +66,226 @@ export const swaggerSpec = swaggerJsdoc({
             coverCredits: { type: "array", items: { type: "string" } },
           },
         },
+        PublicEpisodeCatalogGuest: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", example: "Convidado Especial" },
+          },
+        },
+        PublicEpisodeReferenceLink: {
+          type: "object",
+          required: ["label", "url"],
+          properties: {
+            label: { type: "string", example: "instagram" },
+            url: { type: "string", format: "uri", example: "https://www.instagram.com/dragaocareca" },
+          },
+        },
+        PublicEpisodeReference: {
+          type: "object",
+          required: ["name", "links"],
+          properties: {
+            name: { type: "string", example: "Convidado Especial" },
+            links: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeReferenceLink" },
+            },
+          },
+        },
+        PublicEpisodeCoverCredit: {
+          type: "object",
+          required: ["name", "member"],
+          properties: {
+            name: { type: "string", example: "Gabriel Moraes" },
+            member: { type: "boolean", example: true },
+          },
+        },
+        PublicEpisodeCatalogItem: {
+          type: "object",
+          required: ["episodeId", "title", "summary", "pubDate", "guests", "pageUrl", "audioUrl", "coverUrl", "trailerUrl"],
+          properties: {
+            episodeId: { type: "integer", example: 344 },
+            title: { type: "string", example: "Episodio 344" },
+            summary: { type: "string", example: "Resumo publico do episodio." },
+            pubDate: { type: "string", format: "date-time" },
+            guests: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeCatalogGuest" },
+            },
+            pageUrl: { type: "string", format: "uri", example: "https://dragaocareca.com/#/episode/344" },
+            audioUrl: { type: "string", format: "uri", nullable: true, example: "https://www.dragaocareca.com/files/episodes/episode_344.mp3" },
+            coverUrl: { type: "string", format: "uri", nullable: true, example: "https://www.dragaocareca.com/files/images/episode_344.jpeg" },
+            trailerUrl: { type: "string", format: "uri", nullable: true, example: "https://dragaocareca.com/media/trailers/trailer_344.mp3" },
+          },
+        },
+        PublicEpisodeDetail: {
+          type: "object",
+          required: [
+            "episodeId",
+            "title",
+            "summary",
+            "pubDate",
+            "duration",
+            "explicit",
+            "authors",
+            "guests",
+            "citations",
+            "musicCredits",
+            "coverCredits",
+            "pageUrl",
+            "audioUrl",
+            "downloadUrl",
+            "coverUrl",
+            "trailerUrl",
+            "youtubeUrl",
+            "youtubeEmbedUrl",
+            "spotifyId",
+            "spotifyEmbedUrl",
+          ],
+          properties: {
+            episodeId: { type: "integer", example: 344 },
+            title: { type: "string", example: "DC 328 - Jogando um jogo sobre jogos | DC 328" },
+            summary: { type: "string", example: "Resumo publico do episodio." },
+            pubDate: { type: "string", format: "date-time" },
+            duration: { type: "string", nullable: true, example: "01:04:47" },
+            explicit: { type: "string", enum: ["yes", "no"] },
+            authors: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeCatalogGuest" },
+            },
+            guests: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeReference" },
+            },
+            citations: {
+              type: "array",
+              items: { type: "string" },
+            },
+            musicCredits: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeReference" },
+            },
+            coverCredits: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicEpisodeCoverCredit" },
+            },
+            pageUrl: { type: "string", format: "uri", example: "https://dragaocareca.com/#/episode/344" },
+            audioUrl: { type: "string", format: "uri", nullable: true },
+            downloadUrl: { type: "string", format: "uri", nullable: true },
+            coverUrl: { type: "string", format: "uri", nullable: true },
+            trailerUrl: { type: "string", format: "uri", nullable: true },
+            youtubeUrl: { type: "string", format: "uri", nullable: true },
+            youtubeEmbedUrl: { type: "string", format: "uri", nullable: true },
+            spotifyId: { type: "string", nullable: true, example: "4Qps7LshTGJVTf0x3UYlJf" },
+            spotifyEmbedUrl: { type: "string", format: "uri", nullable: true },
+          },
+        },
+        PublicSupportersResponse: {
+          type: "object",
+          required: ["supportUrl", "supporters"],
+          properties: {
+            supportUrl: { type: "string", format: "uri", example: "http://bit.ly/guildadc" },
+            supporters: {
+              type: "array",
+              items: { type: "string", example: "Ana Flavia Sagan Lucena Rodrigues de Moraes" },
+            },
+          },
+        },
+        PublicAboutResponse: {
+          type: "object",
+          required: ["title", "description"],
+          properties: {
+            title: { type: "string", example: "Dragão Careca" },
+            description: { type: "string", example: "Podcast de humor com temática de RPG, cultura pop e aventuras improvisadas." },
+          },
+        },
+        PublicContactResponse: {
+          type: "object",
+          required: ["email", "characterSheetsBaseUrl"],
+          properties: {
+            email: { type: "string", example: "contato@dragaocareca.com" },
+            characterSheetsBaseUrl: { type: "string", format: "uri", example: "https://ficha.dragaocareca.com/#" },
+          },
+        },
+        PublicSiteConfigResponse: {
+          type: "object",
+          required: [
+            "email",
+            "supportersUrl",
+            "characterSheetsBaseUrl",
+            "maxEpisodesPerPage",
+            "transitionTimeMs",
+            "disqus",
+          ],
+          properties: {
+            email: { type: "string", example: "contato@dragaocareca.com" },
+            supportersUrl: { type: "string", format: "uri", example: "http://bit.ly/guildadc" },
+            characterSheetsBaseUrl: { type: "string", format: "uri", example: "https://ficha.dragaocareca.com/#" },
+            maxEpisodesPerPage: { type: "integer", example: 10 },
+            transitionTimeMs: { type: "integer", example: 7000 },
+            disqus: {
+              type: "object",
+              required: ["shortName"],
+              properties: {
+                shortName: { type: "string", example: "dragaocareca" },
+              },
+            },
+          },
+        },
+        PublicSocialResponse: {
+          type: "object",
+          required: [
+            "twitter",
+            "youtube",
+            "instagram",
+            "facebook",
+            "spotify",
+            "deezer",
+            "googlePodcasts",
+            "applePodcasts",
+            "pocketCast",
+            "castBox",
+            "rss",
+          ],
+          properties: {
+            twitter: { type: "string", format: "uri" },
+            youtube: { type: "string", format: "uri" },
+            instagram: { type: "string", format: "uri" },
+            facebook: { type: "string", format: "uri" },
+            spotify: { type: "string", format: "uri" },
+            deezer: { type: "string", format: "uri" },
+            googlePodcasts: { type: "string", format: "uri" },
+            applePodcasts: { type: "string", format: "uri" },
+            pocketCast: { type: "string", format: "uri" },
+            castBox: { type: "string", format: "uri" },
+            rss: { type: "string", format: "uri" },
+          },
+        },
+        PublicAuthorContact: {
+          type: "object",
+          required: ["name", "character", "contacts"],
+          properties: {
+            name: { type: "string", example: "Jhonatt Lima" },
+            character: { type: "string", nullable: true, example: "Tiamat" },
+            contacts: {
+              type: "object",
+              additionalProperties: {
+                type: "string",
+                format: "uri",
+              },
+            },
+          },
+        },
+        PublicContactsResponse: {
+          type: "object",
+          required: ["authors"],
+          properties: {
+            authors: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PublicAuthorContact" },
+            },
+          },
+        },
         HealthStatus: {
           type: "object",
           required: ["status", "uptime", "bot"],
@@ -235,6 +455,154 @@ export const swaggerSpec = swaggerJsdoc({
           tags: ["Feed"],
           summary: "Public dynamic RSS feed",
           responses: { "200": { description: "RSS XML" } },
+        },
+      },
+      "/v1/public/episodes": {
+        get: {
+          tags: ["Public"],
+          summary: "Published public episode catalog",
+          description: "Returns the full published episode catalog as a plain JSON array ordered from newest to oldest.",
+          responses: {
+            "200": {
+              description: "Published episodes ordered newest-first",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/PublicEpisodeCatalogItem" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/episodes/{episodeId}": {
+        get: {
+          tags: ["Public"],
+          summary: "Published public episode detail",
+          description: "Returns one published episode with frontend-ready media, credit, and embed fields.",
+          parameters: [
+            {
+              name: "episodeId",
+              in: "path",
+              required: true,
+              schema: { type: "integer" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Published episode detail payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicEpisodeDetail" },
+                },
+              },
+            },
+            "400": {
+              description: "Invalid episodeId",
+            },
+            "404": {
+              description: "Episode not found or not yet published",
+            },
+          },
+        },
+      },
+      "/v1/public/supporters": {
+        get: {
+          tags: ["Public"],
+          summary: "Public supporters page data",
+          description: "Returns the guild/support link and the current supporters list as JSON.",
+          responses: {
+            "200": {
+              description: "Supporters payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicSupportersResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/about": {
+        get: {
+          tags: ["Public"],
+          summary: "Public about page data",
+          responses: {
+            "200": {
+              description: "About payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicAboutResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/contact": {
+        get: {
+          tags: ["Public"],
+          summary: "Public contact page data",
+          responses: {
+            "200": {
+              description: "Contact payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicContactResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/site-config": {
+        get: {
+          tags: ["Public"],
+          summary: "Public shared frontend config",
+          responses: {
+            "200": {
+              description: "Shared public config payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicSiteConfigResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/social": {
+        get: {
+          tags: ["Public"],
+          summary: "Public social links",
+          responses: {
+            "200": {
+              description: "Social links payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicSocialResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/public/contacts": {
+        get: {
+          tags: ["Public"],
+          summary: "Public author contacts",
+          responses: {
+            "200": {
+              description: "Author contacts payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PublicContactsResponse" },
+                },
+              },
+            },
+          },
         },
       },
       "/v1/feed/preview": {

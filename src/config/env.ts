@@ -58,6 +58,14 @@ export const config = {
     timeoutMs: Number(process.env.YOUTUBE_METRICS_TIMEOUT_MS ?? 15000),
     sampleIntervalMs: Number(process.env.YOUTUBE_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
   },
+  transcription: {
+    enabled: (process.env.EPISODE_TRANSCRIPTION_ENABLED ?? "false").toLowerCase() === "true",
+    command: process.env.EPISODE_TRANSCRIPTION_COMMAND ?? "whisper-cli",
+    modelPath: process.env.EPISODE_TRANSCRIPTION_MODEL_PATH ?? "",
+    language: process.env.EPISODE_TRANSCRIPTION_LANGUAGE ?? "pt",
+    timeoutMs: Number(process.env.EPISODE_TRANSCRIPTION_TIMEOUT_MS ?? 7200000),
+    pollIntervalMs: Number(process.env.EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS ?? 300000),
+  },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),
     audioBase: required(process.env.FEED_AUDIO_BASE, "FEED_AUDIO_BASE"),
@@ -91,6 +99,43 @@ export const config = {
     itunesCategorySecondary: process.env.FEED_ITUNES_CATEGORY_SECONDARY ?? "Leisure",
     itunesCategorySecondarySub: process.env.FEED_ITUNES_CATEGORY_SECONDARY_SUB ?? "Games",
   },
+  public: {
+    supportersLink: process.env.PUBLIC_SUPPORTERS_LINK ?? "http://bit.ly/guildadc",
+    supportersDataFile:
+      process.env.PUBLIC_SUPPORTERS_DATA_FILE ??
+      path.resolve(process.cwd(), "data", "public", "supporters.json"),
+    aboutTitle: process.env.PUBLIC_ABOUT_TITLE ?? "Dragão Careca",
+    aboutDescription:
+      process.env.PUBLIC_ABOUT_DESCRIPTION ??
+      "Dragão Careca é um podcast de humor com temática de RPG, cultura pop e aventuras improvisadas.",
+    email: process.env.PUBLIC_EMAIL ?? "contato@dragaocareca.com",
+    characterSheetsBaseUrl: process.env.PUBLIC_CHARACTER_SHEETS_BASE_URL ?? "https://ficha.dragaocareca.com/#",
+    maxEpisodesPerPage: Number(process.env.PUBLIC_MAX_EPISODES_PER_PAGE ?? 10),
+    transitionTimeMs: Number(process.env.PUBLIC_TRANSITION_TIME_MS ?? 7000),
+    disqusShortName: process.env.PUBLIC_DISQUS_SHORT_NAME ?? "dragaocareca",
+    social: {
+      twitter: process.env.PUBLIC_SOCIAL_TWITTER ?? "https://twitter.com/Dragao_Careca",
+      youtube:
+        process.env.PUBLIC_SOCIAL_YOUTUBE ??
+        "https://www.youtube.com/channel/UCq-TjauoYJrr3po121gA6iw?sub_confirmation=1",
+      instagram: process.env.PUBLIC_SOCIAL_INSTAGRAM ?? "https://www.instagram.com/dragaocareca",
+      facebook: process.env.PUBLIC_SOCIAL_FACEBOOK ?? "https://www.facebook.com/dragaocareca",
+      spotify: process.env.PUBLIC_SOCIAL_SPOTIFY ?? "https://open.spotify.com/show/4uTtWo6e9TIDnAy5r6UWIZ",
+      deezer: process.env.PUBLIC_SOCIAL_DEEZER ?? "https://www.deezer.com/br/show/615692",
+      googlePodcasts:
+        process.env.PUBLIC_SOCIAL_GOOGLE_PODCASTS ??
+        "https://podcasts.google.com/?feed=aHR0cDovL2ZlZWQuZHJhZ2FvY2FyZWNhLmNvbS8",
+      applePodcasts:
+        process.env.PUBLIC_SOCIAL_APPLE_PODCASTS ??
+        "https://podcasts.apple.com/br/podcast/drag%C3%A3o-careca/id1482299800",
+      pocketCast: process.env.PUBLIC_SOCIAL_POCKET_CAST ?? "https://pca.st/17w8yhs3",
+      castBox: process.env.PUBLIC_SOCIAL_CASTBOX ?? "https://castbox.fm/ch/2414107",
+      rss: process.env.PUBLIC_SOCIAL_RSS ?? "https://feed.dragaocareca.com",
+    },
+    contactsDataFile:
+      process.env.PUBLIC_CONTACTS_DATA_FILE ??
+      path.resolve(process.cwd(), "data", "public", "contacts.json"),
+  },
   media: {
     storageRoot: process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
     backupRoot:
@@ -101,88 +146,9 @@ export const config = {
       path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "episodes"),
     episodesStagingDir:
       process.env.MEDIA_EPISODES_STAGING_DIR ??
-      path.resolve(
-        process.env.MEDIA_EPISODES_DIR ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "episodes"),
-        "staging"
-      ),
-    trailersDir:
-      process.env.MEDIA_TRAILERS_DIR ??
-      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "trailers"),
-    trailersStagingDir:
-      process.env.MEDIA_TRAILERS_STAGING_DIR ??
-      path.resolve(
-        process.env.MEDIA_TRAILERS_DIR ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "trailers"),
-        "staging"
-      ),
-    coversDir:
-      process.env.MEDIA_COVERS_DIR ??
-      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "images"),
-    coversStagingDir:
-      process.env.MEDIA_COVERS_STAGING_DIR ??
-      path.resolve(
-        process.env.MEDIA_COVERS_DIR ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "images"),
-        "staging"
-      ),
-    coversLowDir:
-      process.env.MEDIA_COVERS_LOW_DIR ??
-      path.resolve(
-        process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
-        "images",
-        "low"
-      ),
-    coversLowStagingDir:
-      process.env.MEDIA_COVERS_LOW_STAGING_DIR ??
-      path.resolve(
-        process.env.MEDIA_COVERS_LOW_DIR ??
-          path.resolve(
-            process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
-            "images",
-            "low"
-          ),
-        "staging"
-      ),
+      path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "staging"),
     backupEpisodesDir:
       process.env.MEDIA_BACKUP_EPISODES_DIR ??
-      path.resolve(
-        process.env.MEDIA_BACKUP_ROOT ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
-        "episodes"
-      ),
-    backupEpisodesAudioDir:
-      process.env.MEDIA_BACKUP_EPISODES_AUDIO_DIR ??
-      path.resolve(
-        process.env.MEDIA_BACKUP_ROOT ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
-        "episodes",
-        "audio"
-      ),
-    backupEpisodesTrailersDir:
-      process.env.MEDIA_BACKUP_EPISODES_TRAILERS_DIR ??
-      path.resolve(
-        process.env.MEDIA_BACKUP_ROOT ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
-        "episodes",
-        "trailers"
-      ),
-    backupEpisodesCoversDir:
-      process.env.MEDIA_BACKUP_EPISODES_COVERS_DIR ??
-      path.resolve(
-        process.env.MEDIA_BACKUP_ROOT ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
-        "episodes",
-        "images"
-      ),
-    backupEpisodesCoversLowDir:
-      process.env.MEDIA_BACKUP_EPISODES_COVERS_LOW_DIR ??
-      path.resolve(
-        process.env.MEDIA_BACKUP_ROOT ??
-          path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
-        "episodes",
-        "images",
-        "low"
-      ),
+      path.resolve(process.env.MEDIA_BACKUP_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),
   },
 };

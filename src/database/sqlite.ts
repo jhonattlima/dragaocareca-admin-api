@@ -27,6 +27,10 @@ export type EpisodeRecord = {
   xmlSnapshot?: string | null;
   musicCredits: string[];
   coverCredits: string[];
+  transcriptFileName?: string | null;
+  transcriptStatus?: "idle" | "pending" | "processing" | "done" | "error";
+  transcriptUpdatedAt?: string | null;
+  transcriptError?: string | null;
   launchNotificationState: "idle" | "pending" | "sent";
   launchNotificationQueuedAt?: string | null;
   launchNotificationSentAt?: string | null;
@@ -110,6 +114,10 @@ CREATE TABLE IF NOT EXISTS episodes (
   xml_snapshot TEXT,
   music_credits_json TEXT NOT NULL DEFAULT '[]',
   cover_credits_json TEXT NOT NULL DEFAULT '[]',
+  transcript_file_name TEXT,
+  transcript_status TEXT NOT NULL DEFAULT 'idle' CHECK (transcript_status IN ('idle', 'pending', 'processing', 'done', 'error')),
+  transcript_updated_at TEXT,
+  transcript_error TEXT,
   launch_notification_state TEXT NOT NULL DEFAULT 'idle' CHECK (launch_notification_state IN ('idle', 'pending', 'sent')),
   launch_notification_queued_at TEXT,
   launch_notification_sent_at TEXT,
@@ -249,6 +257,7 @@ export const getDb = (): DatabaseSync => {
     db = new DatabaseSync(dbPath);
     db.exec(schema);
     ensureYoutubeMetricSampleColumns(db);
+    ensureEpisodeTranscriptColumns(db);
   }
   return db;
 };
@@ -260,5 +269,22 @@ const ensureYoutubeMetricSampleColumns = (database: DatabaseSync): void => {
   const columnNames = new Set(columns.map((column) => column.name));
   if (!columnNames.has("subscribers_current")) {
     database.exec("ALTER TABLE youtube_metric_samples ADD COLUMN subscribers_current INTEGER NOT NULL DEFAULT 0;");
+  }
+};
+
+const ensureEpisodeTranscriptColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(episodes)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("transcript_file_name")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN transcript_file_name TEXT;");
+  }
+  if (!columnNames.has("transcript_status")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN transcript_status TEXT NOT NULL DEFAULT 'idle';");
+  }
+  if (!columnNames.has("transcript_updated_at")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN transcript_updated_at TEXT;");
+  }
+  if (!columnNames.has("transcript_error")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN transcript_error TEXT;");
   }
 };

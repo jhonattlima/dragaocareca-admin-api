@@ -12,6 +12,10 @@ export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   citations: string[];
   musicCredits: string[];
   coverCredits: string[];
+  transcriptFileName?: string | null;
+  transcriptStatus?: "idle" | "pending" | "processing" | "done" | "error";
+  transcriptUpdatedAt?: string | null;
+  transcriptError?: string | null;
   launchNotificationState?: "idle" | "pending" | "sent";
   launchNotificationQueuedAt?: string | null;
   launchNotificationSentAt?: string | null;
@@ -44,6 +48,10 @@ type SqliteEpisodeRow = {
   xml_snapshot: string | null;
   music_credits_json: string;
   cover_credits_json: string;
+  transcript_file_name: string | null;
+  transcript_status: "idle" | "pending" | "processing" | "done" | "error";
+  transcript_updated_at: string | null;
+  transcript_error: string | null;
   launch_notification_state: "idle" | "pending" | "sent";
   launch_notification_queued_at: string | null;
   launch_notification_sent_at: string | null;
@@ -395,6 +403,10 @@ const mapRow = (row: SqliteEpisodeRow): EpisodeRow => ({
   xmlSnapshot: row.xml_snapshot ?? undefined,
   musicCredits: parseArray(row.music_credits_json),
   coverCredits: parseArray(row.cover_credits_json),
+  transcriptFileName: row.transcript_file_name ?? undefined,
+  transcriptStatus: row.transcript_status,
+  transcriptUpdatedAt: row.transcript_updated_at ?? undefined,
+  transcriptError: row.transcript_error ?? undefined,
   launchNotificationState: row.launch_notification_state,
   launchNotificationQueuedAt: row.launch_notification_queued_at ?? undefined,
   launchNotificationSentAt: row.launch_notification_sent_at ?? undefined,
@@ -415,12 +427,14 @@ INSERT INTO episodes (
   episode_id, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
   authors_json, guests_json, tags_json, citations_json, file_name, cover_file_name, cover_low_file_name,
   trailer_file_name, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json,
+  transcript_file_name, transcript_status, transcript_updated_at, transcript_error,
   launch_notification_state, launch_notification_queued_at, launch_notification_sent_at, launch_notification_error,
   created_at, updated_at
 ) VALUES (
   @episodeId, @title, @summary, @episodeNumber, @episodeType, @pubDate, @duration, @bytes, @explicit,
   @authorsJson, @guestsJson, @tagsJson, @citationsJson, @fileName, @coverFileName, @coverLowFileName,
   @trailerFileName, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson,
+  @transcriptFileName, @transcriptStatus, @transcriptUpdatedAt, @transcriptError,
   @launchNotificationState, @launchNotificationQueuedAt, @launchNotificationSentAt, @launchNotificationError,
   @createdAt, @updatedAt
 )`;
@@ -628,6 +642,10 @@ export const episodeRepository = {
       xmlSnapshot: input.xmlSnapshot ?? null,
       musicCreditsJson: jsonArray(input.musicCredits),
       coverCreditsJson: jsonArray(input.coverCredits),
+      transcriptFileName: null,
+      transcriptStatus: "idle",
+      transcriptUpdatedAt: null,
+      transcriptError: null,
       launchNotificationState: "idle",
       launchNotificationQueuedAt: null,
       launchNotificationSentAt: null,
@@ -665,6 +683,10 @@ export const episodeRepository = {
         xml_snapshot = @xmlSnapshot,
         music_credits_json = @musicCreditsJson,
         cover_credits_json = @coverCreditsJson,
+        transcript_file_name = @transcriptFileName,
+        transcript_status = @transcriptStatus,
+        transcript_updated_at = @transcriptUpdatedAt,
+        transcript_error = @transcriptError,
         updated_at = @updatedAt
       WHERE episode_id = @episodeId
     `).run({
@@ -690,6 +712,10 @@ export const episodeRepository = {
       xmlSnapshot: input.xmlSnapshot ?? null,
       musicCreditsJson: jsonArray(input.musicCredits),
       coverCreditsJson: jsonArray(input.coverCredits),
+      transcriptFileName: existing.transcriptFileName ?? null,
+      transcriptStatus: existing.transcriptStatus ?? "idle",
+      transcriptUpdatedAt: existing.transcriptUpdatedAt ?? null,
+      transcriptError: existing.transcriptError ?? null,
       updatedAt: now,
     });
     touchMediaRelations(episodeId, input);
@@ -733,6 +759,80 @@ export const episodeRepository = {
     assignments.push("updated_at = @updatedAt");
     getDb().prepare(`UPDATE episodes SET ${assignments.join(", ")} WHERE episode_id = @episodeId`).run(params);
     return this.findByEpisodeId(episodeId);
+  },
+  queueTranscription(episodeId: number): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing || !existing.fileName) return existing;
+    getDb().prepare(`
+      UPDATE episodes SET
+        transcript_file_name = ?,
+        transcript_status = 'pending',
+        transcript_updated_at = ?,
+        transcript_error = NULL,
+        updated_at = ?
+      WHERE episode_id = ?
+    `).run(`episodes/${episodeId}/transcript.txt`, nowIso(), nowIso(), episodeId);
+    return this.findByEpisodeId(episodeId);
+  },
+  markTranscriptionProcessing(episodeId: number): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing) return null;
+    getDb().prepare(`
+      UPDATE episodes SET
+        transcript_status = 'processing',
+        transcript_updated_at = ?,
+        transcript_error = NULL,
+        updated_at = ?
+      WHERE episode_id = ?
+    `).run(nowIso(), nowIso(), episodeId);
+    return this.findByEpisodeId(episodeId);
+  },
+  markTranscriptionDone(episodeId: number, transcriptFileName: string): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing) return null;
+    getDb().prepare(`
+      UPDATE episodes SET
+        transcript_file_name = ?,
+        transcript_status = 'done',
+        transcript_updated_at = ?,
+        transcript_error = NULL,
+        updated_at = ?
+      WHERE episode_id = ?
+    `).run(transcriptFileName, nowIso(), nowIso(), episodeId);
+    return this.findByEpisodeId(episodeId);
+  },
+  markTranscriptionError(episodeId: number, message: string): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing) return null;
+    getDb().prepare(`
+      UPDATE episodes SET
+        transcript_status = 'error',
+        transcript_updated_at = ?,
+        transcript_error = ?,
+        updated_at = ?
+      WHERE episode_id = ?
+    `).run(nowIso(), message, nowIso(), episodeId);
+    return this.findByEpisodeId(episodeId);
+  },
+  clearTranscription(episodeId: number): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing) return null;
+    getDb().prepare(`
+      UPDATE episodes SET
+        transcript_file_name = NULL,
+        transcript_status = 'idle',
+        transcript_updated_at = NULL,
+        transcript_error = NULL,
+        updated_at = ?
+      WHERE episode_id = ?
+    `).run(nowIso(), episodeId);
+    return this.findByEpisodeId(episodeId);
+  },
+  getPendingTranscriptions(): EpisodeRow[] {
+    const rows = getDb()
+      .prepare("SELECT * FROM episodes WHERE transcript_status = 'pending' AND file_name IS NOT NULL ORDER BY datetime(pub_date) ASC, episode_id ASC")
+      .all() as SqliteEpisodeRow[];
+    return rows.map(mapRow);
   },
   queueLaunchNotification(episodeId: number): EpisodeRow | null {
     const existing = this.findByEpisodeId(episodeId);

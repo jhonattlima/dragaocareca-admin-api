@@ -8,6 +8,21 @@ import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
 import { refreshCoverMosaicBackground } from "../services/cover-mosaic.service";
 import { episodeRepository } from "../database/repositories/episode.repository";
+import {
+  abortDraftEpisodeTranscription,
+  clearEpisodeTranscription,
+  getEpisodeTranscriptionStatus,
+  queueDraftEpisodeTranscription,
+  syncDraftEpisodeTranscription,
+} from "../services/episode-transcription.service";
+import {
+  getEpisodeMediaBackupPath,
+  findExistingEpisodeMediaPath,
+  getEpisodeMediaFinalPath,
+  getEpisodeMediaRelativePath,
+  getEpisodeMediaStagingDirectory,
+  getEpisodeMediaStagingPath,
+} from "../services/episode-media-layout.service";
 
 export const episodesRouter = Router();
 
@@ -17,29 +32,7 @@ const queueCoverMosaicRefresh = (): void => {
   });
 };
 
-const mediaDirectories = {
-  audio: config.media.episodesDir,
-  trailer: config.media.trailersDir,
-  cover: config.media.coversDir,
-  coverLow: config.media.coversLowDir,
-};
-
-const stagingDirectories = {
-  audio: config.media.episodesStagingDir,
-  trailer: config.media.trailersStagingDir,
-  cover: config.media.coversStagingDir,
-  coverLow: config.media.coversLowStagingDir,
-};
-
-const backupDirectories = {
-  episodes: config.media.backupEpisodesDir,
-  audio: config.media.backupEpisodesAudioDir,
-  trailer: config.media.backupEpisodesTrailersDir,
-  cover: config.media.backupEpisodesCoversDir,
-  coverLow: config.media.backupEpisodesCoversLowDir,
-};
-
-for (const directory of [...Object.values(mediaDirectories), ...Object.values(stagingDirectories), ...Object.values(backupDirectories)]) {
+for (const directory of [config.media.episodesDir, config.media.episodesStagingDir, config.media.backupEpisodesDir]) {
   fs.mkdirSync(directory, { recursive: true });
 }
 
@@ -48,9 +41,9 @@ type UploadKind = "audio" | "trailer" | "cover" | "coverLow";
 type UploadSpec = {
   kind: UploadKind;
   field: "fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName";
-  directory: string;
-  stagingDirectory: string;
+  buildStagingDirectory: (episodeId: number) => string;
   buildFileName: (episodeId: number) => string;
+  buildStagingFileName: (episodeId: number) => string;
   allowedExtensions: string[];
   allowedMimeTypes: string[];
   maxBytes: number;
@@ -60,9 +53,9 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
   audio: {
     kind: "audio",
     field: "fileName",
-    directory: mediaDirectories.audio,
-    stagingDirectory: stagingDirectories.audio,
-    buildFileName: (episodeId) => `episode_${episodeId}.mp3`,
+    buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "audio"),
+    buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
+    buildStagingFileName: () => "audio.mp3",
     allowedExtensions: [".mp3"],
     allowedMimeTypes: ["audio/mpeg", "audio/mp3", "audio/x-mpeg"],
     maxBytes: 500 * 1024 * 1024,
@@ -70,9 +63,9 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
   trailer: {
     kind: "trailer",
     field: "trailerFileName",
-    directory: mediaDirectories.trailer,
-    stagingDirectory: stagingDirectories.trailer,
-    buildFileName: (episodeId) => `trailer_${episodeId}.mp3`,
+    buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "trailer"),
+    buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
+    buildStagingFileName: () => "trailer.mp3",
     allowedExtensions: [".mp3"],
     allowedMimeTypes: ["audio/mpeg", "audio/mp3", "audio/x-mpeg"],
     maxBytes: 250 * 1024 * 1024,
@@ -80,9 +73,9 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
   cover: {
     kind: "cover",
     field: "coverFileName",
-    directory: mediaDirectories.cover,
-    stagingDirectory: stagingDirectories.cover,
-    buildFileName: (episodeId) => `episode_${episodeId}.jpeg`,
+    buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "cover"),
+    buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
+    buildStagingFileName: () => "cover.jpeg",
     allowedExtensions: [".jpg", ".jpeg"],
     allowedMimeTypes: ["image/jpeg", "image/jpg"],
     maxBytes: 20 * 1024 * 1024,
@@ -90,9 +83,9 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
   coverLow: {
     kind: "coverLow",
     field: "coverLowFileName",
-    directory: mediaDirectories.coverLow,
-    stagingDirectory: stagingDirectories.coverLow,
-    buildFileName: (episodeId) => `episode_${episodeId}.webp`,
+    buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "coverLow"),
+    buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
+    buildStagingFileName: () => "cover.webp",
     allowedExtensions: [".webp"],
     allowedMimeTypes: ["image/webp"],
     maxBytes: 10 * 1024 * 1024,
@@ -101,6 +94,7 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
 
 const moveFile = async (sourcePath: string, targetPath: string): Promise<void> => {
   await fs.promises.rm(targetPath, { force: true }).catch(() => undefined);
+  await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
 
   try {
     await fs.promises.rename(sourcePath, targetPath);
@@ -142,12 +136,20 @@ const moveExistingFileToBackup = async (primaryPath: string, stagingPath: string
 const buildUploader = (spec: UploadSpec) =>
   multer({
     storage: multer.diskStorage({
-      destination: (_req, _file, callback) => callback(null, spec.stagingDirectory),
+      destination: (req, _file, callback) => {
+        const episodeId = Number(req.params.episodeId);
+        const stagingDirectory =
+          Number.isInteger(episodeId) && episodeId > 0
+            ? spec.buildStagingDirectory(episodeId)
+            : config.media.episodesStagingDir;
+        fs.mkdirSync(stagingDirectory, { recursive: true });
+        callback(null, stagingDirectory);
+      },
       filename: (req, _file, callback) => {
         const episodeId = Number(req.params.episodeId);
         const fileName =
           Number.isInteger(episodeId) && episodeId > 0
-            ? spec.buildFileName(episodeId)
+            ? spec.buildStagingFileName(episodeId)
             : _file.originalname;
         callback(null, fileName);
       },
@@ -200,7 +202,54 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
         }
 
         const fileName = spec.buildFileName(episodeId);
-        res.json({ episodeId, [spec.field]: fileName });
+        const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
+        console.info(`[episodes] upload ${spec.kind} episode=${episodeId} current=${Boolean(currentEpisode)}`);
+        if (!currentEpisode) {
+          if (spec.kind === "audio") {
+            await abortDraftEpisodeTranscription(episodeId);
+            const draftState = await queueDraftEpisodeTranscription(episodeId);
+            console.info(
+              `[transcription] draft queued episode=${episodeId} version=${draftState.version} status=${draftState.status}`
+            );
+            const transcriptionMessage =
+              draftState.status === "error"
+                ? `Audio staged, but transcription could not start: ${draftState.error ?? "unknown error"}`
+                : "Audio staged and transcription started.";
+            res.json({
+              episodeId,
+              [spec.field]: fileName,
+              transcriptStatus: draftState.status,
+              transcriptUpdatedAt: new Date().toISOString(),
+              transcriptStartedAt: draftState.progress !== null && draftState.status === "processing" ? new Date().toISOString() : undefined,
+              transcriptProgress: draftState.progress ?? (draftState.status === "done" ? 100 : 0),
+              transcriptError: draftState.error ?? undefined,
+              message: transcriptionMessage,
+            });
+            return;
+          }
+
+          res.json({
+            episodeId,
+            [spec.field]: fileName,
+            message: "File staged.",
+          });
+          return;
+        }
+
+        const updated = episodeRepository.updateMedia(episodeId, { [spec.field]: fileName });
+
+        const refreshed = episodeRepository.findByEpisodeId(episodeId);
+        if (spec.kind === "audio") {
+          console.info(`[episodes] audio staged for existing episode=${episodeId}; draft transcription not used`);
+        }
+        res.json({
+          ...(refreshed ?? updated ?? currentEpisode),
+          [spec.field]: fileName,
+          message:
+            spec.kind === "audio"
+              ? "Audio staged for an existing episode. Draft transcription is only used for new episodes."
+              : "File staged.",
+        });
       } catch (error) {
         if (file) {
           await fs.promises.unlink(file.path).catch(() => undefined);
@@ -221,28 +270,25 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
       }
 
       const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
-      const currentFileName = (currentEpisode as any)?.[spec.field] || spec.buildFileName(episodeId);
-      const finalPath = path.join(spec.directory, currentFileName);
-      const stagingPath = path.join(spec.stagingDirectory, currentFileName);
-      const backupPath = path.join(
-        spec.kind === "audio"
-          ? backupDirectories.audio
-          : spec.kind === "trailer"
-            ? backupDirectories.trailer
-            : spec.kind === "cover"
-              ? backupDirectories.cover
-              : backupDirectories.coverLow,
-        currentFileName
+      const backupPath = getEpisodeMediaBackupPath(episodeId, spec.kind);
+
+      const existingPath = await findExistingEpisodeMediaPath(
+        episodeId,
+        spec.kind as "audio" | "trailer" | "cover" | "coverLow",
+        (currentEpisode as any)?.[spec.field] ?? null
       );
 
-      if (!currentEpisode && !(await findExistingFile([finalPath, stagingPath]))) {
+      if (!currentEpisode && !existingPath) {
         res.status(404).json({ message: "Episode not found" });
         return;
       }
 
-      const movedToBackup = await moveExistingFileToBackup(finalPath, stagingPath, backupPath);
+      const movedToBackup = existingPath ? (await moveFile(existingPath, backupPath), true) : false;
 
       if (!currentEpisode) {
+        if (spec.kind === "audio" && movedToBackup) {
+          await clearEpisodeTranscription(episodeId);
+        }
         res.json({ episodeId, [spec.field]: movedToBackup ? "" : undefined });
         return;
       }
@@ -255,6 +301,9 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
         return;
       }
 
+      if (spec.kind === "audio") {
+        await clearEpisodeTranscription(episodeId);
+      }
       queueCoverMosaicRefresh();
       res.json(updated);
     } catch (error) {
@@ -268,8 +317,8 @@ const promoteStagedMedia = async (episodeId: number) => {
 
   for (const spec of Object.values(uploadSpecs)) {
     const fileName = spec.buildFileName(episodeId);
-    const stagingPath = path.join(spec.stagingDirectory, fileName);
-    const finalPath = path.join(spec.directory, fileName);
+    const stagingPath = getEpisodeMediaStagingPath(episodeId, spec.kind);
+    const finalPath = getEpisodeMediaFinalPath(episodeId, spec.kind);
     const stagedExists = await fs.promises
       .access(stagingPath)
       .then(() => true)
@@ -313,6 +362,20 @@ episodesRouter.get("/references", requireAuth, async (_req, res, next) => {
   }
 });
 
+episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+
+    res.json(getEpisodeTranscriptionStatus(episodeId));
+  } catch (error) {
+    next(error);
+  }
+});
+
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
@@ -332,7 +395,18 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     const payload = episodeSchema.parse(req.body);
     const created = episodeRepository.create(payload);
     const mediaUpdates = await promoteStagedMedia(created.episodeId);
+    const transcriptState = await syncDraftEpisodeTranscription(created.episodeId);
+
+    if (transcriptState.status === "done" && transcriptState.transcriptFileName) {
+      episodeRepository.markTranscriptionDone(created.episodeId, transcriptState.transcriptFileName);
+    } else if (transcriptState.status === "pending" || transcriptState.status === "processing") {
+      episodeRepository.queueTranscription(created.episodeId);
+    } else if (transcriptState.status === "error") {
+      episodeRepository.markTranscriptionError(created.episodeId, "Draft transcription failed");
+    }
+
     await queueLaunchNotification(created.episodeId);
+
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(created.episodeId)
       : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
@@ -356,6 +430,9 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
 
     const mediaUpdates = await promoteStagedMedia(routeId);
     await queueLaunchNotification(routeId);
+    if (mediaUpdates.fileName) {
+      await clearEpisodeTranscription(routeId);
+    }
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(routeId)
       : episodeRepository.updateMedia(routeId, mediaUpdates);
@@ -380,22 +457,15 @@ episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
       return;
     }
 
-    const snapshotPath = path.join(backupDirectories.episodes, `episode_${episodeId}.json`);
+    const snapshotPath = path.join(config.media.backupEpisodesDir, String(episodeId), "episode.json");
+    await fs.promises.mkdir(path.dirname(snapshotPath), { recursive: true });
     await fs.promises.writeFile(snapshotPath, JSON.stringify(episode, null, 2), "utf8");
 
     for (const spec of Object.values(uploadSpecs)) {
       const currentFileName = (episode as any)[spec.field] || spec.buildFileName(episodeId);
-      const finalPath = path.join(spec.directory, currentFileName);
-      const stagingPath = path.join(spec.stagingDirectory, currentFileName);
-      const backupDir =
-        spec.kind === "audio"
-          ? backupDirectories.audio
-          : spec.kind === "trailer"
-            ? backupDirectories.trailer
-            : spec.kind === "cover"
-              ? backupDirectories.cover
-              : backupDirectories.coverLow;
-      const backupPath = path.join(backupDir, currentFileName);
+      const finalPath = getEpisodeMediaFinalPath(episodeId, spec.kind);
+      const stagingPath = getEpisodeMediaStagingPath(episodeId, spec.kind);
+      const backupPath = getEpisodeMediaBackupPath(episodeId, spec.kind);
       await moveExistingFileToBackup(finalPath, stagingPath, backupPath);
     }
 
