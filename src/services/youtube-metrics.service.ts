@@ -93,6 +93,42 @@ const accessTokenRefreshMarginMs = 5 * 60 * 1000;
 let cachedAccessToken: string | null = null;
 let cachedAccessTokenExpiresAt = 0;
 
+const isInvalidGrantError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    message?: unknown;
+    response?: {
+      data?: {
+        error?: unknown;
+      };
+    };
+    cause?: {
+      message?: unknown;
+      code?: unknown;
+    };
+  };
+
+  return (
+    candidate.message === "invalid_grant" ||
+    candidate.response?.data?.error === "invalid_grant" ||
+    candidate.cause?.message === "invalid_grant" ||
+    candidate.cause?.code === 400
+  );
+};
+
+const normalizeYouTubeAuthError = (error: unknown): Error => {
+  if (!isInvalidGrantError(error)) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  return new Error(
+    "Invalid YouTube OAuth refresh grant. Re-authorize the YouTube integration and update YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, and YOUTUBE_REFRESH_TOKEN."
+  );
+};
+
 const isEnabled = (): boolean => config.youtube.enabled;
 
 const assertConfig = (): void => {
@@ -117,7 +153,9 @@ const getAccessToken = async (): Promise<string> => {
     return cachedAccessToken;
   }
 
-  const accessTokenResponse = await youtubeClient.getAccessToken();
+  const accessTokenResponse = await youtubeClient.getAccessToken().catch((error: unknown) => {
+    throw normalizeYouTubeAuthError(error);
+  });
   const token = accessTokenResponse?.token ?? null;
   if (!token) {
     throw new Error("Unable to obtain a YouTube access token.");

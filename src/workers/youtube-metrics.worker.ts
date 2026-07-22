@@ -40,12 +40,17 @@ export const startYouTubeMetricsWorker = async (): Promise<() => void> => {
     return () => undefined;
   }
 
+  const logWorkerError = (label: string, error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${label}: ${message}`);
+  };
+
   await runOnce().catch((error: unknown) => {
-    console.error("YouTube metrics worker initial run failed", error);
+    logWorkerError("YouTube metrics worker initial run failed", error);
   });
   pollTimer = setInterval(() => {
     void runOnce().catch((error: unknown) => {
-      console.error("YouTube metrics worker failed", error);
+      logWorkerError("YouTube metrics worker failed", error);
     });
   }, config.youtube.sampleIntervalMs);
 
