@@ -6,19 +6,9 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 ## Current State
 
-- Latest shipped milestone: **v1.1 Public frontend API responses** on 2026-07-23
-- Public API surface now includes episode catalog, episode detail, site metadata, contacts/social/about, and supporters endpoints under `/v1/public/*`
-- Next planning step: execute **v1.2 Episode AI authoring API**
-
-## Current Milestone: v1.2 Episode AI authoring API
-
-**Goal:** Add backend-only summary suggestion support so episode metadata can be prepared faster from the existing transcript workflow.
-
-**Target features:**
-- Summary suggestion generation from the transcript `.txt` already produced by the current transcription workflow
-- Sequential transcript-to-summary processing inside `admin-api`
-- Suggested summary persisted in the episode folder for reuse/review before episode save
-- Backend API surface only for this milestone; `admin-web` integration will be a later milestone
+- Latest shipped milestone: **v1.2 Episode AI authoring API** on 2026-07-23
+- Summary suggestion generation now runs from the existing transcript workflow, stays sequential for the 4 GB VPS target, and exposes a protected read contract for future frontend reuse
+- Next planning step: define the next milestone with `$gsd-new-milestone`
 
 ## Core Value
 
@@ -34,13 +24,15 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Public episodes catalog and episode-detail endpoints are implemented under `/v1/public/episodes` and `/v1/public/episodes/:episodeId`.
 - Public site endpoints are implemented under `/v1/public/about`, `/v1/public/contact`, `/v1/public/social`, `/v1/public/contacts`, and `/v1/public/site-config`.
 - Public supporters data is implemented under `/v1/public/supporters` with `supporters` terminology and documented in the backend OpenAPI/feature docs.
+- The backend can generate a suggested episode summary from transcript-only input.
+- Summary generation stays sequential and lightweight enough for the 4 GB VPS target.
+- Suggested summary drafts are persisted beside the episode files and kept separate from the final saved episode summary.
+- Protected backend APIs expose the summary suggestion and generation state.
 
 ### Active
 
-- [ ] Generate a suggested episode summary from the existing transcript only.
-- [ ] Keep summary generation sequential and lightweight enough for the 4 GB VPS target.
-- [ ] Persist the suggested summary as backend-managed draft data beside the episode files.
-- [ ] Expose protected backend APIs to trigger, inspect, and reuse summary suggestions.
+- No active v1.2 requirements remain.
+- Define the next milestone requirements with `$gsd-new-milestone`.
 
 ### Out of Scope
 
@@ -75,6 +67,9 @@ The backend already owns episode media layout and transcript generation. Transcr
 | Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | ✓ Good |
 | Add a repo-native public-catalog verification script | Sandbox networking made localhost validation unreliable | ✓ Good |
 | Defer transcription-engine re-evaluation out of v1.2 | Summary generation can proceed on top of the existing transcript pipeline | — Pending |
+| Keep summary generation transcript-only and sequential | The 4 GB VPS target requires lightweight, backend-owned processing | ✓ Good |
+| Store suggested summaries as draft artifacts beside the episode files | This preserves operator review/editability before save | ✓ Good |
+| Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
 
 ## Archived Milestones
 
@@ -90,6 +85,20 @@ Target features:
 - Public people/contacts endpoint for author and credit rendering
 - Public site metadata endpoint for shared social/email/support links
 - Public supporters endpoint for the guilda/supporters page
+
+</details>
+
+<details>
+<summary>v1.2 Episode AI authoring API</summary>
+
+Goal:
+Add backend-only summary suggestion support on top of the existing transcript workflow.
+
+Target features:
+- Summary suggestion generation from transcript-only input
+- Sequential transcript-to-summary processing inside `admin-api`
+- Suggested summary persisted in the episode folder for reuse/review before episode save
+- Backend API surface only for this milestone; `admin-web` integration deferred
 
 </details>
 

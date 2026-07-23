@@ -233,7 +233,7 @@ src/
 │       ├── types.ts
 │       └── llama-cli.adapter.ts
 └── scripts/
-    └── verify-summary-runtime.ts
+    └── verify-summary-runtime-contract.ts
 
 data/media/staging/<episodeId>/
 ├── transcript.txt
@@ -483,7 +483,7 @@ The initial local `llama.cpp` path has no per-token vendor charge, so the budget
 | Spoken-audio robustness | `PASS:` Despite disfluencies or noisy ASR text, the summary preserves the real meaning and important proper nouns well enough that editors make only light cleanup.<br>`FAIL:` Filler chatter dominates, ASR mistakes are repeated as fact, or late-episode topics disappear because of compaction/noise. | Human review on noisy-transcript fixtures and sampled production runs; LLM Judge on ASR-edge examples after calibration. | High |
 | Title-description fit | `PASS:` The summary complements the title, adds useful context, and avoids contradiction or empty repetition.<br>`FAIL:` The summary duplicates the title, conflicts with it, or spoils the only hook while adding no value. | LLM Judge using title + transcript + summary, with human sampling for low-scoring or disputed cases. | Medium |
 | Safety and platform compliance | `PASS:` The draft stays content-faithful, avoids spam-style SEO behavior, and does not introduce abusive, defamatory, or policy-risk language absent from the episode framing.<br>`FAIL:` The draft contains keyword blocks, unsafe wording, or explicit-content mismatch introduced by the model. | Code checks for banned formatting patterns and repetition thresholds; LLM Judge for policy/spam review; human audit for escalations. | Critical |
-| Task completion and artifact isolation | `PASS:` Generation runs only when `transcript.txt` exists, writes only `summary.txt` and `episode.state.json`, preserves `episodes.summary`, and finishes within the sequential runtime contract.<br>`FAIL:` Generation starts without a transcript, clobbers transcript/final summary state, leaves stale state behind, or depends on parallel/persistent runtime behavior to finish. | Code-based integration checks plus an executable `verify-summary-runtime` script in CI. | Critical |
+| Task completion and artifact isolation | `PASS:` Generation runs only when `transcript.txt` exists, writes only `summary.txt` and `episode.state.json`, preserves `episodes.summary`, and finishes within the sequential runtime contract.<br>`FAIL:` Generation starts without a transcript, clobbers transcript/final summary state, leaves stale state behind, or depends on parallel/persistent runtime behavior to finish. | Code-based integration checks plus an executable `verify-summary-runtime-contract` script in CI. | Critical |
 
 LLM-judge scores are advisory until calibrated against editor labels on the seed dataset with at least `0.7` agreement; before that threshold, use judges for triage and keep human review as the release gate on critical dimensions.
 
@@ -516,7 +516,7 @@ Trace payloads should log `episodeId`, transcript hash, transcript byte length, 
 
 **CI/CD Integration:**
 ```bash
-npm run typecheck && npm run build && NODE_ENV=development node dist/scripts/verify-summary-runtime.js && npx promptfoo eval -c evals/summary-runtime.promptfoo.yaml
+npm run typecheck && npm run build && NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js && npx promptfoo eval -c evals/summary-runtime.promptfoo.yaml
 ```
 
 ### Reference Dataset

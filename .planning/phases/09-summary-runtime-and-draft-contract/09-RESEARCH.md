@@ -160,7 +160,7 @@ src/
 │   ├── episode-transcription.service.ts  # unchanged transcription engine
 │   └── episode-summary.service.ts        # new one-shot summary runtime
 └── schemas/
-    └── episode-summary-state.ts     # optional zod-backed shared state schema
+    └── episode-draft-state.ts       # optional zod-backed shared state schema
 ```
 
 ### Pattern 1: Env-Driven Summary Runtime Block
@@ -341,17 +341,15 @@ await execFileAsync(config.summary.command, [
 | A2 | The exact GGUF quant to deploy for Qwen should remain operator-selected instead of being locked in Phase 9. [ASSUMED] | Standard Stack | Medium; a later phase may need to pin one artifact for reproducible ops docs. |
 | A3 | The chosen `llama.cpp` CLI invocation can stay runtime-specific without locking exact prompt-file flags in Phase 9. [ASSUMED] | Code Examples | Low; implementation still needs one concrete invocation shape before verification. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Phase 9 pin one exact default GGUF artifact name or only the runtime contract?**
-   - What we know: The feature README points at `Qwen2.5-3B-Instruct q3_k_m`, but that exact quantized artifact was not verified from an official Qwen source in this session. [VERIFIED: docs/features/004-episode-summary-suggestion/README.md] [ASSUMED]
-   - What's unclear: Whether operators want one documented default artifact for reproducibility or only env-driven model-path flexibility. [ASSUMED]
-   - Recommendation: Keep Phase 9 contract env-driven and let Phase 11 ops docs pin the deployed artifact after local validation. [ASSUMED]
+   - Resolution: Phase 9 locks only the env-driven runtime contract and example model family, not one mandatory GGUF artifact name. The backend must accept the model location through `EPISODE_SUMMARY_MODEL_PATH`, and Phase 11 operations docs can pin the deployed artifact after local validation. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: docs/features/004-episode-summary-suggestion/README.md]
+   - Why this is locked: D-01 requires configuration-driven runtime selection, and the context leaves exact env naming and service boundaries to the agent, so locking the contract instead of a single artifact preserves operator control without reopening the architecture. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 2. **Should summary state live in staging only or be copied to the final episode folder after save?**
-   - What we know: The context locks `summary.txt` beside episode files and allows later endpoint reuse. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
-   - What's unclear: Whether unsaved draft episodes need staging-only summary persistence before promotion, exactly like draft transcripts do today. [VERIFIED: codebase grep]
-   - Recommendation: Mirror the current transcript draft/final promotion behavior so the shared state/artifact helpers support both unsaved and saved episodes. [VERIFIED: codebase grep]
+   - Resolution: Phase 9 locks `summary.txt` and `episode.state.json` to the episode staging directory as the canonical generation-time write target, matching the current draft transcript workflow. The media-layout contract must also support promoted final-path reads after save/sync so later phases can resolve the same artifacts before or after promotion without changing ownership rules. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts] [VERIFIED: src/services/episode-transcription.service.ts]
+   - Why this is locked: Unsaved draft work already needs a staging-first home, while saved episodes already use promotion and final-path resolution in the existing media layout. Locking staging-first writes plus promotion-aware reads removes the ambiguity without changing the transcription engine per D-02, D-04, D-05, and D-08. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts]
 
 ## Environment Availability
 
@@ -384,8 +382,8 @@ await execFileAsync(config.summary.command, [
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| SUMM-01 | Transcript-only summary generation path is defined and executable behind a service boundary. [VERIFIED: .planning/REQUIREMENTS.md] | integration | `npm run build && node dist/<summary-verification-script>.js` | ❌ Wave 0 |
-| FLOW-02 | Summary start is blocked until transcript artifact exists. [VERIFIED: .planning/REQUIREMENTS.md] | unit/integration | `npm run build && node dist/<summary-verification-script>.js --missing-transcript` | ❌ Wave 0 |
+| SUMM-01 | Transcript-only summary generation path is defined and executable behind a service boundary. [VERIFIED: .planning/REQUIREMENTS.md] | integration | `npm run build && NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js` | ❌ Wave 0 |
+| FLOW-02 | Summary start is blocked until transcript artifact exists. [VERIFIED: .planning/REQUIREMENTS.md] | unit/integration | `npm run build && NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js --missing-transcript` | ❌ Wave 0 |
 | OPS-01 | Runtime/model selection comes only from backend config. [VERIFIED: .planning/REQUIREMENTS.md] | unit | `npm run typecheck` plus targeted config/service assertions | ❌ Wave 0 |
 
 ### Sampling Rate

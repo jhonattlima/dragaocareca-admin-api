@@ -66,6 +66,15 @@ export const config = {
     timeoutMs: Number(process.env.EPISODE_TRANSCRIPTION_TIMEOUT_MS ?? 7200000),
     pollIntervalMs: Number(process.env.EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS ?? 300000),
   },
+  summary: {
+    enabled: (process.env.EPISODE_SUMMARY_ENABLED ?? "false").toLowerCase() === "true",
+    command: process.env.EPISODE_SUMMARY_COMMAND ?? "llama-cli",
+    modelPath: process.env.EPISODE_SUMMARY_MODEL_PATH ?? "",
+    contextSize: Number(process.env.EPISODE_SUMMARY_CONTEXT_SIZE ?? 4096),
+    maxTokens: Number(process.env.EPISODE_SUMMARY_MAX_TOKENS ?? 256),
+    timeoutMs: Number(process.env.EPISODE_SUMMARY_TIMEOUT_MS ?? 900000),
+    promptVersion: process.env.EPISODE_SUMMARY_PROMPT_VERSION ?? "1",
+  },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),
     audioBase: required(process.env.FEED_AUDIO_BASE, "FEED_AUDIO_BASE"),

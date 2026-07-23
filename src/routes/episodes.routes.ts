@@ -15,6 +15,7 @@ import {
   queueDraftEpisodeTranscription,
   syncDraftEpisodeTranscription,
 } from "../services/episode-transcription.service";
+import { getEpisodeDraftSummary } from "../services/episode-summary.service";
 import {
   getEpisodeMediaBackupPath,
   findExistingEpisodeMediaPath,
@@ -371,6 +372,20 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
     }
 
     res.json(getEpisodeTranscriptionStatus(episodeId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+
+    res.json(getEpisodeDraftSummary(episodeId));
   } catch (error) {
     next(error);
   }

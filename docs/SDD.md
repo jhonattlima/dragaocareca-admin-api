@@ -28,6 +28,7 @@ Main modules:
 - `src/database/repositories/episode.repository.ts`: episode persistence
 - `src/routes/*.routes.ts`: auth/feed/episode routes
 - `src/services/feed.service.ts`: RSS feed generation
+- `src/services/episode-summary.service.ts`: transcript-only summary drafting, draft-state promotion, and summary runtime verification
 - `src/services/launch-notification.service.ts`: launch queue and Telegram delivery workflow
 - `src/services/telegram.service.ts`: Telegram Bot API sender
 - `src/middleware/auth.middleware.ts`: JWT auth + dev bypass
@@ -97,6 +98,7 @@ Episodes (protected unless backend bypass):
 - `GET /v1/episodes/:episodeId`
 - `POST /v1/episodes`
 - `PUT /v1/episodes/:episodeId`
+- `GET /v1/episodes/:episodeId/episodes-generated-summary`
 
 Feed admin (protected unless backend bypass):
 - `GET /v1/feed/preview`
@@ -191,6 +193,15 @@ Docs:
 - `EPISODE_TRANSCRIPTION_TIMEOUT_MS`
 - `EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS`
 
+### 8.6 Episode Summary Drafting
+- `EPISODE_SUMMARY_ENABLED`
+- `EPISODE_SUMMARY_COMMAND`
+- `EPISODE_SUMMARY_MODEL_PATH`
+- `EPISODE_SUMMARY_CONTEXT_SIZE`
+- `EPISODE_SUMMARY_MAX_TOKENS`
+- `EPISODE_SUMMARY_TIMEOUT_MS`
+- `EPISODE_SUMMARY_PROMPT_VERSION`
+
 ## 9. Local Runbook
 ### 9.1 Backend
 ```powershell
@@ -265,12 +276,17 @@ Install these on the VPS before enabling the full stack:
 - Python package `spotifyconnector` for the Spotify metrics script
 - `whisper.cpp` or a compatible transcription binary exposed through `EPISODE_TRANSCRIPTION_COMMAND`
 - a Whisper model file such as `ggml-small.bin` for `EPISODE_TRANSCRIPTION_MODEL_PATH`
+- a local summary runtime command exposed through `EPISODE_SUMMARY_COMMAND`
+- a model file for summary drafting exposed through `EPISODE_SUMMARY_MODEL_PATH`
 - a writable filesystem location for `data/database/`, `data/media/`, and `data/generated/`
+- enough memory headroom to run transcription and summary jobs sequentially on a 4 GB VPS
 
 Optional but recommended for production:
 
 - a process manager such as systemd, PM2, or Docker
 - a dedicated virtual environment for Python dependencies
+
+Summary workers are transcript-driven and should stay sequential on the target VPS. The summary job runs after the transcript is ready, reads `transcript.txt`, and writes the draft `summary.txt` plus the shared `episode.state.json` metadata. Do not plan parallel transcription and summary execution on the same 4 GB host.
 
 Bootstrap references:
 

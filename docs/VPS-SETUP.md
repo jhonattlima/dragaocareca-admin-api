@@ -35,6 +35,16 @@ The current implementation expects a Whisper-family local CLI such as `whisper.c
 
 If we revisit the transcription runtime later, track that work under [TODO.md](./TODO.md#td-001-re-evaluate-the-local-transcription-engine-before-changing-the-transcript-pipeline) rather than changing the current production path ad hoc.
 
+## Summary dependencies
+
+The summary worker also needs:
+
+- a summary command exposed through `EPISODE_SUMMARY_COMMAND`
+- a model file referenced by `EPISODE_SUMMARY_MODEL_PATH`
+- enough CPU and memory headroom to keep the summary job sequential with transcription on a 4 GB VPS
+
+The summary runtime reads the transcript file, writes a draft `summary.txt`, and updates the shared `episode.state.json` metadata for the episode. Do not run transcription and summary generation in parallel on the same VPS host.
+
 ## Suggested bootstrap
 
 Run the full bootstrap script from the project root:
