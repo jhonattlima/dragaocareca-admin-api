@@ -23,15 +23,10 @@ npm run build
 
 ### Route smoke check
 
-Run the backend locally, fetch the Phase 5 endpoint, and assert the current frontend compatibility contract:
+Run the dedicated verification script, which invokes the real `GET /v1/public/episodes` route handler and asserts the current frontend compatibility contract without depending on sandboxed localhost networking:
 
 ```bash
-PORT=3000 npm run dev >/tmp/phase5-public-catalog.log 2>&1 &
-API_PID=$!
-trap 'kill $API_PID' EXIT
-sleep 5
-curl -fsS http://127.0.0.1:3000/v1/public/episodes > /tmp/phase5-public-episodes.json
-node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync("/tmp/phase5-public-episodes.json","utf8")); if(!Array.isArray(data)) throw new Error("expected array response"); for (const item of data) { if (typeof item.episodeId !== "number") throw new Error("missing numeric episodeId"); if (typeof item.title !== "string" || !item.title.trim()) throw new Error("missing title"); if (typeof item.pubDate !== "string" || Number.isNaN(Date.parse(item.pubDate))) throw new Error("invalid pubDate"); if (!Array.isArray(item.guests) || item.guests.some((guest) => !guest || typeof guest.name !== "string")) throw new Error("invalid guests[].name contract"); for (const key of ["pageUrl","audioUrl","coverUrl","trailerUrl"]) { if (item[key] != null && !/^https?:\\/\\//.test(item[key])) throw new Error(`non-absolute ${key}`); } if (Date.parse(item.pubDate) > Date.now()) throw new Error("future-dated episode leaked"); } for (let index = 1; index < data.length; index += 1) { if (Date.parse(data[index - 1].pubDate) < Date.parse(data[index].pubDate)) throw new Error("catalog not newest-first"); }'
+npm run verify:public-episodes
 ```
 
 ## Requirement Traceability

@@ -2,18 +2,17 @@
 
 ## What This Is
 
-An admin and public API service for Dragao Careca. It already manages podcast episodes, media, feed generation, notifications, and supporting backend workflows; this milestone adds backend-owned public JSON contracts so `dragaocareca_frontend` can render the live site without relying on legacy PHP endpoints.
+An admin and public API service for Dragao Careca. It manages podcast episodes, media, feed generation, notifications, supporting backend workflows, and backend-owned public JSON contracts for the live/public frontend.
 
-## Current Milestone: v1.1 Public Frontend API Responses
+## Current State
 
-**Goal:** Replace the legacy public PHP data sources with distinct backend JSON endpoints that serve the home page and the other public frontend pages.
+- Latest shipped milestone: **v1.1 Public frontend API responses** on 2026-07-23
+- Public API surface now includes episode catalog, episode detail, site metadata, contacts/social/about, and supporters endpoints under `/v1/public/*`
+- Next planning step: define the next milestone with `$gsd-new-milestone`
 
-**Target features:**
-- Public episodes catalog endpoint for the home page
-- Public episode detail endpoint for `/episode/:id`
-- Public people/contacts endpoint for author and credit rendering
-- Public site metadata endpoint for shared social/email/support links
-- Public supporters endpoint for the guilda/supporters page
+## Next Milestone Goals
+
+(Not defined yet)
 
 ## Core Value
 
@@ -26,14 +25,13 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Feed generation is backend-owned and already uses SQLite as the source of truth.
 - Episode management, media storage, Telegram launch notifications, and transcription workflows are already implemented in this backend.
 - The current public site behavior and the `dragaocareca_frontend` repo provide a concrete reference for the required public data shapes.
+- Public episodes catalog and episode-detail endpoints are implemented under `/v1/public/episodes` and `/v1/public/episodes/:episodeId`.
+- Public site endpoints are implemented under `/v1/public/about`, `/v1/public/contact`, `/v1/public/social`, `/v1/public/contacts`, and `/v1/public/site-config`.
+- Public supporters data is implemented under `/v1/public/supporters` with `supporters` terminology and documented in the backend OpenAPI/feature docs.
 
 ### Active
 
-- [ ] Expose a public episodes catalog endpoint that returns only published episodes in frontend-ready order.
-- [ ] Expose a public episode detail endpoint that serves the episode page without fetching the full catalog.
-- [ ] Expose a dedicated people/contacts endpoint for authors and credit resolution.
-- [ ] Expose a dedicated site metadata endpoint for shared public-page configuration.
-- [ ] Expose a dedicated supporters endpoint using `supporters` terminology instead of `patreon`.
+(None currently — milestone v1.1 implementation was reconciled against the codebase on 2026-07-23 and is ready for milestone closeout or a new milestone.)
 
 ### Out of Scope
 
@@ -58,9 +56,27 @@ The production site at `https://dragaocareca.com/#/` currently depends on legacy
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Replace legacy public PHP responses with backend-owned JSON endpoints | The backend already owns canonical content and media rules | — Pending |
-| Keep public data split across distinct endpoints | Matches the requested scope and avoids one oversized contract | — Pending |
-| Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | — Pending |
+| Replace legacy public PHP responses with backend-owned JSON endpoints | The backend already owns canonical content and media rules | ✓ Good |
+| Keep public data split across distinct endpoints | Matches the requested scope and avoids one oversized contract | ✓ Good |
+| Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | ✓ Good |
+| Add a repo-native public-catalog verification script | Sandbox networking made localhost validation unreliable | ✓ Good |
+
+## Archived Milestones
+
+<details>
+<summary>v1.1 Public frontend API responses</summary>
+
+Goal:
+Replace the legacy public PHP data sources with distinct backend JSON endpoints that serve the home page and the other public frontend pages.
+
+Target features:
+- Public episodes catalog endpoint for the home page
+- Public episode detail endpoint for `/episode/:id`
+- Public people/contacts endpoint for author and credit rendering
+- Public site metadata endpoint for shared social/email/support links
+- Public supporters endpoint for the guilda/supporters page
+
+</details>
 
 ## Evolution
 
@@ -80,4 +96,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 after milestone v1.1 definition*
+*Last updated: 2026-07-23 after closing milestone v1.1*
