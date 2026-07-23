@@ -1,16 +1,16 @@
 ---
-gsd_state_version: '1.0'
-milestone: v1.1
-milestone_name: Public frontend API responses
-status: idle
-last_updated: 2026-07-23T00:30:00-03:00
+gsd_state_version: 1.0
+milestone: v1.2
+milestone_name: Episode AI authoring API
+status: planning
+last_updated: "2026-07-23T17:07:24.625Z"
 last_activity: 2026-07-23
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,12 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-23)
 
 ## Current Position
 
-Phase: Milestone archive complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Waiting for next milestone definition
-Last activity: 2026-07-23 — Archived milestone v1.1 and reset planning state
-
-Progress: [██████████] 100%
+Status: Defining requirements
+Last activity: 2026-07-23 — Milestone v1.2 started
 
 ## Accumulated Context
 

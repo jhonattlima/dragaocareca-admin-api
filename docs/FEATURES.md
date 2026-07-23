@@ -7,6 +7,7 @@ Use it to record:
 - implemented features
 - active feature work
 - planned feature work
+- deferred follow-ups captured in [TODO.md](./TODO.md)
 
 ## Implemented
 

@@ -33,6 +33,8 @@ The transcription worker also needs:
 
 The current implementation expects a Whisper-family local CLI such as `whisper.cpp`.
 
+If we revisit the transcription runtime later, track that work under [TODO.md](./TODO.md#td-001-re-evaluate-the-local-transcription-engine-before-changing-the-transcript-pipeline) rather than changing the current production path ad hoc.
+
 ## Suggested bootstrap
 
 Run the full bootstrap script from the project root:

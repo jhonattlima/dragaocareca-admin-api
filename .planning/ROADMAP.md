@@ -8,6 +8,7 @@ This roadmap tracks active and future milestone planning only. Shipped milestone
 
 - ✅ **v1.0 Backend platform foundation** - Phases 1-4 (shipped 2026-06-27)
 - ✅ **v1.1 Public frontend API responses** - Phases 5-8 (shipped 2026-07-23, archive: `.planning/milestones/v1.1-ROADMAP.md`)
+- 🚧 **v1.2 Episode AI authoring API** - Phases 9-11 (planned)
 
 <details>
 <summary>✅ v1.0 Backend platform foundation (Phases 1-4) - SHIPPED 2026-06-27</summary>
@@ -77,9 +78,69 @@ Plans:
 
 ## Next Up
 
-No active milestone is defined.
+**v1.2 Episode AI authoring API** — backend-only transcript-to-summary drafting workflow.
 
-Use `$gsd-new-milestone` to define the next milestone and create a fresh `.planning/REQUIREMENTS.md`.
+## 🚧 v1.2 Episode AI authoring API
+
+**Milestone Goal:** Add backend-only summary suggestion support on top of the existing transcript workflow.
+
+## Phases
+
+- [ ] **Phase 9: Summary Runtime and Draft Contract** - Define the backend summary-generation runtime and transcript-driven draft contract.
+- [ ] **Phase 10: Summary Generation Workflow and Admin API** - Implement sequential summary generation, draft storage, and protected API endpoints.
+- [ ] **Phase 11: Summary Quality Verification and Documentation** - Verify the summary workflow, document operations, and prepare for later frontend integration.
+
+## v1.2 Episode AI authoring API (Phase Details)
+
+### Phase 9: Summary Runtime and Draft Contract
+**Goal**: Define the backend summary-generation runtime and transcript-driven draft contract.
+**Depends on**: Phase 8
+**Requirements**: SUMM-01, FLOW-02, OPS-01
+**Success Criteria** (what must be TRUE):
+  1. The backend has a concrete, configuration-driven summary-generation path that reads only the transcript.
+  2. Summary generation is explicitly designed for sequential execution under the VPS memory constraint.
+  3. The draft summary contract is defined without changing the existing transcription engine.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 09-01: Define the transcript-to-summary runtime contract and model configuration.
+- [ ] 09-02: Implement backend draft-summary generation primitives.
+
+### Phase 10: Summary Generation Workflow and Admin API
+**Goal**: Implement sequential summary generation, draft storage, and protected API endpoints.
+**Depends on**: Phase 9
+**Requirements**: SUMM-03, FLOW-01, FLOW-03, API-01, API-02, API-03
+**Success Criteria** (what must be TRUE):
+  1. A protected backend flow can trigger or refresh summary generation for an episode with a transcript.
+  2. Suggested summaries are stored as draft data beside the episode files.
+  3. Backend endpoints expose summary content, status, and failures clearly enough for later frontend integration.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 10-01: Implement sequential summary-generation orchestration and draft storage.
+- [ ] 10-02: Expose protected admin API endpoints for summary generation and retrieval.
+
+### Phase 11: Summary Quality Verification and Documentation
+**Goal**: Verify the summary workflow, document operations, and prepare for later frontend integration.
+**Depends on**: Phase 10
+**Requirements**: SUMM-02, OPS-02, DOC-01
+**Success Criteria** (what must be TRUE):
+  1. Summary outputs are constrained to short Portuguese-BR draft summaries.
+  2. Backend verification includes executable workflow checks in addition to build/type checks.
+  3. Documentation explains how the summary suggestion feature works and how it should be operated on the VPS.
+**Plans**: 2 plans
+
+Plans:
+- [ ] 11-01: Add executable verification for the summary-suggestion workflow.
+- [ ] 11-02: Document the backend summary-suggestion flow and operational constraints.
+
+## Progress
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 9. Summary Runtime and Draft Contract | v1.2 | 0/2 | Not started | - |
+| 10. Summary Generation Workflow and Admin API | v1.2 | 0/2 | Not started | - |
+| 11. Summary Quality Verification and Documentation | v1.2 | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-07-23 after closing milestone v1.1*
+*Last updated: 2026-07-23 after defining milestone v1.2*

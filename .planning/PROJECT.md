@@ -8,11 +8,17 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 - Latest shipped milestone: **v1.1 Public frontend API responses** on 2026-07-23
 - Public API surface now includes episode catalog, episode detail, site metadata, contacts/social/about, and supporters endpoints under `/v1/public/*`
-- Next planning step: define the next milestone with `$gsd-new-milestone`
+- Next planning step: execute **v1.2 Episode AI authoring API**
 
-## Next Milestone Goals
+## Current Milestone: v1.2 Episode AI authoring API
 
-(Not defined yet)
+**Goal:** Add backend-only summary suggestion support so episode metadata can be prepared faster from the existing transcript workflow.
+
+**Target features:**
+- Summary suggestion generation from the transcript `.txt` already produced by the current transcription workflow
+- Sequential transcript-to-summary processing inside `admin-api`
+- Suggested summary persisted in the episode folder for reuse/review before episode save
+- Backend API surface only for this milestone; `admin-web` integration will be a later milestone
 
 ## Core Value
 
@@ -31,7 +37,10 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 
 ### Active
 
-(None currently — milestone v1.1 implementation was reconciled against the codebase on 2026-07-23 and is ready for milestone closeout or a new milestone.)
+- [ ] Generate a suggested episode summary from the existing transcript only.
+- [ ] Keep summary generation sequential and lightweight enough for the 4 GB VPS target.
+- [ ] Persist the suggested summary as backend-managed draft data beside the episode files.
+- [ ] Expose protected backend APIs to trigger, inspect, and reuse summary suggestions.
 
 ### Out of Scope
 
@@ -39,10 +48,13 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - A single mega-endpoint for all public pages — the scope is distinct endpoints by concern.
 - Public frontend redesign work — this milestone provides data contracts, not UI changes.
 - Replacing the admin authentication model — auth bypass and admin auth behavior remain as-is.
+- `admin-web` integration for pre-filling the summary field — defer to a later milestone in the frontend project.
+- Replacing the current Whisper-family transcription engine during v1.2 — tracked as deferred tech debt in `docs/TODO.md`.
+- Generating anything beyond summary text (title, tags, guests, etc.) — summary only in this milestone.
 
 ## Context
 
-The production site at `https://dragaocareca.com/#/` currently depends on legacy endpoints such as `index.php`, `contacts.php`, and `patreon.php`, plus hardcoded frontend config for social links and media URL conventions. The backend already owns the canonical episode data and media layout, so the public frontend should consume backend-defined JSON endpoints instead of reverse-engineering URLs and joining multiple legacy sources.
+The backend already owns episode media layout and transcript generation. Transcripts are written into the episode folder and are now the source input for the next AI feature track: generating a summary suggestion inside `admin-api`. This milestone intentionally focuses on the backend workflow only; the frontend integration that consumes the suggestion will happen later in the frontend project.
 
 ## Constraints
 
@@ -51,6 +63,8 @@ The production site at `https://dragaocareca.com/#/` currently depends on legacy
 - **Compatibility**: Use the existing production site and local `dragaocareca_frontend` repo as the behavioral contract to replace.
 - **Scope**: Prefer minimal backend-focused changes that can be verified with `npm run typecheck` and `npm run build`.
 - **Terminology**: Use `supporters` naming in public contracts instead of `patreon`.
+- **Runtime**: The Hostinger VPS target has 4 GB RAM — AI work must run sequentially and stay lightweight.
+- **Integration**: Reuse the existing transcript workflow rather than redesigning transcription in this milestone.
 
 ## Key Decisions
 
@@ -60,6 +74,7 @@ The production site at `https://dragaocareca.com/#/` currently depends on legacy
 | Keep public data split across distinct endpoints | Matches the requested scope and avoids one oversized contract | ✓ Good |
 | Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | ✓ Good |
 | Add a repo-native public-catalog verification script | Sandbox networking made localhost validation unreliable | ✓ Good |
+| Defer transcription-engine re-evaluation out of v1.2 | Summary generation can proceed on top of the existing transcript pipeline | — Pending |
 
 ## Archived Milestones
 
@@ -96,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-23 after closing milestone v1.1*
+*Last updated: 2026-07-23 after defining milestone v1.2*

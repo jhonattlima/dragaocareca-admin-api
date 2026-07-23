@@ -31,3 +31,8 @@ Implementation plan:
 ## Output
 
 - `transcript.txt`
+
+## Deferred follow-up
+
+- Re-evaluate `whisper.cpp` versus other Whisper-family runtimes later under the 4 GB VPS constraint.
+- See [TODO.md](../../TODO.md#td-001-re-evaluate-the-local-transcription-engine-before-changing-the-transcript-pipeline).

@@ -28,4 +28,4 @@ Generate a suggested summary from the transcript and prefill the episode summary
 
 - This feature intentionally does not transcribe audio.
 - It depends on the transcript feature already being available.
-
+- Re-evaluating the transcription engine is deferred follow-up work tracked in [TODO.md](../../TODO.md#td-001-re-evaluate-the-local-transcription-engine-before-changing-the-transcript-pipeline).
