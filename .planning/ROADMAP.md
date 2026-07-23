@@ -103,8 +103,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01: Define the transcript-to-summary runtime contract and model configuration.
-- [ ] 09-02: Implement backend draft-summary generation primitives.
+- [ ] 09-01: Establish env-driven summary config and episode-level draft-state contract.
+- [ ] 09-02: Implement transcript-only summary runtime primitives and contract verification.
 
 ### Phase 10: Summary Generation Workflow and Admin API
 **Goal**: Implement sequential summary generation, draft storage, and protected API endpoints.
