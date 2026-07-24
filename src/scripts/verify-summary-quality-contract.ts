@@ -107,7 +107,7 @@ const createRuntime = (summaryText: string, capture: RuntimeCapture): SummaryRun
     const promptPath = request.args[promptIndex + 1];
     assert(promptPath, "summary runtime prompt path missing");
     const prompt = fs.readFileSync(promptPath, "utf8");
-    const transcript = prompt.split("TRANSCRIPT:")[1]?.trim();
+    const transcript = prompt.split("TRANSCRIPT:")[1]?.split("\n\nUSER:")[0]?.trim();
     if (!transcript) {
       throw new Error("request transcript missing");
     }

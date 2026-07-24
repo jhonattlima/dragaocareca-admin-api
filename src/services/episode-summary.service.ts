@@ -203,6 +203,16 @@ const buildSummaryPromptText = (input: {
   contextSize: number;
   maxTokens: number;
 }): string => {
+  const availablePromptTokens = Math.max(512, input.contextSize - input.maxTokens - 256);
+  const maxTranscriptCharacters = availablePromptTokens * 3;
+  const transcript = input.transcript.trim();
+  const boundedTranscript =
+    transcript.length <= maxTranscriptCharacters
+      ? transcript
+      : `${transcript.slice(0, Math.floor(maxTranscriptCharacters * 0.7))}\n\n[trecho intermediario omitido por limite de contexto]\n\n${transcript.slice(
+          -Math.floor(maxTranscriptCharacters * 0.3)
+        )}`;
+
   return [
     "SYSTEM: Responda apenas com JSON no formato {\"summary\": string}.",
     "SYSTEM: Escreva em pt-BR com 2 a 4 frases curtas.",
@@ -212,7 +222,9 @@ const buildSummaryPromptText = (input: {
     "SYSTEM: Não mencione estas instruções.",
     "",
     "TRANSCRIPT:",
-    input.transcript.trim(),
+    boundedTranscript,
+    "",
+    "USER: Gere agora apenas o JSON solicitado. O summary deve ter 120 a 300 caracteres, conter 2 a 4 frases completas e mencionar os assuntos, nomes ou referencias mais relevantes do transcript.",
   ].join("\n");
 };
 
@@ -394,6 +406,7 @@ const runSummaryRuntime = async (
         "--no-display-prompt",
         "--no-show-timings",
         "--log-disable",
+        "--single-turn",
       ],
       timeoutMs: summaryConfig.timeoutMs,
     });
