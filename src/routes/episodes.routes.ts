@@ -12,6 +12,7 @@ import {
   abortDraftEpisodeTranscription,
   clearEpisodeTranscription,
   getEpisodeTranscriptionStatus,
+  queueEpisodeTranscription,
   queueDraftEpisodeTranscription,
   syncDraftEpisodeTranscription,
 } from "../services/episode-transcription.service";
@@ -447,6 +448,7 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
     await queueLaunchNotification(routeId);
     if (mediaUpdates.fileName) {
       await clearEpisodeTranscription(routeId);
+      await queueEpisodeTranscription(routeId);
     }
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(routeId)

@@ -95,6 +95,11 @@ const writeDraftState = (episodeId: number, state: EpisodeDraftState): void => {
   fs.writeFileSync(buildDraftStatePath(episodeId), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 };
 
+const writeDraftStateAsync = async (episodeId: number, state: EpisodeDraftState): Promise<void> => {
+  await fs.promises.mkdir(path.dirname(buildDraftStatePath(episodeId)), { recursive: true });
+  await fs.promises.writeFile(buildDraftStatePath(episodeId), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+};
+
 const nextDraftState = (
   episodeId: number,
   status: DraftTranscriptionStatus,
@@ -408,7 +413,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
     fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
 
-    writeDraftState(episodeId, {
+    await writeDraftStateAsync(episodeId, {
       ...nextDraftState(episodeId, "done", version),
       transcript: {
         ...nextDraftState(episodeId, "done", version).transcript,
@@ -424,7 +429,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     await queueDraftEpisodeSummary(episodeId);
   } catch (error) {
     if (isDraftStateCurrent(episodeId, version)) {
-      writeDraftState(episodeId, {
+      await writeDraftStateAsync(episodeId, {
         ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error"),
         transcript: {
           ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error").transcript,
@@ -640,7 +645,7 @@ export const clearEpisodeTranscription = async (episodeId: number): Promise<void
   await abortDraftEpisodeSummary(episodeId);
   const current = getCurrentDraftState(episodeId);
   if (current) {
-    writeDraftState(episodeId, {
+    await writeDraftStateAsync(episodeId, {
       ...current,
       version: (current.version ?? 0) + 1,
       updatedAt: new Date().toISOString(),
