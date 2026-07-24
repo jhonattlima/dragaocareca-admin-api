@@ -74,23 +74,22 @@ const createFakeRuntime = async (): Promise<{ command: string; modelPath: string
 
   await fs.promises.writeFile(modelPath, "fake-model", "utf8");
 
-  const runtimeScript = `#!/usr/bin/env node
+const runtimeScript = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const requestIndex = args.indexOf("--request-file");
-if (requestIndex < 0 || !args[requestIndex + 1]) {
-  console.error("missing request file");
+const promptIndex = args.indexOf("-f");
+if (promptIndex < 0 || !args[promptIndex + 1]) {
+  console.error("missing prompt file");
   process.exit(1);
 }
 
-const requestPath = args[requestIndex + 1];
-const request = JSON.parse(fs.readFileSync(requestPath, "utf8"));
-if (typeof request.prompt !== "string" || !request.prompt.includes("pt-BR")) {
+const prompt = fs.readFileSync(args[promptIndex + 1], "utf8");
+if (!prompt.includes("pt-BR")) {
   console.error("missing pt-BR prompt");
   process.exit(1);
 }
 
-if (typeof request.transcript !== "string" || !request.transcript.trim()) {
+if (!prompt.includes("TRANSCRIPT:") || !prompt.split("TRANSCRIPT:")[1].trim()) {
   console.error("missing transcript");
   process.exit(1);
 }
@@ -165,13 +164,13 @@ const runSuccessCase = async (): Promise<void> => {
     runtime: {
       async execute(request) {
         runtimeCalls.push({ command: request.command, args: request.args });
-        const requestIndex = request.args.indexOf("--request-file");
-        assert(requestIndex >= 0, "runtime missing request-file argument");
-        const requestPath = request.args[requestIndex + 1];
-        assert(requestPath, "runtime missing request file path");
-        const requestBody = JSON.parse(fs.readFileSync(requestPath, "utf8")) as { prompt?: string; transcript?: string };
-        assert(typeof requestBody.prompt === "string" && requestBody.prompt.includes("pt-BR"), "prompt contract missing pt-BR");
-        assert(typeof requestBody.transcript === "string" && requestBody.transcript.includes("RPG"), "transcript contract missing");
+        const promptIndex = request.args.indexOf("-f");
+        assert(promptIndex >= 0, "runtime missing prompt file argument");
+        const promptPath = request.args[promptIndex + 1];
+        assert(promptPath, "runtime missing prompt file path");
+        const prompt = fs.readFileSync(promptPath, "utf8");
+        assert(prompt.includes("pt-BR"), "prompt contract missing pt-BR");
+        assert(prompt.includes("TRANSCRIPT:") && prompt.includes("RPG"), "transcript contract missing");
         return JSON.stringify({
           summary:
             "O episodio discute RPG, games e cultura pop com nomes e referencias claras. O texto fica curto, fiel ao transcript e escrito em pt-BR. O resultado mantem termos pesquisaveis sem virar keyword stuffing.",

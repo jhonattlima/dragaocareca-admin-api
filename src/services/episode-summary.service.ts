@@ -375,22 +375,25 @@ const runSummaryRuntime = async (
   ensureTempRoot();
   const requestDir = fs.mkdtempSync(path.join(tempRoot, "request-"));
   const requestPath = path.join(requestDir, "summary-request.json");
+  const promptPath = path.join(requestDir, "summary-prompt.txt");
 
   try {
     await writeJsonAtomic(requestPath, request);
+    await fs.promises.writeFile(promptPath, request.prompt, "utf8");
     const stdout = await runtime.execute({
       command: summaryConfig.command.trim(),
       args: [
-        "--request-file",
-        requestPath,
-        "--model-path",
+        "-m",
         summaryConfig.modelPath.trim(),
-        "--context-size",
+        "-c",
         String(summaryConfig.contextSize),
-        "--max-tokens",
+        "-n",
         String(summaryConfig.maxTokens),
-        "--prompt-version",
-        summaryConfig.promptVersion,
+        "-f",
+        promptPath,
+        "--no-display-prompt",
+        "--no-show-timings",
+        "--log-disable",
       ],
       timeoutMs: summaryConfig.timeoutMs,
     });

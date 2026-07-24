@@ -102,33 +102,13 @@ const createRuntimeConfig = async (): Promise<SummaryRuntimeConfig> => {
 const createRuntime = (summaryText: string, capture: RuntimeCapture): SummaryRuntimeAdapter => ({
   async execute(request) {
     assert(request.command === process.execPath, "summary runtime command was not propagated");
-    const requestIndex = request.args.indexOf("--request-file");
-    assert(requestIndex >= 0, "summary runtime request file missing");
-    const requestPath = request.args[requestIndex + 1];
-    assert(requestPath, "summary runtime request path missing");
-
-    const parsed = JSON.parse(fs.readFileSync(requestPath, "utf8")) as {
-      episodeId?: number;
-      promptVersion?: string;
-      contextSize?: number;
-      maxTokens?: number;
-      prompt?: string;
-      transcript?: string;
-    };
-
-    const episodeId = parsed.episodeId;
-    const prompt = parsed.prompt;
-    const transcript = parsed.transcript;
-
-    if (typeof episodeId !== "number") {
-      throw new Error("request episodeId missing");
-    }
-
-    if (typeof prompt !== "string") {
-      throw new Error("request prompt missing");
-    }
-
-    if (typeof transcript !== "string") {
+    const promptIndex = request.args.indexOf("-f");
+    assert(promptIndex >= 0, "summary runtime prompt file missing");
+    const promptPath = request.args[promptIndex + 1];
+    assert(promptPath, "summary runtime prompt path missing");
+    const prompt = fs.readFileSync(promptPath, "utf8");
+    const transcript = prompt.split("TRANSCRIPT:")[1]?.trim();
+    if (!transcript) {
       throw new Error("request transcript missing");
     }
 
@@ -137,10 +117,10 @@ const createRuntime = (summaryText: string, capture: RuntimeCapture): SummaryRun
     assert(prompt.includes(transcript.trim()), "prompt is not transcript-only");
 
     capture.requestBody = {
-      episodeId,
-      promptVersion: parsed.promptVersion ?? "",
-      contextSize: parsed.contextSize ?? 0,
-      maxTokens: parsed.maxTokens ?? 0,
+      episodeId: 0,
+      promptVersion: "",
+      contextSize: 0,
+      maxTokens: 0,
       prompt,
       transcript,
     };
