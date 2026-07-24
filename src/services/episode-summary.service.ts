@@ -343,7 +343,7 @@ const buildDraftStateForSummary = (
       version,
       updatedAt: now,
       startedAt: status === "pending" || status === "processing" ? now : currentState?.aiSummary?.startedAt ?? null,
-      finishedAt: status === "done" || status === "error" ? now : currentState?.aiSummary?.finishedAt ?? null,
+      finishedAt: status === "done" || status === "error" ? now : status === "processing" ? null : currentState?.aiSummary?.finishedAt ?? null,
       progress: status === "done" ? 100 : status === "processing" ? 0 : null,
       promptVersion: summaryConfig.promptVersion,
       fileName: buildSummaryFileName(episodeId),
@@ -421,6 +421,22 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
   const summaryConfig = deps.summaryConfig ?? config.summary;
   const runtime = deps.runtime ?? defaultSummaryRuntime;
   const now = deps.now ?? defaultNow;
+  let summaryExecutionTail: Promise<void> = Promise.resolve();
+
+  const runSummaryExclusively = async <T>(task: () => Promise<T>): Promise<T> => {
+    const previous = summaryExecutionTail;
+    let release!: () => void;
+    summaryExecutionTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
 
   const getSummaryConfigurationErrorForRuntime = (): string | null => getSummaryConfigurationErrorForConfig(summaryConfig);
 
@@ -522,8 +538,13 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
     const nextState = buildDraftStateForSummary(episodeId, currentState, version, now(), summaryConfig, "pending", null);
     await writeDraftState(episodeId, nextState);
 
-    void (async (): Promise<void> => {
-      const runningState = buildDraftStateForSummary(episodeId, currentState, version, now(), summaryConfig, "processing", null);
+    void runSummaryExclusively(async (): Promise<void> => {
+      const currentBeforeRun = readDraftState(episodeId);
+      if (!currentBeforeRun || currentBeforeRun.version !== version) {
+        return;
+      }
+
+      const runningState = buildDraftStateForSummary(episodeId, currentBeforeRun, version, now(), summaryConfig, "processing", null);
       runningState.aiSummary.startedAt = now();
       runningState.aiSummary.progress = 0;
       await writeDraftState(episodeId, runningState);
@@ -574,7 +595,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         erroredState.aiSummary.progress = null;
         await writeDraftState(episodeId, erroredState);
       }
-    })().catch((error: unknown) => {
+    }).catch((error: unknown) => {
       console.error(
         `[summary] draft episode=${episodeId} version=${version} failed: ${error instanceof Error ? error.message : String(error)}`
       );
