@@ -372,6 +372,7 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
       return;
     }
 
+    res.setHeader("Cache-Control", "no-store");
     res.json(getEpisodeTranscriptionStatus(episodeId));
   } catch (error) {
     next(error);
@@ -386,6 +387,7 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
       return;
     }
 
+    res.setHeader("Cache-Control", "no-store");
     res.json(getEpisodeDraftSummary(episodeId));
   } catch (error) {
     next(error);
