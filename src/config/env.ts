@@ -35,6 +35,7 @@ export const config = {
     chatId: process.env.TELEGRAM_CHAT_ID ?? "",
     apiBaseUrl: process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org",
     pollIntervalMs: Number(process.env.TELEGRAM_POLL_INTERVAL_MS ?? 60000),
+    ytDlpCommand: process.env.TELEGRAM_YTDLP_COMMAND ?? "yt-dlp",
   },
   spotify: {
     enabled: (process.env.SPOTIFY_METRICS_ENABLED ?? "false").toLowerCase() === "true",
