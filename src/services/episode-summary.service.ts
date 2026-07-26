@@ -167,6 +167,16 @@ const normalizeSummaryDraftText = (raw: string): string => {
       }
     }
   } catch {
+    const jsonSummaryMatches = [...text.matchAll(/\{\s*"summary"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}/g)];
+    const lastJsonSummary = jsonSummaryMatches.at(-1)?.[1];
+    if (lastJsonSummary) {
+      try {
+        text = JSON.parse(`"${lastJsonSummary}"`) as string;
+      } catch {
+        // Fall through to the plain-text cleanup below.
+      }
+    }
+
     const summaryMatch = text.match(/^summary\s*[:=]\s*(.+)$/i);
     if (summaryMatch?.[1]) {
       text = summaryMatch[1].trim();
