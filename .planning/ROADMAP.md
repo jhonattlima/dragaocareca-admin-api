@@ -26,7 +26,13 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 4. Invalid selector shapes/values return `400`, and no request can retrieve staging, backups, state, summary, legacy, or arbitrary filesystem content.
 5. The route remains behind the existing authentication middleware, is described in OpenAPI, and is covered by a built contract verifier alongside typecheck and build validation.
 
-**Plans:** 0/0 plans complete
+**Plans:** 0/4 plans complete
+
+Plans:
+- [ ] 12-01-PLAN.md — Approve the flagged archive dependency before installation.
+- [ ] 12-02-PLAN.md — Install the approved dependency and bootstrap the runnable compiled verifier.
+- [ ] 12-03-PLAN.md — Create and verify the final-only selector/preflight service.
+- [ ] 12-04-PLAN.md — Add the protected ZIP route, OpenAPI contract, and completed verifier.
 
 ## Archive Index
 

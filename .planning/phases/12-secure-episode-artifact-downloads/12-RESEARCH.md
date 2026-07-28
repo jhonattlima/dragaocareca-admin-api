@@ -292,12 +292,12 @@ await archive.finalize();
 | A1 | Express represents a repeated query key as an array in this configuration. | Common Pitfalls | Parser may need to handle an alternative repeated-key representation while still returning `400`. |
 | A2 | `@types/archiver` is needed for the chosen Archiver release. | Standard Stack | Unnecessary install or missing compiler types; check after installing Archiver. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Which ZIP-entry inspection method should the verifier use?**
-   - What we know: No system `unzip` or `zipinfo` command is available, while verifier scripts are intentionally network-free. [VERIFIED: local command] [VERIFIED: codebase grep]
-   - What's unclear: Whether the team accepts a narrow test-only ZIP central-directory reader or prefers a separately vetted reader dependency. [ASSUMED]
-   - Recommendation: Keep the first plan's verification implementation dependency-free if it can inspect only the archive entries it generates; otherwise stop at a human checkpoint before adding any reader package. [ASSUMED]
+   - **Decision:** Use a narrow, dependency-free central-directory reader inside `src/scripts/verify-episode-artifact-downloads.ts`. It reads only the ZIP bytes captured by the verifier's in-memory response and extracts entry names needed to prove the emitted archive contract; it is verifier-only and never participates in production archive generation.
+   - **Failure path:** If the narrow reader cannot reliably inspect the Archiver output, do not add a ZIP-reader package automatically. Stop at a new blocking human package-legitimacy checkpoint, audit the candidate package, and obtain explicit approval before any package-manager mutation.
+   - **Rationale:** No system `unzip` or `zipinfo` command is available, verifier scripts are intentionally network-free, and this bounded reader avoids expanding the runtime or test dependency surface. [VERIFIED: local command] [VERIFIED: codebase grep]
 
 ## Environment Availability
 
