@@ -22,6 +22,7 @@
   "type": "commonjs",
   "dependencies": {
     "@types/multer": "^2.1.0",
+    "archiver": "^8.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
