@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Archiver } from "archiver" with { "resolution-mode": "import" };
 import multer from "multer";
 import { Router } from "express";
 import { config } from "../config/env";
@@ -18,6 +19,11 @@ import {
 } from "../services/episode-transcription.service";
 import { getEpisodeDraftSummary } from "../services/episode-summary.service";
 import {
+  EpisodeArtifactSelectorValidationError,
+  parseEpisodeArtifactSelectors,
+  preflightEpisodeArtifactDownloads,
+} from "../services/episode-artifact-download.service";
+import {
   getEpisodeMediaBackupPath,
   findExistingEpisodeMediaPath,
   getEpisodeMediaFinalPath,
@@ -32,6 +38,15 @@ const queueCoverMosaicRefresh = (): void => {
   void refreshCoverMosaicBackground().catch((error: unknown) => {
     console.warn("Cover mosaic refresh failed", error instanceof Error ? error.message : String(error));
   });
+};
+
+const logArtifactDownload = (details: {
+  episodeId: number;
+  requested: string[];
+  available: string[];
+  missing: string[];
+}): void => {
+  console.info("Episode artifact download", details);
 };
 
 for (const directory of [config.media.episodesDir, config.media.episodesStagingDir, config.media.backupEpisodesDir]) {
@@ -406,6 +421,104 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
     res.setHeader("Cache-Control", "no-store");
     res.json(getEpisodeDraftSummary(episodeId));
   } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, res, next) => {
+  let streaming = false;
+
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      logArtifactDownload({ episodeId, requested: [], available: [], missing: [] });
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+
+    let selectedArtifacts;
+    try {
+      selectedArtifacts = parseEpisodeArtifactSelectors(req.query.artifacts);
+    } catch (error) {
+      if (error instanceof EpisodeArtifactSelectorValidationError) {
+        logArtifactDownload({ episodeId, requested: [], available: [], missing: [] });
+        res.status(400).json({ message: error.message });
+        return;
+      }
+      throw error;
+    }
+
+    const episode = episodeRepository.findByEpisodeId(episodeId);
+    if (!episode) {
+      logArtifactDownload({
+        episodeId,
+        requested: selectedArtifacts.map((artifact) => artifact.selector),
+        available: [],
+        missing: [],
+      });
+      res.status(404).json({ message: "Episode not found" });
+      return;
+    }
+
+    const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
+    logArtifactDownload({
+      episodeId,
+      requested: preflight.requested,
+      available: preflight.available.map((artifact) => artifact.selector),
+      missing: preflight.missing,
+    });
+
+    if (preflight.available.length === 0) {
+      res.status(404).json({ message: "No requested artifacts found" });
+      return;
+    }
+
+    const archiver = require("archiver") as (format: "zip") => Archiver;
+    res.status(200);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
+    if (preflight.missing.length > 0) {
+      res.setHeader("X-Missing-Artifacts", preflight.missing.join(","));
+    }
+
+    const archive = archiver("zip");
+    const logArchiveFailure = (event: "warning" | "error"): void => {
+      console.error("Episode artifact archive failure", {
+        event,
+        episodeId,
+        requested: preflight.requested,
+        available: preflight.available.map((artifact) => artifact.selector),
+        missing: preflight.missing,
+      });
+    };
+
+    archive.on("warning", () => logArchiveFailure("warning"));
+    archive.on("error", (error: Error) => {
+      logArchiveFailure("error");
+      if (!res.destroyed) {
+        res.destroy(error);
+      }
+    });
+    streaming = true;
+    archive.pipe(res);
+
+    for (const artifact of preflight.available) {
+      archive.file(artifact.path, { name: artifact.archiveEntryName });
+    }
+
+    void archive.finalize().catch((error: unknown) => {
+      logArchiveFailure("error");
+      if (!res.destroyed) {
+        res.destroy(error as Error);
+      }
+    });
+  } catch (error) {
+    if (streaming) {
+      if (!res.destroyed) {
+        res.destroy(error as Error);
+      }
+      return;
+    }
     next(error);
   }
 });
