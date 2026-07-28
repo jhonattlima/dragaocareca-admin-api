@@ -5,15 +5,15 @@ milestone_name: Episode Artifact Downloads
 current_phase: 12
 current_phase_name: Secure Episode Artifact Downloads
 status: executing
-stopped_at: Completed 12-02-PLAN.md
-last_updated: "2026-07-28T23:10:46.553Z"
+stopped_at: Completed 12-03-PLAN.md
+last_updated: "2026-07-28T23:15:29.810Z"
 last_activity: 2026-07-28
 last_activity_desc: Phase 12 execution started
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 ## Current Position
 
 Phase: 12 (Secure Episode Artifact Downloads) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-07-28 — Phase 12 execution started
 
@@ -50,6 +50,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Plan 12-02 may install archiver; @types/archiver remains conditional on TypeScript compiler evidence.
 - [Phase ?]: Install only approved archiver; defer @types/archiver until a future import produces a compiler declaration error.
 - [Phase ?]: Run artifact-download verification as a compiled development script before selector or preflight implementation.
+- [Phase ?]: Use lstat so only regular canonical final files can enter artifact preflight; symlinks and directories are treated as missing.
+- [Phase ?]: Accept duplicate selector values only within one valid CSV and normalize them into the fixed catalog order; reject repeated query keys.
 
 ### Pending Todos
 
@@ -75,8 +77,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-28T23:10:46.546Z
-Stopped at: Completed 12-02-PLAN.md
+Last session: 2026-07-28T23:15:29.804Z
+Stopped at: Completed 12-03-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -85,3 +87,4 @@ Resume file: None
 |------|----------|-------|-------|
 | Phase 12 P01 | 0 | 1 tasks | 1 files |
 | Phase 12 P02 | 3min | 2 tasks | 3 files |
+| Phase 12 P03 | 1min | 2 tasks | 2 files |
