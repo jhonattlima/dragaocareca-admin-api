@@ -28,7 +28,8 @@ Main modules:
 - `src/database/repositories/episode.repository.ts`: episode persistence
 - `src/routes/*.routes.ts`: auth/feed/episode routes
 - `src/services/feed.service.ts`: RSS feed generation
-- `src/services/episode-summary.service.ts`: transcript-only summary drafting, draft-state promotion, and summary runtime verification
+- `src/services/episode-summary.service.ts`: transcript-only Gemini/Llama summary drafting, shared draft-state updates, and summary runtime verification
+- `src/services/episode-transcription.service.ts`: sequential Gemini/internal transcription and summary handoff
 - `src/services/launch-notification.service.ts`: launch queue and Telegram delivery workflow
 - `src/services/telegram.service.ts`: Telegram Bot API sender
 - `src/middleware/auth.middleware.ts`: JWT auth + dev bypass
@@ -188,20 +189,36 @@ Docs:
 
 ### 8.5 Episode Transcription
 - `EPISODE_TRANSCRIPTION_ENABLED`
+- `EPISODE_TRANSCRIPTION_PROVIDER` (`internal` or `gemini`)
 - `EPISODE_TRANSCRIPTION_COMMAND`
 - `EPISODE_TRANSCRIPTION_MODEL_PATH`
 - `EPISODE_TRANSCRIPTION_LANGUAGE`
 - `EPISODE_TRANSCRIPTION_TIMEOUT_MS`
 - `EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS`
+- `EPISODE_TRANSCRIPTION_GEMINI_MODEL`
+- `EPISODE_TRANSCRIPTION_GEMINI_MAX_OUTPUT_TOKENS`
+- `EPISODE_TRANSCRIPTION_GEMINI_THINKING_LEVEL`
 
 ### 8.6 Episode Summary Drafting
 - `EPISODE_SUMMARY_ENABLED`
+- `EPISODE_SUMMARY_PROVIDER` (`llama` or `gemini`)
 - `EPISODE_SUMMARY_COMMAND`
 - `EPISODE_SUMMARY_MODEL_PATH`
 - `EPISODE_SUMMARY_CONTEXT_SIZE`
 - `EPISODE_SUMMARY_MAX_TOKENS`
 - `EPISODE_SUMMARY_TIMEOUT_MS`
 - `EPISODE_SUMMARY_PROMPT_VERSION`
+- `GEMINI_API_KEY`
+- `EPISODE_SUMMARY_GEMINI_MODEL`
+- `GEMINI_API_BASE_URL`
+- `EPISODE_SUMMARY_GEMINI_THINKING_LEVEL`
+
+### 8.7 Episode AI Workflow
+- Uploading audio queues transcription. The selected provider is `EPISODE_TRANSCRIPTION_PROVIDER` (`gemini` or `internal`).
+- A completed transcript is written to `transcript.txt`; `episode.state.json` records the transcript state and automatically queues summary generation.
+- The selected summary provider is `EPISODE_SUMMARY_PROVIDER` (`gemini` or `llama`). Both providers run sequentially after transcription, suitable for the 4 GB VPS constraint.
+- The generated `summary.txt` is a suggestion only. It is exposed through `GET /v1/episodes/:episodeId/episodes-generated-summary` and never overwrites the final SQLite `episodes.summary` value.
+- Prompt version `4` uses the production feed's editorial structure as a static style reference while keeping the current transcript as the sole source of facts.
 
 ## 9. Local Runbook
 ### 9.1 Backend
@@ -233,6 +250,7 @@ npm run import:episodes -- "E:/Jhonatt/Development/Projects/node/dragaocareca-ad
 - Frontend layout has been modernized with old-project section structure, but not all legacy subfeatures are reintroduced yet.
 - Spotify metrics are exposed through an authenticated backend snapshot endpoint, not directly from the frontend.
 - YouTube metrics use authenticated YouTube Analytics access plus daily SQLite sampling for range comparisons.
+- Episode transcription and summary generation are backend-owned, sequential jobs. Gemini avoids local model memory for the configured remote steps, but requires outbound access and a configured API key.
 
 ## 12. Documentation Layout
 - Master feature registry lives at `docs/FEATURES.md`
@@ -275,10 +293,10 @@ Install these on the VPS before enabling the full stack:
 - `ffmpeg`
 - `python3`
 - Python package `spotifyconnector` for the Spotify metrics script
-- `whisper.cpp` or a compatible transcription binary exposed through `EPISODE_TRANSCRIPTION_COMMAND`
-- a Whisper model file such as `ggml-small.bin` for `EPISODE_TRANSCRIPTION_MODEL_PATH`
-- a local summary runtime command exposed through `EPISODE_SUMMARY_COMMAND`
-- a model file for summary drafting exposed through `EPISODE_SUMMARY_MODEL_PATH`
+- either Gemini transcription (`EPISODE_TRANSCRIPTION_PROVIDER=gemini` with `GEMINI_API_KEY`) or `whisper.cpp`/a compatible binary exposed through `EPISODE_TRANSCRIPTION_COMMAND`
+- a Whisper model file such as `ggml-small.bin` for `EPISODE_TRANSCRIPTION_MODEL_PATH` only when `EPISODE_TRANSCRIPTION_PROVIDER=internal`
+- either a Gemini API key (`GEMINI_API_KEY`) with `EPISODE_SUMMARY_PROVIDER=gemini`, or a local summary runtime command exposed through `EPISODE_SUMMARY_COMMAND`
+- a local model file for summary drafting only when `EPISODE_SUMMARY_PROVIDER=llama`, exposed through `EPISODE_SUMMARY_MODEL_PATH`
 - a writable filesystem location for `data/database/`, `data/media/`, and `data/generated/`
 - enough memory headroom to run transcription and summary jobs sequentially on a 4 GB VPS
 
@@ -287,7 +305,7 @@ Optional but recommended for production:
 - a process manager such as systemd, PM2, or Docker
 - a dedicated virtual environment for Python dependencies
 
-Summary workers are transcript-driven and should stay sequential on the target VPS. The summary job runs after the transcript is ready, reads `transcript.txt`, and writes the draft `summary.txt` plus the shared `episode.state.json` metadata. Do not plan parallel transcription and summary execution on the same 4 GB host.
+Summary workers are transcript-driven and should stay sequential on the target VPS. The summary job runs after the transcript is ready, reads `transcript.txt`, and writes the draft `summary.txt` plus the shared `episode.state.json` metadata. Do not plan parallel transcription and summary execution on the same 4 GB host. With the Gemini provider, summary generation is remote and does not load the VPS CPU or RAM beyond the HTTP request.
 
 Bootstrap references:
 

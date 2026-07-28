@@ -240,17 +240,33 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
 
         const updated = episodeRepository.updateMedia(episodeId, { [spec.field]: fileName });
 
-        const refreshed = episodeRepository.findByEpisodeId(episodeId);
         if (spec.kind === "audio") {
-          console.info(`[episodes] audio staged for existing episode=${episodeId}; draft transcription not used`);
+          await clearEpisodeTranscription(episodeId);
+          const draftState = await queueDraftEpisodeTranscription(episodeId);
+          console.info(
+            `[transcription] queued episode=${episodeId} version=${draftState.version} status=${draftState.status} at=${new Date().toISOString()}`
+          );
+          const refreshed = episodeRepository.findByEpisodeId(episodeId);
+          res.json({
+            ...(refreshed ?? updated ?? currentEpisode),
+            [spec.field]: fileName,
+            transcriptStatus: draftState.status,
+            transcriptUpdatedAt: new Date().toISOString(),
+            transcriptStartedAt: draftState.status === "processing" ? new Date().toISOString() : undefined,
+            transcriptProgress: draftState.progress ?? (draftState.status === "done" ? 100 : 0),
+            transcriptError: draftState.error ?? undefined,
+            message:
+              draftState.status === "error"
+                ? `Audio staged, but transcription could not start: ${draftState.error ?? "unknown error"}`
+                : "Audio staged and transcription started.",
+          });
+          return;
         }
+        const refreshed = episodeRepository.findByEpisodeId(episodeId);
         res.json({
           ...(refreshed ?? updated ?? currentEpisode),
           [spec.field]: fileName,
-          message:
-            spec.kind === "audio"
-              ? "Audio staged for an existing episode. Draft transcription is only used for new episodes."
-              : "File staged.",
+          message: "File staged.",
         });
       } catch (error) {
         if (file) {

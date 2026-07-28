@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import {
   abortDraftEpisodeSummary,
   buildSummaryPrompt,
@@ -25,12 +25,17 @@ type RuntimeMode = "success" | "missingTranscript" | "runtimeConfigError";
 
 type SummaryRuntimeConfig = {
   enabled: boolean;
+  provider: string;
   command: string;
   modelPath: string;
   contextSize: number;
   maxTokens: number;
   timeoutMs: number;
   promptVersion: string;
+  geminiApiKey: string;
+  geminiModel: string;
+  geminiApiBaseUrl: string;
+  geminiThinkingLevel: string;
 };
 
 type ContractResult = {
@@ -96,9 +101,14 @@ if (!prompt.includes("TRANSCRIPT:") || !prompt.split("TRANSCRIPT:")[1].trim()) {
 
 const summary = [
   "O episodio discute temas concretos presentes no transcript, com nomes, jogos e referencias que ajudam a descoberta.",
-  "O texto permanece curto, fiel ao conteudo e escrito em pt-BR sem cair em keyword stuffing.",
-  "A leitura final continua util para a equipe editorial e para quem procura o episodio por assunto."
-].join(" ");
+  "O texto permanece fiel ao conteudo e escrito em pt-BR sem cair em keyword stuffing.",
+  "A leitura final organiza os assuntos para quem procura o episodio por temas especificos.",
+  "",
+  "Destaques:",
+  "- RPG, games e cultura pop",
+  "- Referencias e nomes citados no episodio",
+  "- Termos concretos para descoberta"
+].join("\\n");
 
 process.stdout.write(JSON.stringify({ summary }) + "\\n");
 `;
@@ -113,12 +123,17 @@ const createRuntimeConfig = async (): Promise<SummaryRuntimeConfig> => {
   const fakeRuntime = await createFakeRuntime();
   return {
     enabled: true,
+    provider: "llama",
     command: fakeRuntime.command,
     modelPath: fakeRuntime.modelPath,
     contextSize: 4096,
     maxTokens: 256,
     timeoutMs: 15000,
     promptVersion: "1",
+    geminiApiKey: "",
+    geminiModel: "gemini-3.6-flash",
+    geminiApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    geminiThinkingLevel: "low",
   };
 };
 
@@ -156,7 +171,7 @@ const makeTranscriptFixture = (
   ].join(" ");
 
 const runSuccessCase = async (): Promise<void> => {
-  const episodeId = Number(`9${randomUUID().replace(/-/g, "").slice(0, 10)}`);
+  const episodeId = randomInt(1_000_000_000, 2_000_000_000);
   const summaryConfig = await createRuntimeConfig();
   const runtimeCalls: Array<{ command: string; args: string[] }> = [];
   const service = createEpisodeSummaryService({
@@ -173,7 +188,7 @@ const runSuccessCase = async (): Promise<void> => {
         assert(prompt.includes("TRANSCRIPT:") && prompt.includes("RPG"), "transcript contract missing");
         return JSON.stringify({
           summary:
-            "O episodio discute RPG, games e cultura pop com nomes e referencias claras. O texto fica curto, fiel ao transcript e escrito em pt-BR. O resultado mantem termos pesquisaveis sem virar keyword stuffing.",
+            "🎧 No episódio de hoje do Dragão Careca:\n\nComo RPG, games e cultura pop podem se encontrar na mesma conversa?\n\nNeste episódio, a guilda discute RPG, games e cultura pop com nomes e referências claras. A conversa mantém o foco em assuntos concretos, sem transformar termos pesquisáveis em keyword stuffing. É uma descrição para quem procura o episódio por temas nerds e referências citadas no papo.\n\n📜 Destaques do episódio:\n• RPG, games e cultura pop\n• nomes e referências citadas\n• termos concretos para busca\n\n🎮 Se você gosta de RPG, games e cultura pop, este episódio é pra você.",
         });
       },
     },
@@ -225,8 +240,89 @@ const runSuccessCase = async (): Promise<void> => {
   await cleanupEpisodeWorkspace(episodeId);
 };
 
+const runGeminiSuccessCase = async (): Promise<void> => {
+  const episodeId = randomInt(1_000_000_000, 2_000_000_000);
+  const transcript = makeTranscriptFixture(episodeId);
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  const summary = [
+    "🎧 No episódio de hoje do Dragão Careca:",
+    "",
+    "Como RPG, games e cultura pop se misturam nas conversas da guilda?",
+    "",
+    "Neste episódio, a conversa passa por RPG, games e cultura pop, reunindo referências que fazem parte do assunto principal.",
+    "Os convidados retomam nomes e franquias citados durante o papo, mantendo o foco em temas concretos para quem procura o episódio.",
+    "A descrição organiza os pontos centrais sem transformar a conversa em uma lista de falas ou promessas exageradas.",
+    "",
+    "📜 Destaques do episódio:",
+    "• RPG, games e cultura pop",
+    "• franquias e referências citadas",
+    "• temas concretos para descoberta",
+    "",
+    "🎮 Se você gosta de RPG, games e cultura pop, este episódio é pra você.",
+  ].join("\n");
+
+  globalThis.fetch = async (input, init) => {
+    requestCount += 1;
+    assert(String(input).endsWith("/models/gemini-3.6-flash:generateContent"), "Gemini endpoint was not used");
+    const requestHeaders = new Headers(init?.headers);
+    assert(requestHeaders.get("x-goog-api-key") === "test-gemini-key", "Gemini API key header missing");
+    const body = JSON.parse(String(init?.body)) as {
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+      generationConfig?: {
+        thinkingConfig?: { thinkingLevel?: string };
+        responseFormat?: { text?: { mimeType?: string; schema?: { properties?: Record<string, unknown> } } };
+      };
+    };
+    const prompt = body.contents?.[0]?.parts?.[0]?.text ?? "";
+    assert(prompt.includes("OBJETIVO EDITORIAL E SEO"), "Gemini prompt missing SEO instructions");
+    assert(prompt.includes("REGRAS DE FIDELIDADE"), "Gemini prompt missing fidelity instructions");
+    assert(prompt.includes("REFERENCIA DE ESTILO DO FEED DE PRODUCAO"), "Gemini prompt missing feed style reference");
+    assert(prompt.includes("Destaques do episódio"), "Gemini prompt missing production highlights format");
+    assert(prompt.includes(transcript), "Gemini prompt must contain the complete transcript");
+    assert(body.generationConfig?.thinkingConfig?.thinkingLevel === "low", "Gemini thinking level missing");
+    assert(body.generationConfig?.responseFormat?.text?.mimeType === "APPLICATION_JSON", "Gemini JSON response format missing");
+    assert("summary" in (body.generationConfig?.responseFormat?.text?.schema?.properties ?? {}), "Gemini summary schema missing");
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ summary }) }] } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const service = createEpisodeSummaryService({
+      summaryConfig: {
+        enabled: true,
+        provider: "gemini",
+        command: "",
+        modelPath: "",
+        contextSize: 4096,
+        maxTokens: 256,
+        timeoutMs: 15000,
+        promptVersion: "3",
+        geminiApiKey: "test-gemini-key",
+        geminiModel: "gemini-3.6-flash",
+        geminiApiBaseUrl: "https://gemini.test/v1beta",
+        geminiThinkingLevel: "low",
+      },
+    });
+
+    await cleanupEpisodeWorkspace(episodeId);
+    await writeTranscriptFixture(episodeId, transcript);
+    const queueResult = await service.queueDraftEpisodeSummary(episodeId);
+    assert(queueResult.queued, "expected Gemini summary queue to start");
+    await waitForStatus(service, episodeId, ["done", "error"]);
+    const snapshot = service.getEpisodeDraftSummaryStatus(episodeId);
+    assert(snapshot.status === "done", `expected Gemini done status, got ${snapshot.status}`);
+    assert(requestCount === 1, `expected one Gemini request, got ${requestCount}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await cleanupEpisodeWorkspace(episodeId);
+  }
+};
+
 const runMissingTranscriptCase = async (): Promise<void> => {
-  const episodeId = Number(`8${randomUUID().replace(/-/g, "").slice(0, 10)}`);
+  const episodeId = randomInt(1_000_000_000, 2_000_000_000);
   const summaryConfig = await createRuntimeConfig();
   const service = createEpisodeSummaryService({ summaryConfig });
 
@@ -243,16 +339,21 @@ const runMissingTranscriptCase = async (): Promise<void> => {
 };
 
 const runRuntimeConfigErrorCase = async (): Promise<void> => {
-  const episodeId = Number(`7${randomUUID().replace(/-/g, "").slice(0, 10)}`);
+  const episodeId = randomInt(1_000_000_000, 2_000_000_000);
   const service = createEpisodeSummaryService({
     summaryConfig: {
       enabled: true,
+      provider: "llama",
       command: "",
       modelPath: "",
       contextSize: 4096,
       maxTokens: 256,
       timeoutMs: 15000,
       promptVersion: "1",
+      geminiApiKey: "",
+      geminiModel: "gemini-3.6-flash",
+      geminiApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      geminiThinkingLevel: "low",
     },
   });
 
@@ -291,6 +392,7 @@ const main = async (): Promise<void> => {
   }
 
   await runSuccessCase();
+  await runGeminiSuccessCase();
   console.log("verified summary runtime contract");
 };
 

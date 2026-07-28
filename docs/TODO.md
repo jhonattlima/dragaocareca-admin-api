@@ -13,8 +13,8 @@ Durable backlog for follow-up work that should not block the current milestone.
 
 **Current implementation**
 
-- Episode transcription currently uses `whisper.cpp` through `EPISODE_TRANSCRIPTION_COMMAND`
-- The baseline model path is `ggml-small.bin`
+- Episode transcription supports `internal` (`whisper.cpp`) and `gemini` providers through `EPISODE_TRANSCRIPTION_PROVIDER`
+- The current development configuration selects Gemini for transcript generation; `ggml-small.bin` remains the local baseline when `internal` is selected
 - The backend writes `transcript.txt` into the episode folder and uses that transcript as the input for later AI features
 
 **Why revisit later**
@@ -25,9 +25,9 @@ Durable backlog for follow-up work that should not block the current milestone.
 
 **Current decision**
 
-- Keep the existing Whisper-family transcription workflow for now
-- Do not change the transcription engine during v1.2
-- Proceed with summary generation using the transcript that the current workflow already produces
+- Keep the local Whisper-family workflow available as a fallback
+- Compare production quality, cost, and rate limits before making Gemini the permanent production default
+- Proceed with Gemini summary generation from the transcript that the workflow already produces; the summary remains a separate draft artifact
 
 **When to revisit**
 
@@ -50,4 +50,3 @@ Durable backlog for follow-up work that should not block the current milestone.
 - [Episode Summary Suggestion](./features/004-episode-summary-suggestion/README.md)
 - [Episode Summary Suggestion Plan](./features/004-episode-summary-suggestion/PLAN.md)
 - [VPS Setup](./VPS-SETUP.md)
-
