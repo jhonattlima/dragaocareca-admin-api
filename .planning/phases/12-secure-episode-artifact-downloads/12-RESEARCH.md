@@ -56,8 +56,8 @@ None — discussion stayed within phase scope.
 - Do not move scheduling/feed rules to frontend.
 - Respect auth toggles: backend `.env.dev`: `AUTH_BYPASS`; frontend env: `authBypass`.
 - Prefer minimal-scope changes and verify with `npm run typecheck` / `npm run build`.
-- Telegram launch notifications remain in their listed backend service/worker locations.
-- Use the documented WSL paths for the API and admin-web workspaces.
+- Telegram launch notifications live in the backend service: queue + dedupe in `src/services/launch-notification.service.ts`; delivery in `src/services/telegram.service.ts`; startup worker in `src/workers/launch-notification.worker.ts`.
+- Use the WSL workspace layout: `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api` and `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`.
 
 ## Summary
 
