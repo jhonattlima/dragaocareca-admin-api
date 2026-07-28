@@ -20,6 +20,7 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 **Requirements:** ART-01, ART-02, ART-03, ART-04, ART-05, ART-06, ART-07
 
 **Success criteria:**
+
 1. An authenticated request without `artifacts` downloads a ZIP containing every available final file among `episode`, `trailer`, `transcript`, `image`, and `image-low`.
 2. An authenticated request with valid `artifacts` values downloads only those available final artifacts, with deterministic English selector names and canonical ZIP entry names.
 3. If none of the requested artifacts exists, the endpoint returns `404`; if only some exist, it returns a ZIP with `X-Missing-Artifacts` listing exactly the unavailable requested selectors.
@@ -29,9 +30,20 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 **Plans:** 0/4 plans complete
 
 Plans:
+**Wave 1**
+
 - [ ] 12-01-PLAN.md — Approve the flagged archive dependency before installation.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12-02-PLAN.md — Install the approved dependency and bootstrap the runnable compiled verifier.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12-03-PLAN.md — Create and verify the final-only selector/preflight service.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 12-04-PLAN.md — Add the protected ZIP route, OpenAPI contract, and completed verifier.
 
 ## Archive Index
@@ -43,12 +55,15 @@ Plans:
 <summary>✅ v1.2 archived phases (9-11)</summary>
 
 ### Phase 09: Summary Runtime and Draft Contract
+
 **Status:** Complete. Archived artifacts: [09 summary](./milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-02-SUMMARY.md).
 
 ### Phase 10: Summary Generation Workflow and Admin API
+
 **Status:** Complete. Archived artifacts: [10 summary](./milestones/v1.2-phases/10-summary-generation-workflow-and-admin-api/10-02-SUMMARY.md).
 
 ### Phase 11: Summary Quality Verification and Documentation
+
 **Status:** Complete. Archived artifacts: [11 summary](./milestones/v1.2-phases/11-summary-quality-verification-and-documentation/11-02-SUMMARY.md).
 
 </details>
