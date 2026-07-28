@@ -11,6 +11,8 @@
     "start:verify": "NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/server.js",
     "typecheck": "tsc --noEmit",
     "verify:public-episodes": "NODE_ENV=development node dist/scripts/verify-public-episodes.js",
+    "verify:summary-runtime-contract": "NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js",
+    "verify:summary-quality-contract": "NODE_ENV=development node dist/scripts/verify-summary-quality-contract.js",
     "import:episodes": "tsx src/scripts/import-legacy-episodes.ts",
     "spotify:metrics": "npm run build && NODE_ENV=development node dist/scripts/spotify-metrics.js"
   },

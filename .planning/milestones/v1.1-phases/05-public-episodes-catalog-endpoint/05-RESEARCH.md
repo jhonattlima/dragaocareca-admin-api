@@ -63,7 +63,7 @@ The safest implementation is to keep repository querying unchanged, add a dedica
 
 ## Project Constraints (from AGENTS.md)
 
-- Read `docs/SDD.md` before implementation; it is the source of truth for architecture and constraints. [VERIFIED: codebase grep]
+- Read `.planning/PROJECT.md` before implementation; it is the source of truth for architecture and constraints. [VERIFIED: codebase grep]
 - Keep feed generation server-side. [VERIFIED: codebase grep]
 - Do not move scheduling/feed rules to the frontend. [VERIFIED: codebase grep]
 - Respect auth toggles: backend `.env.dev` uses `AUTH_BYPASS`, frontend env uses `authBypass`. [VERIFIED: codebase grep]
@@ -372,7 +372,7 @@ app.use("/media", express.static(config.media.storageRoot));
 
 ### Primary (HIGH confidence)
 - Project codebase files listed in Phase 5 context, especially `src/app.ts`, `src/routes/feed.routes.ts`, `src/database/repositories/episode.repository.ts`, `src/services/feed.service.ts`, `src/services/episode-media-layout.service.ts`, and the referenced frontend catalog files. [VERIFIED: codebase grep]
-- `.planning/PROJECT.md`, `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, `.planning/STATE.md`, and `.planning/phases/05-public-episodes-catalog-endpoint/05-CONTEXT.md`. [VERIFIED: codebase grep]
+- `.planning/PROJECT.md`, `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, `.planning/STATE.md`, and `.planning/milestones/v1.1-phases/05-public-episodes-catalog-endpoint/05-CONTEXT.md`. [VERIFIED: codebase grep]
 
 ### Secondary (MEDIUM confidence)
 - Express static files guide: https://expressjs.com/en/starter/static-files/ [CITED: https://expressjs.com/en/starter/static-files/]

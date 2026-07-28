@@ -58,6 +58,21 @@ export const getEpisodeMediaDraftTranscriptPath = (episodeId: number): string =>
 export const getEpisodeMediaDraftTranscriptionStatePath = (episodeId: number): string =>
   path.join(getEpisodeMediaStagingDirectory(episodeId), "transcript.state.json");
 
+export const getEpisodeMediaDraftSummaryPath = (episodeId: number): string =>
+  path.join(getEpisodeMediaStagingDirectory(episodeId), "summary.txt");
+
+export const getEpisodeMediaDraftStatePath = (episodeId: number): string =>
+  path.join(getEpisodeMediaStagingDirectory(episodeId), "episode.state.json");
+
+export const getEpisodeMediaLegacyDraftTranscriptionStatePath = (episodeId: number): string =>
+  path.join(getEpisodeMediaStagingDirectory(episodeId), "transcript.state.json");
+
+export const getEpisodeMediaSummaryPath = (episodeId: number): string =>
+  path.resolve(getEpisodeMediaDirectory(episodeId), "summary.txt");
+
+export const getEpisodeMediaSummaryRelativePath = (episodeId: number): string =>
+  path.posix.join("episodes", String(episodeId), "summary.txt");
+
 export const getEpisodeMediaFinalPath = (episodeId: number, kind: EpisodeMediaKind): string =>
   path.resolve(getEpisodeMediaDirectory(episodeId), kindFileName(episodeId, kind));
 
@@ -106,6 +121,7 @@ export const findExistingEpisodeMediaPath = async (
     }
     candidates.push(path.join(legacyMediaDirectories[kind], legacyFileName(episodeId, kind)));
   } else {
+    candidates.push(getEpisodeMediaDraftTranscriptPath(episodeId));
     candidates.push(getEpisodeMediaFinalPath(episodeId, kind));
     candidates.push(path.join(config.media.episodesDir, `episode_${episodeId}.txt`));
     candidates.push(path.join(config.media.episodesDir, `${episodeId}.txt`));

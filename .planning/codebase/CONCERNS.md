@@ -24,12 +24,6 @@
 - Workaround: reuse `xmlSnapshot` when available; compare outputs using files under `data/feed/`
 - Root cause: part of the item formatting still depends on legacy snapshot quality and rebuilt XML mapping
 
-**Feature planning files were deleted locally while new feature work exists:**
-- Symptoms: repo status already shows deleted `.planning/*.md` and older `features/*.md` plus newer docs/features work
-- Trigger: running planning/onboarding workflows on the current working tree
-- Workaround: keep new codebase-map work isolated to `.planning/codebase/`
-- Root cause: planning artifacts in this repo are already in a transitional state
-
 ## Security Considerations
 
 **Development auth bypass can disable protection entirely:**

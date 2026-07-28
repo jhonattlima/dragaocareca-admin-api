@@ -1,15 +1,15 @@
 ---
-gsd_state_version: '1.0'
-milestone: v1.1
-milestone_name: Public frontend API responses
-status: idle
-last_updated: 2026-07-23T00:30:00-03:00
-last_activity: 2026-07-23
+gsd_state_version: 1.0
+milestone: v1.2
+milestone_name: Episode AI authoring API
+status: shipped
+last_updated: "2026-07-28T00:00:00.000Z"
+last_activity: 2026-07-28
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
   percent: 100
 ---
 
@@ -17,19 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-23)
+See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Milestone v1.1 archived; next milestone not yet defined
+**Current focus:** Milestone v1.2 shipped; next milestone not yet defined
 
 ## Current Position
 
-Phase: Milestone archive complete
+Phase: Complete
 Plan: —
-Status: Waiting for next milestone definition
-Last activity: 2026-07-23 — Archived milestone v1.1 and reset planning state
-
-Progress: [██████████] 100%
+Status: Milestone shipped
+Last activity: 2026-07-28 — Gemini transcript/summary hardening, verification, and documentation consolidation completed
 
 ## Accumulated Context
 
@@ -41,6 +39,11 @@ Recent decisions affecting current work:
 - [Milestone v1.1]: Replace legacy PHP public responses with backend-owned JSON endpoints.
 - [Milestone v1.1]: Keep public data split across distinct endpoints.
 - [Milestone v1.1]: Rename public support terminology from `patreon` to `supporters`.
+- [Milestone v1.2]: Keep summary generation transcript-only and sequential.
+- [Milestone v1.2]: Store suggested summaries as draft artifacts beside the episode files.
+- [Milestone v1.2]: Expose summary drafts through a protected backend read endpoint.
+- [Post-v1.2]: Use Gemini as the current configured provider for transcript and summary generation; preserve internal/llama fallbacks.
+- [Post-v1.2]: Use production-feed structure as a static summary style reference, never as factual generation context.
 
 ### Pending Todos
 
@@ -57,9 +60,15 @@ Recent decisions affecting current work:
 |----------|------|--------|-------------|
 | artifact | Missing original GSD phase directories/summaries for Phases 6-8 | acknowledged at milestone closeout | 2026-07-23 |
 | verification | Milestone closeout used reconciled code/docs evidence for Phases 6-8 rather than preserved phase-level verification artifacts | acknowledged at milestone closeout | 2026-07-23 |
+| feature | admin-web summary-field prefill | deferred to later frontend milestone | 2026-07-23 |
+| technology | production transcription-provider evaluation (Gemini vs `whisper.cpp` / `faster-whisper`) | deferred tech debt | 2026-07-28 |
+
+### TD-001: Validate the permanent transcription provider
+
+The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemini`; `internal` keeps the local `whisper.cpp` path available as a fallback. Before making Gemini the permanent production default, compare quality, cost, quota, privacy, long-episode latency, and memory behavior on the 4 GB Hostinger VPS. Revisit when transcription becomes slow, unreliable, or cost-sensitive.
 
 ## Session Continuity
 
-Last session: 2026-07-23 00:30
-Stopped at: Milestone v1.1 archived; waiting for next milestone definition
+Last session: 2026-07-28
+Stopped at: Completed documentation consolidation and GSD planning-structure review; waiting for next milestone definition
 Resume file: None

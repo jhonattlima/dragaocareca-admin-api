@@ -6,13 +6,9 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 ## Current State
 
-- Latest shipped milestone: **v1.1 Public frontend API responses** on 2026-07-23
-- Public API surface now includes episode catalog, episode detail, site metadata, contacts/social/about, and supporters endpoints under `/v1/public/*`
+- Latest shipped milestone: **v1.2 Episode AI authoring API** on 2026-07-23, with Gemini provider hardening completed on 2026-07-28
+- Transcript and summary generation can use Gemini or local fallback providers, run sequentially for the 4 GB VPS target, and expose a protected read contract for future frontend reuse
 - Next planning step: define the next milestone with `$gsd-new-milestone`
-
-## Next Milestone Goals
-
-(Not defined yet)
 
 ## Core Value
 
@@ -28,10 +24,16 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Public episodes catalog and episode-detail endpoints are implemented under `/v1/public/episodes` and `/v1/public/episodes/:episodeId`.
 - Public site endpoints are implemented under `/v1/public/about`, `/v1/public/contact`, `/v1/public/social`, `/v1/public/contacts`, and `/v1/public/site-config`.
 - Public supporters data is implemented under `/v1/public/supporters` with `supporters` terminology and documented in the backend OpenAPI/feature docs.
+- The backend can generate a suggested episode summary from transcript-only input.
+- Summary generation stays sequential and lightweight enough for the 4 GB VPS target.
+- Suggested summary drafts are persisted beside the episode files and kept separate from the final saved episode summary.
+- Protected backend APIs expose the summary suggestion and generation state.
+- Gemini summary output follows the production feed's editorial structure while using the current transcript as its only factual source.
 
 ### Active
 
-(None currently — milestone v1.1 implementation was reconciled against the codebase on 2026-07-23 and is ready for milestone closeout or a new milestone.)
+- No active v1.2 requirements remain.
+- Define the next milestone requirements with `$gsd-new-milestone`.
 
 ### Out of Scope
 
@@ -39,10 +41,13 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - A single mega-endpoint for all public pages — the scope is distinct endpoints by concern.
 - Public frontend redesign work — this milestone provides data contracts, not UI changes.
 - Replacing the admin authentication model — auth bypass and admin auth behavior remain as-is.
+- `admin-web` integration for pre-filling the summary field — defer to a later milestone in the frontend project.
+- Finalizing Gemini as the permanent transcription provider — tracked in `.planning/STATE.md` as deferred technical debt.
+- Generating anything beyond summary text (title, tags, guests, etc.) — summary only in this milestone.
 
 ## Context
 
-The production site at `https://dragaocareca.com/#/` currently depends on legacy endpoints such as `index.php`, `contacts.php`, and `patreon.php`, plus hardcoded frontend config for social links and media URL conventions. The backend already owns the canonical episode data and media layout, so the public frontend should consume backend-defined JSON endpoints instead of reverse-engineering URLs and joining multiple legacy sources.
+The backend already owns episode media layout and transcript generation. Transcripts are written into the episode folder and are now the source input for the next AI feature track: generating a summary suggestion inside `admin-api`. This milestone intentionally focuses on the backend workflow only; the frontend integration that consumes the suggestion will happen later in the frontend project.
 
 ## Constraints
 
@@ -51,6 +56,8 @@ The production site at `https://dragaocareca.com/#/` currently depends on legacy
 - **Compatibility**: Use the existing production site and local `dragaocareca_frontend` repo as the behavioral contract to replace.
 - **Scope**: Prefer minimal backend-focused changes that can be verified with `npm run typecheck` and `npm run build`.
 - **Terminology**: Use `supporters` naming in public contracts instead of `patreon`.
+- **Runtime**: The Hostinger VPS target has 4 GB RAM — AI work must run sequentially and stay lightweight.
+- **Integration**: Reuse the existing transcript workflow rather than redesigning transcription in this milestone.
 
 ## Key Decisions
 
@@ -60,6 +67,12 @@ The production site at `https://dragaocareca.com/#/` currently depends on legacy
 | Keep public data split across distinct endpoints | Matches the requested scope and avoids one oversized contract | ✓ Good |
 | Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | ✓ Good |
 | Add a repo-native public-catalog verification script | Sandbox networking made localhost validation unreliable | ✓ Good |
+| Defer transcription-engine re-evaluation out of v1.2 | Summary generation can proceed on top of the existing transcript pipeline | — Pending |
+| Keep summary generation transcript-only and sequential | The 4 GB VPS target requires lightweight, backend-owned processing | ✓ Good |
+| Store suggested summaries as draft artifacts beside the episode files | This preserves operator review/editability before save | ✓ Good |
+| Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
+| Use Gemini for the current transcript and summary configuration, retaining local providers as fallbacks | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback | Under evaluation |
+| Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
 
 ## Archived Milestones
 
@@ -75,6 +88,20 @@ Target features:
 - Public people/contacts endpoint for author and credit rendering
 - Public site metadata endpoint for shared social/email/support links
 - Public supporters endpoint for the guilda/supporters page
+
+</details>
+
+<details>
+<summary>v1.2 Episode AI authoring API</summary>
+
+Goal:
+Add backend-only summary suggestion support on top of the existing transcript workflow.
+
+Target features:
+- Summary suggestion generation from transcript-only input
+- Sequential transcript-to-summary processing inside `admin-api`
+- Suggested summary persisted in the episode folder for reuse/review before episode save
+- Backend API surface only for this milestone; `admin-web` integration deferred
 
 </details>
 
@@ -96,4 +123,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-23 after closing milestone v1.1*
+*Last updated: 2026-07-28 after consolidating the Gemini AI-authoring follow-up*

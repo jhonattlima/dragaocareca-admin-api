@@ -1,8 +1,9 @@
 # AGENTS.md - dragaocareca-admin-api
 
 ## Mandatory Context Loading
-1. Read `docs/SDD.md` before any implementation.
-2. Use SDD as source of truth for architecture and constraints.
+1. Read `.planning/PROJECT.md` and `.planning/STATE.md` before any implementation.
+2. Read the relevant `.planning/codebase/*.md` files before changing an established subsystem.
+3. Use `.planning/` as the source of truth for architecture, constraints, milestone history, and deferred work.
 
 ## High-Signal Rules
 - Keep feed generation server-side.

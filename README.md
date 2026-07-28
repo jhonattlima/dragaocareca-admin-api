@@ -2,9 +2,11 @@
 
 ## Context First (AI / Agent)
 Before making changes, read:
-- `docs/SDD.md`
+- `.planning/PROJECT.md`
+- `.planning/STATE.md`
+- the relevant files under `.planning/codebase/`
 
-This is the canonical compressed context for architecture, auth toggles, feed rules, env vars, and runbook.
+`.planning/` is the canonical project context. It contains architecture, constraints, milestones, deferred work, and the VPS runbook.
 
 Node.js backend for Dragao Careca admin, with SQLite episode storage, dynamic RSS feed generation, and shared media/reference assets.
 

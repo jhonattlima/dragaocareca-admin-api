@@ -1,6 +1,6 @@
 # Technology Stack
 
-**Analysis Date:** 2026-07-21
+**Analysis Date:** 2026-07-28
 
 ## Languages
 
@@ -57,7 +57,7 @@
 
 **Environment:**
 - `.env.dev`, `.env.production`, `.env.example` drive runtime configuration
-- `src/config/env.ts` centralizes feature flags, feed metadata, media paths, auth, Telegram, Spotify, YouTube, and transcription settings
+- `src/config/env.ts` centralizes feature flags, feed metadata, media paths, auth, Telegram, Spotify, YouTube, transcription, and summary settings
 - Feed settings are hard-required at startup through `required(...)` in `src/config/env.ts`
 
 **Build:**
@@ -74,9 +74,10 @@
 **Production:**
 - Long-running Node.js host or VPS
 - Writable SQLite and media storage paths
-- Env-var based secret/config injection for Google auth, JWT, Telegram, Spotify, YouTube, feed metadata, and transcription
+- Env-var based secret/config injection for Google auth, JWT, Telegram, Spotify, YouTube, Gemini, feed metadata, transcription, and summary generation
+- Episode AI providers: Gemini Files API / `gemini-3.6-flash` or local Whisper/Llama fallbacks; jobs are sequential for the 4 GB VPS target
 
 ---
 
-*Stack analysis: 2026-07-21*
+*Stack analysis: 2026-07-28*
 *Update after major dependency changes*

@@ -7,26 +7,49 @@ import { config } from "../config/env";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
 import {
   getEpisodeMediaDraftTranscriptPath,
-  getEpisodeMediaDraftTranscriptionStatePath,
+  getEpisodeMediaDraftStatePath,
+  getEpisodeMediaLegacyDraftTranscriptionStatePath,
+  getEpisodeMediaStagingPath,
   findExistingEpisodeMediaPath,
   getEpisodeMediaFinalPath,
   getEpisodeMediaRelativePath,
 } from "./episode-media-layout.service";
+import {
+  abortDraftEpisodeSummary,
+  queueDraftEpisodeSummary,
+} from "./episode-summary.service";
+import {
+  createAiSummaryDraftState,
+  createTranscriptDraftState,
+  normalizeEpisodeDraftState,
+  type EpisodeDraftState,
+  type EpisodeDraftStepStatus,
+} from "../schemas/episode-draft-state";
 
 const execFileAsync = promisify(execFile);
 const tempRoot = path.resolve(os.tmpdir(), "dragaocareca-episode-transcription");
 const chunkDurationSeconds = 60;
 
-type DraftTranscriptionStatus = "idle" | "pending" | "processing" | "done" | "error";
+type DraftTranscriptionStatus = EpisodeDraftStepStatus;
 
-type DraftTranscriptionState = {
-  episodeId: number;
-  version: number;
-  status: DraftTranscriptionStatus;
-  updatedAt: string;
-  startedAt?: string | null;
-  progress?: number | null;
-  error?: string | null;
+type GeminiFile = {
+  name?: string;
+  uri?: string;
+  mimeType?: string;
+  state?: string;
+};
+
+type GeminiResponse = {
+  file?: GeminiFile;
+  candidates?: Array<{
+    finishReason?: string;
+    content?: {
+      parts?: Array<{ text?: string; thought?: boolean }>;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
 };
 
 export type EpisodeTranscriptionStatusSnapshot = {
@@ -43,6 +66,7 @@ const ensureTempRoot = (): void => {
 };
 
 const transcriptFileName = (episodeId: number): string => getEpisodeMediaRelativePath(episodeId, "transcript");
+const transcriptSummaryFileName = (episodeId: number): string => path.posix.join("episodes", String(episodeId), "summary.txt");
 const buildAudioPath = async (episode: EpisodeRow): Promise<string> => {
   const resolved = await findExistingEpisodeMediaPath(episode.episodeId, "audio", episode.fileName ?? null);
   if (resolved) {
@@ -53,55 +77,89 @@ const buildAudioPath = async (episode: EpisodeRow): Promise<string> => {
 };
 const buildTranscriptPath = (episodeId: number): string => getEpisodeMediaFinalPath(episodeId, "transcript");
 const buildDraftTranscriptPath = (episodeId: number): string => getEpisodeMediaDraftTranscriptPath(episodeId);
-const buildDraftStatePath = (episodeId: number): string => getEpisodeMediaDraftTranscriptionStatePath(episodeId);
+const buildDraftStatePath = (episodeId: number): string => getEpisodeMediaDraftStatePath(episodeId);
+const buildLegacyDraftStatePath = (episodeId: number): string => getEpisodeMediaLegacyDraftTranscriptionStatePath(episodeId);
 
-const readDraftState = (episodeId: number): DraftTranscriptionState | null => {
-  const statePath = buildDraftStatePath(episodeId);
+const readDraftStateFromPath = (statePath: string, episodeId: number): EpisodeDraftState | null => {
   if (!fs.existsSync(statePath)) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8")) as DraftTranscriptionState;
-    if (
-      !parsed ||
-      parsed.episodeId !== episodeId ||
-      typeof parsed.version !== "number" ||
-      typeof parsed.status !== "string"
-    ) {
+    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8")) as unknown;
+    const normalized = normalizeEpisodeDraftState(parsed, episodeId);
+    if (!normalized) {
       return null;
     }
 
     return {
-      episodeId,
-      version: parsed.version,
-      status: parsed.status,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
-      startedAt: typeof parsed.startedAt === "string" ? parsed.startedAt : null,
-      progress: typeof parsed.progress === "number" && Number.isFinite(parsed.progress) ? parsed.progress : null,
-      error: typeof parsed.error === "string" ? parsed.error : null,
+      ...normalized,
+      transcript: {
+        ...normalized.transcript,
+        fileName: normalized.transcript.fileName ?? transcriptFileName(episodeId),
+      },
+      aiSummary: {
+        ...normalized.aiSummary,
+        summaryFileName: normalized.aiSummary.summaryFileName ?? transcriptSummaryFileName(episodeId),
+      },
     };
   } catch {
     return null;
   }
 };
 
-const writeDraftState = (episodeId: number, state: DraftTranscriptionState): void => {
+const readDraftState = (episodeId: number): EpisodeDraftState | null =>
+  readDraftStateFromPath(buildDraftStatePath(episodeId), episodeId) ?? readDraftStateFromPath(buildLegacyDraftStatePath(episodeId), episodeId);
+
+const writeDraftState = (episodeId: number, state: EpisodeDraftState): void => {
   fs.mkdirSync(path.dirname(buildDraftStatePath(episodeId)), { recursive: true });
   fs.writeFileSync(buildDraftStatePath(episodeId), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 };
 
-const nextDraftState = (episodeId: number, status: DraftTranscriptionStatus, version?: number, error?: string | null): DraftTranscriptionState => ({
-  episodeId,
-  version: version ?? (readDraftState(episodeId)?.version ?? 0) + 1,
-  status,
-  updatedAt: new Date().toISOString(),
-  startedAt: status === "processing" ? readDraftState(episodeId)?.startedAt ?? new Date().toISOString() : null,
-  progress: status === "done" ? 100 : status === "processing" ? readDraftState(episodeId)?.progress ?? 0 : null,
-  error: error ?? null,
-});
+const writeDraftStateAsync = async (episodeId: number, state: EpisodeDraftState): Promise<void> => {
+  await fs.promises.mkdir(path.dirname(buildDraftStatePath(episodeId)), { recursive: true });
+  await fs.promises.writeFile(buildDraftStatePath(episodeId), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+};
 
-const getCurrentDraftState = (episodeId: number): DraftTranscriptionState | null => readDraftState(episodeId);
+const nextDraftState = (
+  episodeId: number,
+  status: DraftTranscriptionStatus,
+  version?: number,
+  error?: string | null
+): EpisodeDraftState => {
+  const current = readDraftState(episodeId);
+  const nextVersion = version ?? (current?.version ?? 0) + 1;
+  const now = new Date().toISOString();
+  const transcript = current?.transcript ?? createTranscriptDraftState();
+
+  return {
+    episodeId,
+    version: nextVersion,
+    updatedAt: now,
+    transcript: {
+      ...transcript,
+      status,
+      version: nextVersion,
+      updatedAt: now,
+      startedAt: status === "processing" ? transcript.startedAt ?? now : status === "pending" ? null : transcript.startedAt ?? null,
+      finishedAt: status === "done" ? now : status === "error" ? now : transcript.finishedAt ?? null,
+      progress: status === "done" ? 100 : status === "processing" ? transcript.progress ?? 0 : null,
+      promptVersion: transcript.promptVersion ?? null,
+      fileName: transcriptFileName(episodeId),
+      error: error ?? null,
+    },
+    aiSummary: current?.aiSummary
+      ? {
+          ...current.aiSummary,
+          summaryFileName: current.aiSummary.summaryFileName ?? transcriptSummaryFileName(episodeId),
+        }
+      : createAiSummaryDraftState({
+          summaryFileName: transcriptSummaryFileName(episodeId),
+        }),
+  };
+};
+
+const getCurrentDraftState = (episodeId: number): EpisodeDraftState | null => readDraftState(episodeId);
 
 const isDraftStateCurrent = (episodeId: number, version: number): boolean => {
   const current = getCurrentDraftState(episodeId);
@@ -113,6 +171,21 @@ const getTranscriptionConfigurationError = (): string | null => {
     return "Transcription is disabled";
   }
 
+  const provider = config.transcription.provider.trim().toLowerCase();
+  if (provider === "gemini") {
+    if (!config.summary.geminiApiKey.trim()) {
+      return "GEMINI_API_KEY is not configured";
+    }
+    if (!config.transcription.geminiModel.trim()) {
+      return "EPISODE_TRANSCRIPTION_GEMINI_MODEL is not configured";
+    }
+    return null;
+  }
+
+  if (provider !== "internal") {
+    return `Unsupported EPISODE_TRANSCRIPTION_PROVIDER: ${config.transcription.provider}`;
+  }
+
   if (!config.transcription.command.trim()) {
     return "EPISODE_TRANSCRIPTION_COMMAND is not configured";
   }
@@ -121,11 +194,11 @@ const getTranscriptionConfigurationError = (): string | null => {
     return "EPISODE_TRANSCRIPTION_MODEL_PATH is not configured";
   }
 
-  const commandCheck = spawnSync("bash", ["-lc", `command -v ${config.transcription.command.trim()} >/dev/null 2>&1`], {
+  const commandCheck = spawnSync(config.transcription.command.trim(), ["--version"], {
     stdio: "ignore",
   });
 
-  if (commandCheck.status !== 0) {
+  if (commandCheck.error && (commandCheck.error as NodeJS.ErrnoException).code === "ENOENT") {
     return `Transcription command not found: ${config.transcription.command.trim()}`;
   }
 
@@ -182,6 +255,138 @@ const normalizeTranscriptText = (raw: string): string => {
 };
 
 const clampProgress = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));
+
+const readGeminiResponse = async (response: Response): Promise<GeminiResponse> => {
+  const body = (await response.json().catch(() => ({}))) as GeminiResponse;
+  if (!response.ok) {
+    throw new Error(`Gemini request failed (${response.status}): ${body.error?.message ?? "unknown error"}`);
+  }
+  return body;
+};
+
+const transcribeAudioWithGemini = async (
+  audioPath: string,
+  onProgress?: (progress: number) => void
+): Promise<string> => {
+  if (!fs.existsSync(audioPath)) {
+    throw new Error(`Audio file not found: ${path.basename(audioPath)}`);
+  }
+
+  const apiKey = config.summary.geminiApiKey.trim();
+  const baseUrl = config.summary.geminiApiBaseUrl.replace(/\/+$/, "");
+  const uploadBaseUrl = new URL(baseUrl).origin;
+  const audioBytes = await fs.promises.readFile(audioPath);
+  const mimeType = "audio/mpeg";
+  let remoteFileName: string | null = null;
+
+  try {
+    onProgress?.(5);
+    console.info(`[transcription] provider=gemini upload started audioBytes=${audioBytes.length}`);
+    const uploadStart = await fetch(`${uploadBaseUrl}/upload/v1beta/files`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": apiKey,
+        "x-goog-upload-protocol": "resumable",
+        "x-goog-upload-command": "start",
+        "x-goog-upload-header-content-length": String(audioBytes.length),
+        "x-goog-upload-header-content-type": mimeType,
+      },
+      body: JSON.stringify({ file: { displayName: `episode-transcription-${Date.now()}.mp3` } }),
+      signal: AbortSignal.timeout(config.transcription.timeoutMs),
+    });
+    const uploadUrl = uploadStart.headers.get("x-goog-upload-url");
+    if (!uploadStart.ok || !uploadUrl) {
+      throw new Error(`Gemini upload initialization failed (${uploadStart.status})`);
+    }
+
+    let uploaded = await readGeminiResponse(
+      await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "content-length": String(audioBytes.length),
+          "x-goog-upload-command": "upload, finalize",
+          "x-goog-upload-offset": "0",
+        },
+        body: audioBytes,
+        signal: AbortSignal.timeout(config.transcription.timeoutMs),
+      })
+    );
+    remoteFileName = uploaded.file?.name ?? null;
+    onProgress?.(30);
+    console.info(`[transcription] provider=gemini upload finalized state=${uploaded.file?.state ?? "unknown"}`);
+
+    for (let attempt = 0; uploaded.file?.state === "PROCESSING" && attempt < 30; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      uploaded = await readGeminiResponse(
+        await fetch(`${baseUrl}/${uploaded.file.name}`, {
+          headers: { "x-goog-api-key": apiKey },
+          signal: AbortSignal.timeout(config.transcription.timeoutMs),
+        })
+      );
+      onProgress?.(clampProgress(30 + ((attempt + 1) / 30) * 25));
+    }
+
+    if (uploaded.file?.state && uploaded.file.state !== "ACTIVE") {
+      throw new Error(`Gemini audio file is not active: ${uploaded.file.state}`);
+    }
+    if (!uploaded.file?.uri || !uploaded.file.mimeType) {
+      throw new Error("Gemini upload did not return an audio file URI");
+    }
+
+    onProgress?.(60);
+    console.info(`[transcription] provider=gemini generation started model=${config.transcription.geminiModel}`);
+    const generated = await readGeminiResponse(
+      await fetch(`${baseUrl}/models/${encodeURIComponent(config.transcription.geminiModel.trim())}:generateContent`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              {
+                text:
+                  `Transcreva integralmente o áudio em ${config.transcription.language === "pt" ? "pt-BR" : config.transcription.language}. ` +
+                  "Preserve nomes próprios, interrupções relevantes e linguagem coloquial. Não resuma, não explique e não adicione título.",
+              },
+              { fileData: { mimeType: uploaded.file.mimeType, fileUri: uploaded.file.uri } },
+            ],
+          }],
+          generationConfig: {
+            thinkingConfig: { thinkingLevel: config.transcription.geminiThinkingLevel.trim().toLowerCase() },
+            maxOutputTokens: config.transcription.geminiMaxOutputTokens,
+          },
+        }),
+        signal: AbortSignal.timeout(config.transcription.timeoutMs),
+      })
+    );
+    const candidate = generated.candidates?.[0];
+    const rawTranscript = candidate?.content?.parts
+      ?.filter((part) => !part.thought)
+      .map((part) => part.text ?? "")
+      .join("")
+      .trim();
+    console.info(
+      `[transcription] provider=gemini generation finished finishReason=${candidate?.finishReason ?? "unknown"} chars=${rawTranscript?.length ?? 0}`
+    );
+    const transcript = normalizeTranscriptText(rawTranscript ?? "");
+    if (!transcript) {
+      throw new Error("Gemini transcription completed without output");
+    }
+
+    onProgress?.(95);
+    return transcript;
+  } finally {
+    if (remoteFileName) {
+      await fetch(`${baseUrl}/${remoteFileName}`, {
+        method: "DELETE",
+        headers: { "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(config.transcription.timeoutMs),
+      }).catch(() => undefined);
+      console.info("[transcription] provider=gemini temporary audio deleted");
+    }
+  }
+};
 
 const convertToWav = async (inputPath: string, outputPath: string): Promise<void> => {
   await execFileAsync(
@@ -327,9 +532,18 @@ const transcribeAudioInChunks = async (
   }
 };
 
+const transcribeAudio = async (audioPath: string, onProgress?: (progress: number) => void): Promise<string> => {
+  const provider = config.transcription.provider.trim().toLowerCase();
+  if (provider === "gemini") {
+    return transcribeAudioWithGemini(audioPath, onProgress);
+  }
+
+  return transcribeAudioInChunks(audioPath, onProgress);
+};
+
 const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
   const audioPath = await buildAudioPath(episode);
-  const transcript = await transcribeAudioInChunks(audioPath);
+  const transcript = await transcribeAudio(audioPath);
   const transcriptPath = buildTranscriptPath(episode.episodeId);
   fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
   fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
@@ -337,7 +551,10 @@ const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
 };
 
 const transcribeDraftEpisode = async (episodeId: number, version: number): Promise<void> => {
-  const audioPath = await findExistingEpisodeMediaPath(episodeId, "audio");
+  const stagedAudioPath = getEpisodeMediaStagingPath(episodeId, "audio");
+  const audioPath = fs.existsSync(stagedAudioPath)
+    ? stagedAudioPath
+    : await findExistingEpisodeMediaPath(episodeId, "audio");
   if (!audioPath) {
     console.info(`[transcription] draft episode=${episodeId} version=${version} audio not found`);
     return;
@@ -348,19 +565,23 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     return;
   }
 
-  console.info(`[transcription] draft episode=${episodeId} version=${version} started`);
+  const startedAt = Date.now();
+  console.info(`[transcription] started episode=${episodeId} version=${version} at=${new Date().toISOString()}`);
 
   writeDraftState(episodeId, nextDraftState(episodeId, "processing", version));
 
   try {
-    const transcript = await transcribeAudioInChunks(audioPath, (progress) => {
+    const transcript = await transcribeAudio(audioPath, (progress) => {
       if (!isDraftStateCurrent(episodeId, version)) {
         return;
       }
 
       writeDraftState(episodeId, {
         ...nextDraftState(episodeId, "processing", version),
-        progress,
+        transcript: {
+          ...nextDraftState(episodeId, "processing", version).transcript,
+          progress,
+        },
       });
     });
 
@@ -373,29 +594,39 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
     fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
 
-    writeDraftState(episodeId, {
+    await writeDraftStateAsync(episodeId, {
       ...nextDraftState(episodeId, "done", version),
-      progress: 100,
+      transcript: {
+        ...nextDraftState(episodeId, "done", version).transcript,
+        progress: 100,
+      },
     });
-    console.info(`[transcription] draft episode=${episodeId} version=${version} done`);
+    console.info(
+      `[transcription] finished episode=${episodeId} version=${version} durationMs=${Date.now() - startedAt} at=${new Date().toISOString()}`
+    );
 
     if (episodeExists) {
       episodeRepository.markTranscriptionDone(episodeId, getEpisodeMediaRelativePath(episodeId, "transcript"));
     }
+
+    await queueDraftEpisodeSummary(episodeId);
   } catch (error) {
     if (isDraftStateCurrent(episodeId, version)) {
-      writeDraftState(episodeId, {
+      await writeDraftStateAsync(episodeId, {
         ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error"),
-        progress: null,
+        transcript: {
+          ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error").transcript,
+          progress: null,
+        },
       });
       console.warn(
-        `[transcription] draft episode=${episodeId} version=${version} failed: ${error instanceof Error ? error.message : String(error)}`
+        `[transcription] failed episode=${episodeId} version=${version} durationMs=${Date.now() - startedAt} at=${new Date().toISOString()} error=${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
 };
 
-const isTranscriptionReady = (): boolean => config.transcription.enabled && Boolean(config.transcription.command.trim()) && Boolean(config.transcription.modelPath.trim());
+const isTranscriptionReady = (): boolean => getTranscriptionConfigurationError() === null;
 
 export const queueEpisodeTranscription = async (
   episodeId: number
@@ -428,32 +659,32 @@ export const queueDraftEpisodeTranscription = async (
     return {
       queued: false,
       version: next.version,
-      status: next.status,
-      progress: next.progress ?? null,
-      error: next.error,
+      status: next.transcript.status,
+      progress: next.transcript.progress ?? null,
+      error: next.transcript.error,
     };
   }
 
   const current = getCurrentDraftState(episodeId);
   const next = nextDraftState(episodeId, "pending", (current?.version ?? 0) + 1);
   writeDraftState(episodeId, next);
-  console.info(`[transcription] draft queued episode=${episodeId} version=${next.version}`);
+  console.info(`[transcription] queued episode=${episodeId} version=${next.version} at=${new Date().toISOString()}`);
 
   void transcribeDraftEpisode(episodeId, next.version);
 
   return {
     queued: true,
     version: next.version,
-    status: next.status,
-    progress: next.progress ?? null,
-    error: next.error,
+    status: next.transcript.status,
+    progress: next.transcript.progress ?? null,
+    error: next.transcript.error,
   };
 };
 
 export const abortDraftEpisodeTranscription = async (episodeId: number): Promise<void> => {
   const current = getCurrentDraftState(episodeId);
   const next = nextDraftState(episodeId, "idle", (current?.version ?? 0) + 1);
-  next.progress = null;
+  next.transcript.progress = null;
   writeDraftState(episodeId, next);
   console.info(`[transcription] draft aborted episode=${episodeId} version=${next.version}`);
   await fs.promises.rm(buildDraftTranscriptPath(episodeId), { force: true }).catch(() => undefined);
@@ -474,18 +705,23 @@ export const syncDraftEpisodeTranscription = async (episodeId: number): Promise<
   const finalTranscriptPath = buildTranscriptPath(episodeId);
   const transcriptFileName = getEpisodeMediaRelativePath(episodeId, "transcript");
 
-  if (current.status === "done" && fs.existsSync(draftTranscriptPath)) {
+  if (current.transcript.status === "done" && fs.existsSync(draftTranscriptPath)) {
     fs.mkdirSync(path.dirname(finalTranscriptPath), { recursive: true });
     fs.copyFileSync(draftTranscriptPath, finalTranscriptPath);
     await fs.promises.rm(draftTranscriptPath, { force: true }).catch(() => undefined);
-    return { status: "done", transcriptFileName, transcriptStartedAt: current.startedAt ?? null, progress: 100 };
+    return {
+      status: "done",
+      transcriptFileName,
+      transcriptStartedAt: current.transcript.startedAt ?? null,
+      progress: 100,
+    };
   }
 
   return {
-    status: current.status,
-    transcriptFileName: current.status === "done" ? transcriptFileName : null,
-    transcriptStartedAt: current.startedAt ?? null,
-    progress: current.progress ?? (current.status === "done" ? 100 : null),
+    status: current.transcript.status,
+    transcriptFileName: current.transcript.status === "done" ? transcriptFileName : null,
+    transcriptStartedAt: current.transcript.startedAt ?? null,
+    progress: current.transcript.progress ?? (current.transcript.status === "done" ? 100 : null),
   };
 };
 
@@ -515,12 +751,12 @@ export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscr
   }
 
   return {
-    status: draft.status,
-    transcriptFileName: draft.status === "done" ? getEpisodeMediaRelativePath(episodeId, "transcript") : null,
-    transcriptUpdatedAt: draft.updatedAt,
-    transcriptStartedAt: draft.startedAt ?? null,
-    progress: draft.progress ?? (draft.status === "done" ? 100 : null),
-    transcriptError: draft.error ?? null,
+    status: draft.transcript.status,
+    transcriptFileName: draft.transcript.status === "done" ? getEpisodeMediaRelativePath(episodeId, "transcript") : null,
+    transcriptUpdatedAt: draft.transcript.updatedAt,
+    transcriptStartedAt: draft.transcript.startedAt ?? null,
+    progress: draft.transcript.progress ?? (draft.transcript.status === "done" ? 100 : null),
+    transcriptError: draft.transcript.error ?? null,
   };
 };
 
@@ -544,6 +780,7 @@ export const deliverEpisodeTranscription = async (
     episodeRepository.markTranscriptionProcessing(episodeId);
     const transcriptPath = await transcribeEpisode(episode);
     episodeRepository.markTranscriptionDone(episodeId, path.basename(transcriptPath));
+    await queueDraftEpisodeSummary(episodeId);
     return { delivered: true, alreadyDone: false };
   } catch (error) {
     episodeRepository.markTranscriptionError(episodeId, error instanceof Error ? error.message : "Unknown transcription error");
@@ -587,6 +824,26 @@ export const clearEpisodeTranscription = async (episodeId: number): Promise<void
   const transcriptPath = await findExistingEpisodeMediaPath(episodeId, "transcript", episode.transcriptFileName ?? null);
   if (transcriptPath) {
     await fs.promises.rm(transcriptPath, { force: true }).catch(() => undefined);
+  }
+  await abortDraftEpisodeSummary(episodeId);
+  const current = getCurrentDraftState(episodeId);
+  if (current) {
+    await writeDraftStateAsync(episodeId, {
+      ...current,
+      version: (current.version ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      transcript: {
+        ...current.transcript,
+        status: "idle",
+        version: (current.version ?? 0) + 1,
+        updatedAt: new Date().toISOString(),
+        startedAt: null,
+        finishedAt: null,
+        progress: null,
+        error: null,
+        fileName: null,
+      },
+    });
   }
   episodeRepository.clearTranscription(episodeId);
 };

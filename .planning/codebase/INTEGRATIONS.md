@@ -1,6 +1,6 @@
 # External Integrations
 
-**Analysis Date:** 2026-07-21
+**Analysis Date:** 2026-07-28
 
 ## APIs & External Services
 
@@ -15,6 +15,13 @@
   - Client: custom HTTP integration in `src/services/telegram.service.ts`
   - Auth: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   - Queue/orchestration: `src/services/launch-notification.service.ts`
+
+**Episode AI:**
+- Gemini API - optional audio transcription and summary drafting
+  - Transcription: temporary Files API upload followed by `gemini-3.6-flash` in `src/services/episode-transcription.service.ts`
+  - Summary: structured JSON generation through `gemini-3.6-flash` in `src/services/episode-summary.service.ts`
+  - Auth: `GEMINI_API_KEY`
+  - Provider switches: `EPISODE_TRANSCRIPTION_PROVIDER`, `EPISODE_SUMMARY_PROVIDER`
 
 **Analytics:**
 - Spotify podcaster metrics endpoint
@@ -68,7 +75,7 @@
 ## CI/CD & Deployment
 
 **Hosting:**
-- VPS-style deployment implied by `docs/VPS-SETUP.md`, `requirements-vps.txt`, and `scripts/*.sh`
+- VPS-style deployment documented in `.planning/codebase/OPERATIONS.md`, with `requirements-vps.txt` and `scripts/*.sh`
 - Production runs compiled Node output from `dist/`
 
 **CI Pipeline:**
@@ -96,5 +103,5 @@
 
 ---
 
-*Integration audit: 2026-07-21*
+*Integration audit: 2026-07-28*
 *Update when adding/removing external services*

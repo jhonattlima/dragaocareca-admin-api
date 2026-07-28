@@ -16,7 +16,7 @@ tech-stack:
   patterns: [app-level public route registration, route smoke verification]
 key-files:
   created:
-    - .planning/phases/05-public-episodes-catalog-endpoint/05-VALIDATION.md
+    - .planning/milestones/v1.1-phases/05-public-episodes-catalog-endpoint/05-VALIDATION.md
   modified:
     - src/app.ts
     - src/routes/public-episodes.routes.ts
@@ -77,7 +77,7 @@ No atomic task commits were created during this execution.
 - `src/routes/public-episodes.routes.ts` - Finalized request-origin handling for absolute URL output.
 - `src/services/public-episode-catalog.service.ts` - Hardened page URL fallback for hash-based episode routes.
 - `src/docs/openapi.ts` - Kept docs aligned with the runtime response.
-- `.planning/phases/05-public-episodes-catalog-endpoint/05-VALIDATION.md` - Captures the executable and manual verification contract.
+- `.planning/milestones/v1.1-phases/05-public-episodes-catalog-endpoint/05-VALIDATION.md` - Captures the executable and manual verification contract.
 
 ## Decisions Made
 

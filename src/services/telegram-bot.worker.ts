@@ -210,7 +210,9 @@ const downloadVideo = async (url: string): Promise<string | null> => {
   const tempDir = await fs.mkdtemp(path.join("/tmp", "dona-sonja-"));
   const outputTemplate = path.join(tempDir, "%(title)s.%(ext)s");
   try {
-    await execFileAsync("yt-dlp", ["-f", "best[ext=mp4]/best", "-o", outputTemplate, url], { maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync(config.telegram.ytDlpCommand, ["-f", "best[ext=mp4]/best", "-o", outputTemplate, url], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
     const entries = await fs.readdir(tempDir);
     const file = entries.find((entry) => !entry.endsWith(".part")) || null;
     return file ? path.join(tempDir, file) : null;
@@ -222,7 +224,9 @@ const downloadVideo = async (url: string): Promise<string | null> => {
 
 const fetchDescription = async (url: string): Promise<string | null> => {
   try {
-    const { stdout } = await execFileAsync("yt-dlp", ["--dump-single-json", url], { maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(config.telegram.ytDlpCommand, ["--dump-single-json", url], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
     const info = JSON.parse(stdout);
     const description = typeof info.description === "string" ? info.description.trim() : "";
     return description || null;
