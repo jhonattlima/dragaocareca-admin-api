@@ -13,7 +13,7 @@ The summary workflow is already implemented in the backend. Phase 11 should hard
 ## Recommended Route
 
 1. Extend or complement the existing summary verifier with a quality-focused script that tests valid and invalid summary outputs against the service contract.
-2. Update `docs/SDD.md` so the summary env vars, artifact paths, and workflow boundary are documented alongside the rest of the backend contract.
+2. Update `.planning/PROJECT.md` so the summary env vars, artifact paths, and workflow boundary are documented alongside the rest of the backend contract.
 3. Update the summary feature README and VPS setup guide so operators can see the runtime dependencies, sequence constraints, and output ownership rules.
 
 ## Backend Wiring Points
@@ -22,11 +22,11 @@ The summary workflow is already implemented in the backend. Phase 11 should hard
   - candidate base for additional quality assertions or quality-mode reuse
 - `src/services/episode-summary.service.ts`
   - source of truth for prompt, validation, and draft artifact boundaries
-- `docs/SDD.md`
+- `.planning/PROJECT.md`
   - canonical source-of-truth doc for runtime config and workflow ownership
-- `docs/features/004-episode-summary-suggestion/README.md`
+- `.planning/milestones/v1.2-ROADMAP.md`
   - operator-facing feature summary and reference choices
-- `docs/VPS-SETUP.md`
+- `.planning/codebase/OPERATIONS.md`
   - VPS runtime dependencies and bootstrap guidance
 
 ## Gray Areas / Risks

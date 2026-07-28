@@ -1,6 +1,6 @@
 # Architecture
 
-**Analysis Date:** 2026-07-21
+**Analysis Date:** 2026-07-28
 
 ## Pattern Overview
 
@@ -55,7 +55,15 @@
 4. `src/services/feed.service.ts` assembles RSS XML, optionally reusing legacy `xmlSnapshot`
 5. XML is returned directly from Express
 
-**Worker Flow:**
+**Episode AI Worker Flow:**
+1. Audio upload queues transcription through `src/services/episode-transcription.service.ts`
+2. `EPISODE_TRANSCRIPTION_PROVIDER` selects Gemini Files API transcription or the internal Whisper-family CLI
+3. The completed transcript is written to the episode folder as `transcript.txt`
+4. `episode.state.json` records the transcript state and queues the sequential summary job
+5. `EPISODE_SUMMARY_PROVIDER` selects Gemini or the local Llama fallback, writes draft `summary.txt`, and records `aiSummary` state
+6. The protected summary endpoint returns draft text and status; final `episodes.summary` changes only through the normal episode form save
+
+**Other Worker Flow:**
 1. `src/server.ts` starts launch notification, transcription, Spotify, YouTube, Telegram bot, and cover mosaic tasks
 2. Workers poll SQLite and env-configured integrations
 3. Results are persisted back into SQLite or filesystem outputs
@@ -64,6 +72,7 @@
 - Persistent application state: SQLite database in `data/database/`
 - Persistent binary/media state: filesystem under configured media roots
 - Process-local transient state: cached OAuth token and worker interval state
+- Episode AI state: `episode.state.json` beside the media artifacts, with separate `transcript` and `aiSummary` child states
 
 ## Key Abstractions
 
@@ -124,5 +133,5 @@
 
 ---
 
-*Architecture analysis: 2026-07-21*
+*Architecture analysis: 2026-07-28*
 *Update when major patterns change*

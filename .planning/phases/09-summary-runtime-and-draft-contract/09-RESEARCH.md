@@ -55,7 +55,7 @@ The main planning risk is not model quality but contract drift: if Phase 9 mixes
 
 ## Project Constraints (from AGENTS.md)
 
-- Read `docs/SDD.md` before implementation and treat it as the architecture source of truth. [VERIFIED: AGENTS.md]
+- Read `.planning/PROJECT.md` before implementation and treat it as the architecture source of truth. [VERIFIED: AGENTS.md]
 - Keep feed generation server-side. [VERIFIED: AGENTS.md]
 - Do not move scheduling or feed rules to the frontend. [VERIFIED: AGENTS.md]
 - Respect auth toggles: backend `.env.dev` uses `AUTH_BYPASS`; frontend env uses `authBypass`. [VERIFIED: AGENTS.md]
@@ -78,7 +78,7 @@ The main planning risk is not model quality but contract drift: if Phase 9 mixes
 ### Core
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| Node.js runtime | `18+` on VPS, `v24.17.0` locally | Execute backend services and local CLI orchestration. | The repo already targets Node scripts and VPS docs require Node 18+. [VERIFIED: docs/VPS-SETUP.md] [VERIFIED: local command `node --version`] |
+| Node.js runtime | `18+` on VPS, `v24.17.0` locally | Execute backend services and local CLI orchestration. | The repo already targets Node scripts and VPS docs require Node 18+. [VERIFIED: .planning/codebase/OPERATIONS.md] [VERIFIED: local command `node --version`] |
 | `llama.cpp` CLI | Current upstream CLI docs, version not pinned in repo yet [ASSUMED] | Run one-shot local text generation from a GGUF model. | Official docs describe local inference, GGUF requirement, and minimal setup, which matches this backend’s existing CLI-worker pattern. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md] |
 | `Qwen2.5-3B-Instruct` | Current official model card; exact local GGUF quant remains operator-selected [ASSUMED] | Small instruct model for Portuguese transcript summarization. | Official Qwen sources say the model family supports long text and over 29 languages including Portuguese, which fits transcript-only `pt-BR` summarization. [CITED: https://qwenlm.github.io/blog/qwen2.5/] [CITED: https://huggingface.co/Qwen/Qwen2.5-3B-Instruct] |
 | Node built-ins: `node:child_process`, `node:fs`, `node:path` | Built-in | Execute the CLI, manage temp files, and write episode artifacts. | The transcription service already uses this exact stack successfully. [VERIFIED: codebase grep] |
@@ -95,7 +95,7 @@ The main planning risk is not model quality but contract drift: if Phase 9 mixes
 | One-shot `llama.cpp` CLI process | `llama-server` | `llama-server` adds a persistent local service and concurrency surface that the phase does not need under a sequential 4 GB VPS constraint. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md] |
 | Qwen 3B-class local model | Larger local instruct model | Larger models may improve generation headroom but increase memory pressure and startup time on the target VPS. [CITED: https://qwenlm.github.io/blog/qwen2.5/] [ASSUMED] |
 
-**Installation:** No new npm packages are required for Phase 9; reuse repo dependencies plus an OS-level local inference runtime. [VERIFIED: package.json] [VERIFIED: docs/VPS-SETUP.md]
+**Installation:** No new npm packages are required for Phase 9; reuse repo dependencies plus an OS-level local inference runtime. [VERIFIED: package.json] [VERIFIED: .planning/codebase/OPERATIONS.md]
 
 ```bash
 # Existing verification baseline
@@ -108,7 +108,7 @@ ffmpeg -version | head -1
 llama-cli --version
 ```
 
-**Version verification:** No new npm library is required by this phase, so package-registry version verification is not applicable. Runtime verification should instead confirm the installed CLI binary and model file configured by env. [VERIFIED: package.json] [VERIFIED: docs/VPS-SETUP.md]
+**Version verification:** No new npm library is required by this phase, so package-registry version verification is not applicable. Runtime verification should instead confirm the installed CLI binary and model file configured by env. [VERIFIED: package.json] [VERIFIED: .planning/codebase/OPERATIONS.md]
 
 ## Package Legitimacy Audit
 
@@ -344,7 +344,7 @@ await execFileAsync(config.summary.command, [
 ## Open Questions (RESOLVED)
 
 1. **Should Phase 9 pin one exact default GGUF artifact name or only the runtime contract?**
-   - Resolution: Phase 9 locks only the env-driven runtime contract and example model family, not one mandatory GGUF artifact name. The backend must accept the model location through `EPISODE_SUMMARY_MODEL_PATH`, and Phase 11 operations docs can pin the deployed artifact after local validation. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: docs/features/004-episode-summary-suggestion/README.md]
+   - Resolution: Phase 9 locks only the env-driven runtime contract and example model family, not one mandatory GGUF artifact name. The backend must accept the model location through `EPISODE_SUMMARY_MODEL_PATH`, and Phase 11 operations docs can pin the deployed artifact after local validation. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: .planning/milestones/v1.2-ROADMAP.md]
    - Why this is locked: D-01 requires configuration-driven runtime selection, and the context leaves exact env naming and service boundaries to the agent, so locking the contract instead of a single artifact preserves operator control without reopening the architecture. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 2. **Should summary state live in staging only or be copied to the final episode folder after save?**
@@ -421,7 +421,7 @@ await execFileAsync(config.summary.command, [
 
 ### Primary (HIGH confidence)
 - Codebase grep across `src/config/env.ts`, `src/services/episode-media-layout.service.ts`, `src/services/episode-transcription.service.ts`, `src/routes/episodes.routes.ts`, and `src/database/sqlite.ts` - existing config, file-layout, draft-state, and route patterns. [VERIFIED: codebase grep]
-- `docs/SDD.md` - architecture source of truth, backend ownership, and env conventions. [VERIFIED: docs/SDD.md]
+- `.planning/PROJECT.md` - architecture source of truth, backend ownership, and env conventions. [VERIFIED: .planning/PROJECT.md]
 - `.planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md` - locked decisions for transcript-only input, env-driven runtime, shared state, and draft artifact boundaries. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ### Secondary (MEDIUM confidence)

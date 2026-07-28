@@ -1,6 +1,6 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-07-21
+**Analysis Date:** 2026-07-28
 
 ## Directory Layout
 
@@ -8,7 +8,7 @@
 dragaocareca-admin-api/
 ├── data/                  # SQLite DB, feed snapshots, generated assets, legacy inputs
 ├── dist/                  # Compiled JavaScript output
-├── docs/                  # Architecture, feature, and deployment documentation
+├── .planning/             # GSD project context, codebase map, phases, and milestones
 ├── node_modules/          # Installed dependencies
 ├── scripts/               # VPS/bootstrap helper scripts
 ├── src/                   # TypeScript application source
@@ -46,11 +46,10 @@ dragaocareca-admin-api/
 - Key files: `data/database/dragaocareca-admin.sqlite`, `data/feed/reference-feed.xml`, `data/generated/cover-mosaic.svg`
 - Subdirectories: `database/`, `feed/`, `generated/`
 
-**`docs/`:**
-- Purpose: durable project and feature documentation
-- Contains: `docs/SDD.md`, `docs/FEATURES.md`, `docs/VPS-SETUP.md`, feature READMEs/PLANs
-- Key files: `docs/SDD.md`
-- Subdirectories: `docs/features/`
+**`.planning/`:**
+- Purpose: canonical GSD project documentation and planning state
+- Contains: `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `codebase/`, `phases/`, and `milestones/`
+- Key files: `.planning/PROJECT.md`, `.planning/STATE.md`, `.planning/codebase/ARCHITECTURE.md`
 
 **`scripts/`:**
 - Purpose: machine/bootstrap helpers outside the application runtime
@@ -82,7 +81,7 @@ dragaocareca-admin-api/
 **Documentation:**
 - `README.md`: operator/developer quickstart
 - `AGENTS.md`: agent-specific working rules
-- `docs/SDD.md`: canonical architecture context
+- `.planning/`: canonical architecture context, planning state, and historical artifacts
 
 ## Naming Conventions
 
@@ -97,7 +96,7 @@ dragaocareca-admin-api/
 **Special Patterns:**
 - route modules end in `.routes.ts`
 - background/process helpers often end in `.worker.ts`
-- environment/config docs stay at project root or under `docs/`
+- project context and planning artifacts stay under `.planning/`
 
 ## Where to Add New Code
 
@@ -129,5 +128,5 @@ dragaocareca-admin-api/
 
 ---
 
-*Structure analysis: 2026-07-21*
+*Structure analysis: 2026-07-28*
 *Update when directory structure changes*

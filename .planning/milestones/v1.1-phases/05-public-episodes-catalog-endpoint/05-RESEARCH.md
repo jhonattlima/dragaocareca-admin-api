@@ -63,7 +63,7 @@ The safest implementation is to keep repository querying unchanged, add a dedica
 
 ## Project Constraints (from AGENTS.md)
 
-- Read `docs/SDD.md` before implementation; it is the source of truth for architecture and constraints. [VERIFIED: codebase grep]
+- Read `.planning/PROJECT.md` before implementation; it is the source of truth for architecture and constraints. [VERIFIED: codebase grep]
 - Keep feed generation server-side. [VERIFIED: codebase grep]
 - Do not move scheduling/feed rules to the frontend. [VERIFIED: codebase grep]
 - Respect auth toggles: backend `.env.dev` uses `AUTH_BYPASS`, frontend env uses `authBypass`. [VERIFIED: codebase grep]

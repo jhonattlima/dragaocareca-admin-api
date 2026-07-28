@@ -19,7 +19,7 @@ This phase hardens the implemented summary workflow by adding executable quality
 - **D-03:** Verification should remain backend-only and not require live HTTP or frontend interaction.
 
 ### Documentation
-- **D-04:** `docs/SDD.md` must reflect the summary runtime contract as a source-of-truth addition, including env configuration, file locations, and the summary workflow boundary.
+- **D-04:** `.planning/PROJECT.md` must reflect the summary runtime contract as a source-of-truth addition, including env configuration, file locations, and the summary workflow boundary.
 - **D-05:** The summary feature README should explain the transcript-only input, output artifact location, and quality rules in operator-friendly language.
 - **D-06:** VPS documentation should describe the summary worker/runtime dependencies and the sequential 4 GB deployment constraint.
 
@@ -39,7 +39,7 @@ This phase hardens the implemented summary workflow by adding executable quality
 - `.planning/REQUIREMENTS.md` - requirement mapping for `SUMM-02`, `OPS-02`, and `DOC-01`.
 - `.planning/ROADMAP.md` - v1.2 phase sequence and phase 11 dependency.
 - `.planning/STATE.md` - current milestone status and continuity constraints.
-- `docs/SDD.md` - architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
+- `.planning/PROJECT.md` - architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
 
 ### Existing summary implementation
 - `src/services/episode-summary.service.ts` - summary runtime contract, validation rules, and artifact boundaries.
@@ -48,10 +48,10 @@ This phase hardens the implemented summary workflow by adding executable quality
 - `src/routes/episodes.routes.ts` - protected summary read endpoint shape that should remain compatible with summary docs.
 
 ### Documentation sources
-- `docs/features/004-episode-summary-suggestion/README.md` - current feature summary and reference choices.
-- `docs/features/004-episode-summary-suggestion/PLAN.md` - feature intent and operational constraints.
-- `docs/VPS-SETUP.md` - VPS runtime dependencies and worker bootstrap guidance.
-- `docs/TODO.md` - deferred transcription-engine re-evaluation that must remain out of this phase.
+- `.planning/milestones/v1.2-ROADMAP.md` - current feature summary and reference choices.
+- `.planning/milestones/v1.2-ROADMAP.md` - feature intent and operational constraints.
+- `.planning/codebase/OPERATIONS.md` - VPS runtime dependencies and worker bootstrap guidance.
+- `.planning/STATE.md` - deferred transcription-engine re-evaluation that must remain out of this phase.
 
 </canonical_refs>
 
@@ -86,7 +86,7 @@ This phase hardens the implemented summary workflow by adding executable quality
 <deferred>
 ## Deferred Ideas
 
-- Re-evaluating `whisper.cpp` versus other transcription engines stays in `docs/TODO.md` and is not part of this phase.
+- Re-evaluating `whisper.cpp` versus other transcription engines stays in `.planning/STATE.md` and is not part of this phase.
 - `admin-web` prefilling and review UX remain a later milestone in the frontend repo.
 
 </deferred>

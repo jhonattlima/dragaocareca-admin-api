@@ -49,14 +49,14 @@ Exact env var names and internal service boundaries are left to the agent, as lo
 - `.planning/REQUIREMENTS.md` — Phase 9 requirement mapping for `SUMM-01`, `FLOW-02`, and `OPS-01`.
 - `.planning/ROADMAP.md` — Phase 9 goal, success criteria, and follow-on dependency into Phases 10 and 11.
 - `.planning/STATE.md` — current milestone state and archive-related cautions that affect planning continuity.
-- `docs/SDD.md` — architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
+- `.planning/PROJECT.md` — architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
 
 ### Existing transcript and summary feature intent
-- `docs/features/003-episode-transcription/README.md` — current transcript workflow behavior and output location.
-- `docs/features/003-episode-transcription/PLAN.md` — transcript implementation expectations that summary generation must build on top of.
-- `docs/features/004-episode-summary-suggestion/README.md` — summary feature intent and current model-direction note.
-- `docs/features/004-episode-summary-suggestion/PLAN.md` — draft summary workflow expectations, including transcript-only input and publish-friendly output.
-- `docs/TODO.md` — deferred tech debt note confirming that transcription engine re-evaluation is out of scope for v1.2.
+- `.planning/milestones/v1.2-ROADMAP.md` — current transcript workflow behavior and output location.
+- `.planning/milestones/v1.2-ROADMAP.md` — transcript implementation expectations that summary generation must build on top of.
+- `.planning/milestones/v1.2-ROADMAP.md` — summary feature intent and current model-direction note.
+- `.planning/milestones/v1.2-ROADMAP.md` — draft summary workflow expectations, including transcript-only input and publish-friendly output.
+- `.planning/STATE.md` — deferred tech debt note confirming that transcription engine re-evaluation is out of scope for v1.2.
 
 ### Backend runtime and integration points
 - `src/config/env.ts` — existing env-driven runtime configuration pattern that Phase 9 should follow for summary settings.

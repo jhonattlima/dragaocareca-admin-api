@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Episode AI authoring API
 status: shipped
-last_updated: "2026-07-23T00:00:00.000Z"
-last_activity: 2026-07-23
+last_updated: "2026-07-28T00:00:00.000Z"
+last_activity: 2026-07-28
 progress:
   total_phases: 3
   completed_phases: 3
@@ -17,7 +17,7 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-23)
+See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
 **Current focus:** Milestone v1.2 shipped; next milestone not yet defined
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-23)
 Phase: Complete
 Plan: —
 Status: Milestone shipped
-Last activity: 2026-07-23 — Milestone v1.2 shipped and archived
+Last activity: 2026-07-28 — Gemini transcript/summary hardening, verification, and documentation consolidation completed
 
 ## Accumulated Context
 
@@ -42,6 +42,8 @@ Recent decisions affecting current work:
 - [Milestone v1.2]: Keep summary generation transcript-only and sequential.
 - [Milestone v1.2]: Store suggested summaries as draft artifacts beside the episode files.
 - [Milestone v1.2]: Expose summary drafts through a protected backend read endpoint.
+- [Post-v1.2]: Use Gemini as the current configured provider for transcript and summary generation; preserve internal/llama fallbacks.
+- [Post-v1.2]: Use production-feed structure as a static summary style reference, never as factual generation context.
 
 ### Pending Todos
 
@@ -59,7 +61,11 @@ Recent decisions affecting current work:
 | artifact | Missing original GSD phase directories/summaries for Phases 6-8 | acknowledged at milestone closeout | 2026-07-23 |
 | verification | Milestone closeout used reconciled code/docs evidence for Phases 6-8 rather than preserved phase-level verification artifacts | acknowledged at milestone closeout | 2026-07-23 |
 | feature | admin-web summary-field prefill | deferred to later frontend milestone | 2026-07-23 |
-| technology | transcription-engine re-evaluation (`whisper.cpp` vs `faster-whisper`) | deferred tech debt | 2026-07-23 |
+| technology | production transcription-provider evaluation (Gemini vs `whisper.cpp` / `faster-whisper`) | deferred tech debt | 2026-07-28 |
+
+### TD-001: Validate the permanent transcription provider
+
+The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemini`; `internal` keeps the local `whisper.cpp` path available as a fallback. Before making Gemini the permanent production default, compare quality, cost, quota, privacy, long-episode latency, and memory behavior on the 4 GB Hostinger VPS. Revisit when transcription becomes slow, unreliable, or cost-sensitive.
 
 ## Session Continuity
 

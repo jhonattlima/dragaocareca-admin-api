@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-07-21
+**Analysis Date:** 2026-07-28
 
 ## Test Framework
 
@@ -15,6 +15,9 @@
 ```bash
 npm run typecheck     # Static TypeScript validation
 npm run build         # Compile-time validation of the backend
+npm run verify:public-episodes            # Public catalog route contract
+npm run verify:summary-runtime-contract   # Summary provider and draft lifecycle contract
+npm run verify:summary-quality-contract   # Summary editorial-shape contract
 npm run dev           # Manual runtime verification during development
 ```
 
@@ -98,5 +101,5 @@ No adjacent test files were found.
 
 ---
 
-*Testing analysis: 2026-07-21*
+*Testing analysis: 2026-07-28*
 *Update when test patterns change*

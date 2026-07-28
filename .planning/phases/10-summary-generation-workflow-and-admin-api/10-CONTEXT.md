@@ -52,12 +52,12 @@ This phase implements the backend summary-generation workflow on top of the tran
 - `.planning/REQUIREMENTS.md` - requirement mapping for `SUMM-03`, `FLOW-01`, `FLOW-03`, `API-02`, and `API-03`.
 - `.planning/ROADMAP.md` - v1.2 phase sequence and phase 10 dependencies.
 - `.planning/STATE.md` - current milestone status and continuity constraints.
-- `docs/SDD.md` - architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
+- `.planning/PROJECT.md` - architecture source of truth, env/config conventions, media layout expectations, and backend ownership rules.
 
 ### Existing transcript and summary implementation
-- `docs/features/003-episode-transcription/PLAN.md` - transcript workflow behavior and progress reporting pattern.
-- `docs/features/004-episode-summary-suggestion/PLAN.md` - summary feature intent and backend-only output rules.
-- `docs/TODO.md` - deferred transcription-engine re-evaluation that must stay out of v1.2.
+- `.planning/milestones/v1.2-ROADMAP.md` - transcript workflow behavior and progress reporting pattern.
+- `.planning/milestones/v1.2-ROADMAP.md` - summary feature intent and backend-only output rules.
+- `.planning/STATE.md` - deferred transcription-engine re-evaluation that must stay out of v1.2.
 
 ### Backend runtime and integration points
 - `src/services/episode-transcription.service.ts` - current transcript draft workflow, queueing, and state write pattern to extend.

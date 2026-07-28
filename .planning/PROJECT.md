@@ -6,8 +6,8 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 ## Current State
 
-- Latest shipped milestone: **v1.2 Episode AI authoring API** on 2026-07-23
-- Summary suggestion generation now runs from the existing transcript workflow, stays sequential for the 4 GB VPS target, and exposes a protected read contract for future frontend reuse
+- Latest shipped milestone: **v1.2 Episode AI authoring API** on 2026-07-23, with Gemini provider hardening completed on 2026-07-28
+- Transcript and summary generation can use Gemini or local fallback providers, run sequentially for the 4 GB VPS target, and expose a protected read contract for future frontend reuse
 - Next planning step: define the next milestone with `$gsd-new-milestone`
 
 ## Core Value
@@ -28,6 +28,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Summary generation stays sequential and lightweight enough for the 4 GB VPS target.
 - Suggested summary drafts are persisted beside the episode files and kept separate from the final saved episode summary.
 - Protected backend APIs expose the summary suggestion and generation state.
+- Gemini summary output follows the production feed's editorial structure while using the current transcript as its only factual source.
 
 ### Active
 
@@ -41,7 +42,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Public frontend redesign work — this milestone provides data contracts, not UI changes.
 - Replacing the admin authentication model — auth bypass and admin auth behavior remain as-is.
 - `admin-web` integration for pre-filling the summary field — defer to a later milestone in the frontend project.
-- Replacing the current Whisper-family transcription engine during v1.2 — tracked as deferred tech debt in `docs/TODO.md`.
+- Finalizing Gemini as the permanent transcription provider — tracked in `.planning/STATE.md` as deferred technical debt.
 - Generating anything beyond summary text (title, tags, guests, etc.) — summary only in this milestone.
 
 ## Context
@@ -70,6 +71,8 @@ The backend already owns episode media layout and transcript generation. Transcr
 | Keep summary generation transcript-only and sequential | The 4 GB VPS target requires lightweight, backend-owned processing | ✓ Good |
 | Store suggested summaries as draft artifacts beside the episode files | This preserves operator review/editability before save | ✓ Good |
 | Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
+| Use Gemini for the current transcript and summary configuration, retaining local providers as fallbacks | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback | Under evaluation |
+| Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
 
 ## Archived Milestones
 
@@ -120,4 +123,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-23 after defining milestone v1.2*
+*Last updated: 2026-07-28 after consolidating the Gemini AI-authoring follow-up*

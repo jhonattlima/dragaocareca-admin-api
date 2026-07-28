@@ -41,7 +41,7 @@ Route naming, exact field normalization, and internal mapper/service boundaries 
 - `.planning/REQUIREMENTS.md` — Phase 5 requirement mapping for the catalog endpoint
 - `.planning/ROADMAP.md` — Phase 5 goal, dependencies, and success criteria
 - `.planning/STATE.md` — current milestone focus and current blockers/concerns
-- `docs/SDD.md` — architecture and mandatory backend constraints, especially server-side feed ownership and auth toggles
+- `.planning/PROJECT.md` — architecture and mandatory backend constraints, especially server-side feed ownership and auth toggles
 
 ### Public frontend catalog behavior
 - `../dragaocareca_frontend/src/config.js` — legacy public endpoint and media URL conventions currently used by the site
