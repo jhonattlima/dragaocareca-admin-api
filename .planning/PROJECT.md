@@ -41,7 +41,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 
 ### Active
 
-- Define and deliver the v1.3 episode artifact-download requirements.
+- Deliver the v1.3 protected final episode artifact-download endpoint and verification contract.
 
 ### Out of Scope
 

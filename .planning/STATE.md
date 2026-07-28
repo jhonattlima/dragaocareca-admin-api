@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Define requirements and roadmap for v1.3 Episode Artifact Downloads
+**Current focus:** Plan Phase 12: Secure Episode Artifact Downloads
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 12 of 12 (Secure Episode Artifact Downloads)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-28 — Milestone v1.3 started
+Status: Ready for discussion and planning
+Last activity: 2026-07-28 — v1.3 requirements and roadmap created
 
 ## Accumulated Context
 
@@ -47,7 +47,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Define v1.3 requirements and roadmap, then begin with `$gsd-plan-phase [N]`.
+- Discuss and plan Phase 12 with `$gsd-discuss-phase 12` or `$gsd-plan-phase 12`.
 
 ### Blockers/Concerns
 
@@ -70,5 +70,5 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 ## Session Continuity
 
 Last session: 2026-07-28
-Stopped at: Milestone v1.3 started; awaiting research decision before requirements and roadmap definition
+Stopped at: Milestone v1.3 initialized with Phase 12 ready for discussion/planning
 Resume file: None
