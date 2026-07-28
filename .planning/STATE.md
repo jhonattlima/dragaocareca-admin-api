@@ -5,15 +5,15 @@ milestone_name: Episode Artifact Downloads
 current_phase: 12
 current_phase_name: Secure Episode Artifact Downloads
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-07-28T23:06:23.156Z"
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-07-28T23:10:46.553Z"
 last_activity: 2026-07-28
 last_activity_desc: Phase 12 execution started
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 ## Current Position
 
 Phase: 12 (Secure Episode Artifact Downloads) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-07-28 — Phase 12 execution started
 
@@ -48,6 +48,8 @@ Recent decisions affecting current work:
 - [Post-v1.2]: Use Gemini as the current configured provider for transcript and summary generation; preserve internal/llama fallbacks.
 - [Post-v1.2]: Use production-feed structure as a static summary style reference, never as factual generation context.
 - [Phase ?]: Plan 12-02 may install archiver; @types/archiver remains conditional on TypeScript compiler evidence.
+- [Phase ?]: Install only approved archiver; defer @types/archiver until a future import produces a compiler declaration error.
+- [Phase ?]: Run artifact-download verification as a compiled development script before selector or preflight implementation.
 
 ### Pending Todos
 
@@ -73,8 +75,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-28T23:06:23.148Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-07-28T23:10:46.546Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -82,3 +84,4 @@ Resume file: None
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 12 P01 | 0 | 1 tasks | 1 files |
+| Phase 12 P02 | 3min | 2 tasks | 3 files |

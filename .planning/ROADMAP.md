@@ -36,7 +36,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12-02-PLAN.md — Install the approved dependency and bootstrap the runnable compiled verifier.
+- [x] 12-02-PLAN.md — Install the approved dependency and bootstrap the runnable compiled verifier.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
