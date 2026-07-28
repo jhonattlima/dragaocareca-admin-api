@@ -44,7 +44,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12-04-PLAN.md — Add the protected ZIP route, OpenAPI contract, and completed verifier.
+- [x] 12-04-PLAN.md — Add the protected ZIP route, OpenAPI contract, and completed verifier.
 
 ## Archive Index
 
