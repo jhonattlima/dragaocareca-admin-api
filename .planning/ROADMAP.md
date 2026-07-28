@@ -32,7 +32,7 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Approve the flagged archive dependency before installation.
+- [x] 12-01-PLAN.md — Approve the flagged archive dependency before installation.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
