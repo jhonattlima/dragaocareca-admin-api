@@ -1,7 +1,7 @@
 # Phase 9: Summary Runtime and Draft Contract - Research
 
 **Researched:** 2026-07-23 [VERIFIED: local command `date -Iseconds`]
-**Domain:** Backend-local transcript-to-summary runtime design for `admin-api` [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+**Domain:** Backend-local transcript-to-summary runtime design for `admin-api` [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 **Confidence:** MEDIUM [VERIFIED: synthesis from codebase + official docs]
 
 <user_constraints>
@@ -21,16 +21,16 @@
 - **D-11:** Generated summaries must follow short, discovery-friendly `pt-BR` writing rules intended to improve natural internet search relevance without keyword stuffing.
 - **D-12:** The prompt and validation contract should enforce: `2-4` short sentences, main topic in the opening sentence, `1-3` concrete searchable terms when supported by the transcript, explicit naming of relevant guests/franchises/games/themes when present, and a concise explanation of what the listener will hear or learn.
 - **D-13:** The summary contract should explicitly avoid vague hype language, disconnected keyword lists, and any behavior that mixes SEO goals with unnatural writing.
-[VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+[VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ### the agent's Discretion
 Exact env var names and internal service boundaries are left to the agent, as long as the runtime stays env-driven, sequential, and consistent with the existing transcript workflow.
-[VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+[VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ### Deferred Ideas (OUT OF SCOPE)
 - `admin-web` behavior for prefilling, editing UX, and acceptance/rejection controls belongs to a later frontend milestone.
 - Any change to the transcription runtime or broader AI drafting beyond summary text remains deferred outside Phase 9.
-[VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+[VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 </user_constraints>
 
 <phase_requirements>
@@ -49,7 +49,7 @@ Phase 9 should define a backend-owned summary runtime that mirrors the existing 
 
 The standard implementation path is a one-shot local `llama.cpp` CLI invocation using a small instruction model, with transcript input read from `transcript.txt`, draft output written to `summary.txt`, and operational metadata consolidated into `episode.state.json`. `llama.cpp` is documented as a local inference runtime with GGUF model support, quantization options for reduced memory use, and a simple CLI/server split; for this repo, the CLI path fits the existing `execFile` pattern better than adding a persistent inference server. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md]
 
-The main planning risk is not model quality but contract drift: if Phase 9 mixes draft summary text into `transcript.txt`, overwrites `episodes.summary`, or keeps transcript-only state files, later API and frontend phases will inherit the wrong storage boundaries. The plan should therefore prioritize shared artifact/state primitives and a strict transcript-ready gate before any route work. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
+The main planning risk is not model quality but contract drift: if Phase 9 mixes draft summary text into `transcript.txt`, overwrites `episodes.summary`, or keeps transcript-only state files, later API and frontend phases will inherit the wrong storage boundaries. The plan should therefore prioritize shared artifact/state primitives and a strict transcript-ready gate before any route work. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
 
 **Primary recommendation:** Reuse the transcription service architecture, but implement summary generation as a separate env-driven one-shot `llama.cpp` CLI service using transcript-only input, `summary.txt` output, and shared `episode.state.json` step objects. [VERIFIED: codebase grep] [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md]
 
@@ -71,7 +71,7 @@ The main planning risk is not model quality but contract drift: if Phase 9 mixes
 | Invoke local summary model | API / Backend | — | The transcription workflow already executes local CLIs from backend code through `execFile`; summary generation should follow the same ownership boundary. [VERIFIED: codebase grep] |
 | Store `summary.txt` and `episode.state.json` | Database / Storage | API / Backend | Files belong in the episode media layout, while the backend owns write timing and shape. [VERIFIED: codebase grep] |
 | Preserve final `episodes.summary` editorial ownership | API / Backend | Database / Storage | The SQLite row is only mutated through normal create/update repository flows, which Phase 9 should leave unchanged for draft generation. [VERIFIED: codebase grep] |
-| Review/edit/delete draft summary | Browser / Client | API / Backend | Context explicitly defers human review and final form submission to `admin-web` and later phases. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
+| Review/edit/delete draft summary | Browser / Client | API / Backend | Context explicitly defers human review and final form submission to `admin-web` and later phases. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
 
 ## Standard Stack
 
@@ -148,7 +148,7 @@ Read transcript.txt  --->  Read episode.state.json (fallback transcript.state.js
      Phase 10 protected read endpoint / later admin-web review
 ```
 
-This diagram reflects the locked boundary that transcript input, draft artifact output, and final DB summary ownership stay separate. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+This diagram reflects the locked boundary that transcript input, draft artifact output, and final DB summary ownership stay separate. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ### Recommended Project Structure
 ```text
@@ -165,7 +165,7 @@ src/
 
 ### Pattern 1: Env-Driven Summary Runtime Block
 **What:** Add a `summary` config block beside the existing `transcription` block with flags such as `enabled`, `command`, `modelPath`, `contextSize`, `maxTokens`, and `timeoutMs`. [VERIFIED: codebase grep]
-**When to use:** Use for every runtime choice that operators may need to tune without code edits. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+**When to use:** Use for every runtime choice that operators may need to tune without code edits. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 **Example:**
 ```typescript
 // Source: codebase env pattern + official llama.cpp CLI docs
@@ -183,7 +183,7 @@ export const config = {
 ```
 
 ### Pattern 2: Shared Episode-Level Draft State
-**What:** Replace `transcript.state.json` as the primary contract with `episode.state.json` containing step-specific objects such as `transcript` and `aiSummary`. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+**What:** Replace `transcript.state.json` as the primary contract with `episode.state.json` containing step-specific objects such as `transcript` and `aiSummary`. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 **When to use:** Use whenever draft media files exist before the episode row is finalized or when multiple background steps need the same episode-scoped operational state. [VERIFIED: codebase grep]
 **Example:**
 ```typescript
@@ -210,7 +210,7 @@ type EpisodeDraftState = {
 ```
 
 ### Pattern 3: One-Shot Sequential Summary Job
-**What:** Run summary generation as a single fire-and-stop process per episode, with state versioning to prevent stale writes. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
+**What:** Run summary generation as a single fire-and-stop process per episode, with state versioning to prevent stale writes. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
 **When to use:** Use for manual trigger/refresh flows and any future protected admin endpoint that needs deterministic low-memory behavior. [VERIFIED: .planning/REQUIREMENTS.md]
 **Example:**
 ```typescript
@@ -227,8 +227,8 @@ void generateDraftSummary(episodeId, nextVersion);
 ```
 
 ### Anti-Patterns to Avoid
-- **Transcript/summary mixing:** Do not append generated summary text into `transcript.txt`; keep transcript as a pure source artifact. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
-- **Direct DB overwrite:** Do not mutate `episodes.summary` from the generator; that field remains user-submitted final content only. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+- **Transcript/summary mixing:** Do not append generated summary text into `transcript.txt`; keep transcript as a pure source artifact. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+- **Direct DB overwrite:** Do not mutate `episodes.summary` from the generator; that field remains user-submitted final content only. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 - **Persistent inference daemon for this phase:** Do not add a background `llama-server` just to support single-episode generation. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md]
 - **Ad hoc shell interpolation:** Do not build CLI commands by concatenating transcript text into shell strings; use `execFile`/argument arrays only. [VERIFIED: codebase grep]
 
@@ -237,11 +237,11 @@ void generateDraftSummary(episodeId, nextVersion);
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
 | Local LLM serving for one draft job | Custom HTTP model microservice | One-shot CLI execution from a backend service | The repo already uses local CLI orchestration for AI-adjacent work, and Phase 9 does not need a long-lived model server. [VERIFIED: codebase grep] [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md] |
-| Per-step state file sprawl | Separate `summary.state.json`, `prompt.state.json`, etc. | One shared `episode.state.json` with child step objects | The phase explicitly locks shared episode-level state to avoid cross-step drift. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
-| Final-summary auto-publish | Generator writes directly into SQLite `summary` | Separate `summary.txt` draft artifact | Editorial review belongs later and final DB ownership must stay manual. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
-| Free-form prompt output parsing | Regex-heavy parser against arbitrary model output | Tight prompt contract plus simple post-validation of sentence count and non-empty text | The phase only needs short draft text, not a complex generative protocol. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [ASSUMED] |
+| Per-step state file sprawl | Separate `summary.state.json`, `prompt.state.json`, etc. | One shared `episode.state.json` with child step objects | The phase explicitly locks shared episode-level state to avoid cross-step drift. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
+| Final-summary auto-publish | Generator writes directly into SQLite `summary` | Separate `summary.txt` draft artifact | Editorial review belongs later and final DB ownership must stay manual. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
+| Free-form prompt output parsing | Regex-heavy parser against arbitrary model output | Tight prompt contract plus simple post-validation of sentence count and non-empty text | The phase only needs short draft text, not a complex generative protocol. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [ASSUMED] |
 
-**Key insight:** The difficult part here is not generating text; it is preserving clean backend ownership boundaries between transcript source, draft artifact, operational state, and final database content. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+**Key insight:** The difficult part here is not generating text; it is preserving clean backend ownership boundaries between transcript source, draft artifact, operational state, and final database content. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ## Runtime State Inventory
 
@@ -250,7 +250,7 @@ void generateDraftSummary(episodeId, nextVersion);
 | Stored data | Existing draft transcription state files are currently written as staging-side `transcript.state.json`, and final transcript artifacts are written as `transcript.txt`. [VERIFIED: codebase grep] | Add backward-compatible reads for the legacy transcript state path and migrate forward to `episode.state.json` on next write/sync. This is a file-state migration, not a database migration. [VERIFIED: codebase grep] |
 | Live service config | None found in external UI-managed services for transcript or summary runtime. [VERIFIED: repo/doc scan] | None. [VERIFIED: repo/doc scan] |
 | OS-registered state | None found; current transcription worker is started by backend runtime code rather than OS scheduler registration. [VERIFIED: codebase grep] | None. [VERIFIED: codebase grep] |
-| Secrets/env vars | Existing transcription env vars are read from `src/config/env.ts`; summary runtime will need new env names, but no existing secret key rename is required by this phase. [VERIFIED: codebase grep] | Add new summary env vars only; keep transcription env vars unchanged. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
+| Secrets/env vars | Existing transcription env vars are read from `src/config/env.ts`; summary runtime will need new env names, but no existing secret key rename is required by this phase. [VERIFIED: codebase grep] | Add new summary env vars only; keep transcription env vars unchanged. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
 | Build artifacts | None found for summary runtime yet; `dist/` output will refresh from source changes normally. [VERIFIED: repo scan] | None. [VERIFIED: repo scan] |
 
 ## Common Pitfalls
@@ -258,11 +258,11 @@ void generateDraftSummary(episodeId, nextVersion);
 ### Pitfall 1: Overwriting the final summary field
 **What goes wrong:** The generator updates `episodes.summary` automatically and destroys the review boundary. [VERIFIED: .planning/REQUIREMENTS.md]
 **Why it happens:** The repo already stores a `summary` column on the episode row, so it is tempting to reuse it as the draft store. [VERIFIED: src/database/sqlite.ts]
-**How to avoid:** Write drafts to `summary.txt` and expose them separately; only `PUT /episodes/:id` should update the final DB summary. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
+**How to avoid:** Write drafts to `summary.txt` and expose them separately; only `PUT /episodes/:id` should update the final DB summary. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
 **Warning signs:** A summary-generation primitive imports the repository update path or returns an updated `EpisodeRow.summary`. [VERIFIED: codebase grep]
 
 ### Pitfall 2: Leaving transcript-only state as the contract
-**What goes wrong:** Phase 10 must special-case two different state-file shapes and later phases inherit fragmented operational state. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+**What goes wrong:** Phase 10 must special-case two different state-file shapes and later phases inherit fragmented operational state. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 **Why it happens:** The current draft workflow only knows `transcript.state.json`. [VERIFIED: codebase grep]
 **How to avoid:** Introduce `episode.state.json` now and make transcription read/write through shared helpers. [VERIFIED: codebase grep]
 **Warning signs:** New summary code adds `summary.state.json` or duplicates version/progress fields in a second file. [VERIFIED: synthesis from codebase pattern]
@@ -270,7 +270,7 @@ void generateDraftSummary(episodeId, nextVersion);
 ### Pitfall 3: Unbounded context causing VPS memory spikes
 **What goes wrong:** Large transcript prompts or oversized context settings make the local inference process too heavy for the 4 GB VPS target. [VERIFIED: .planning/PROJECT.md]
 **Why it happens:** `llama.cpp` docs explicitly warn to start with a reasonable context size because memory can spike with larger settings. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md]
-**How to avoid:** Keep summary execution sequential, make context size env-configurable, and default conservatively. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [CITED: https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md]
+**How to avoid:** Keep summary execution sequential, make context size env-configurable, and default conservatively. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [CITED: https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md]
 **Warning signs:** Planning assumes parallel episode generation or hardcodes a large context without an operator override. [VERIFIED: .planning/REQUIREMENTS.md]
 
 ### Pitfall 4: Treating transcript text as trusted shell input
@@ -326,12 +326,12 @@ await execFileAsync(config.summary.command, [
 
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
-| Transcript-only draft state file | Shared episode-level state document for multi-step AI workflow | Required by Phase 9 decisions on 2026-07-23. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] | Avoids per-step state drift and simplifies later API exposure. [VERIFIED: synthesis from context + codebase] |
+| Transcript-only draft state file | Shared episode-level state document for multi-step AI workflow | Required by Phase 9 decisions on 2026-07-23. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] | Avoids per-step state drift and simplifies later API exposure. [VERIFIED: synthesis from context + codebase] |
 | Persistent local model service assumption | One-shot local CLI invocation for a single sequential job | Current recommendation as of 2026-07-23. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md] | Lowers idle resource usage and matches repo worker patterns. [VERIFIED: codebase grep] |
-| Draft summary stored in DB summary field | Draft summary stored as `summary.txt` beside media | Required by Phase 9 decisions on 2026-07-23. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] | Preserves editorial review and keeps DB state authoritative only after form submit. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
+| Draft summary stored in DB summary field | Draft summary stored as `summary.txt` beside media | Required by Phase 9 decisions on 2026-07-23. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] | Preserves editorial review and keeps DB state authoritative only after form submit. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] |
 
 **Deprecated/outdated:**
-- `transcript.state.json` as the primary forward contract is outdated for this milestone because Phase 9 locks a shared episode-level state file. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+- `transcript.state.json` as the primary forward contract is outdated for this milestone because Phase 9 locks a shared episode-level state file. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ## Assumptions Log
 
@@ -344,12 +344,12 @@ await execFileAsync(config.summary.command, [
 ## Open Questions (RESOLVED)
 
 1. **Should Phase 9 pin one exact default GGUF artifact name or only the runtime contract?**
-   - Resolution: Phase 9 locks only the env-driven runtime contract and example model family, not one mandatory GGUF artifact name. The backend must accept the model location through `EPISODE_SUMMARY_MODEL_PATH`, and Phase 11 operations docs can pin the deployed artifact after local validation. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: .planning/milestones/v1.2-ROADMAP.md]
-   - Why this is locked: D-01 requires configuration-driven runtime selection, and the context leaves exact env naming and service boundaries to the agent, so locking the contract instead of a single artifact preserves operator control without reopening the architecture. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+   - Resolution: Phase 9 locks only the env-driven runtime contract and example model family, not one mandatory GGUF artifact name. The backend must accept the model location through `EPISODE_SUMMARY_MODEL_PATH`, and Phase 11 operations docs can pin the deployed artifact after local validation. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: .planning/milestones/v1.2-ROADMAP.md]
+   - Why this is locked: D-01 requires configuration-driven runtime selection, and the context leaves exact env naming and service boundaries to the agent, so locking the contract instead of a single artifact preserves operator control without reopening the architecture. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 2. **Should summary state live in staging only or be copied to the final episode folder after save?**
-   - Resolution: Phase 9 locks `summary.txt` and `episode.state.json` to the episode staging directory as the canonical generation-time write target, matching the current draft transcript workflow. The media-layout contract must also support promoted final-path reads after save/sync so later phases can resolve the same artifacts before or after promotion without changing ownership rules. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts] [VERIFIED: src/services/episode-transcription.service.ts]
-   - Why this is locked: Unsaved draft work already needs a staging-first home, while saved episodes already use promotion and final-path resolution in the existing media layout. Locking staging-first writes plus promotion-aware reads removes the ambiguity without changing the transcription engine per D-02, D-04, D-05, and D-08. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts]
+   - Resolution: Phase 9 locks `summary.txt` and `episode.state.json` to the episode staging directory as the canonical generation-time write target, matching the current draft transcript workflow. The media-layout contract must also support promoted final-path reads after save/sync so later phases can resolve the same artifacts before or after promotion without changing ownership rules. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts] [VERIFIED: src/services/episode-transcription.service.ts]
+   - Why this is locked: Unsaved draft work already needs a staging-first home, while saved episodes already use promotion and final-path resolution in the existing media layout. Locking staging-first writes plus promotion-aware reads removes the ambiguity without changing the transcription engine per D-02, D-04, D-05, and D-08. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: src/services/episode-media-layout.service.ts]
 
 ## Environment Availability
 
@@ -422,7 +422,7 @@ await execFileAsync(config.summary.command, [
 ### Primary (HIGH confidence)
 - Codebase grep across `src/config/env.ts`, `src/services/episode-media-layout.service.ts`, `src/services/episode-transcription.service.ts`, `src/routes/episodes.routes.ts`, and `src/database/sqlite.ts` - existing config, file-layout, draft-state, and route patterns. [VERIFIED: codebase grep]
 - `.planning/PROJECT.md` - architecture source of truth, backend ownership, and env conventions. [VERIFIED: .planning/PROJECT.md]
-- `.planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md` - locked decisions for transcript-only input, env-driven runtime, shared state, and draft artifact boundaries. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
+- `.planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md` - locked decisions for transcript-only input, env-driven runtime, shared state, and draft artifact boundaries. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md]
 
 ### Secondary (MEDIUM confidence)
 - https://github.com/ggml-org/llama.cpp/blob/master/README.md - local CLI/server model, GGUF requirement, quantization, and supported Qwen family. [CITED: https://github.com/ggml-org/llama.cpp/blob/master/README.md]
@@ -439,7 +439,7 @@ await execFileAsync(config.summary.command, [
 **Confidence breakdown:**
 - Standard stack: MEDIUM - the internal Node/service pattern is clear, but the exact deployed summary CLI binary and GGUF artifact are not yet installed or pinned in-repo. [VERIFIED: codebase grep] [ASSUMED]
 - Architecture: HIGH - the repo already contains the config, file-layout, and draft-state patterns that Phase 9 should extend. [VERIFIED: codebase grep]
-- Pitfalls: HIGH - the failure modes follow directly from locked phase decisions and the current transcription/state implementation. [VERIFIED: .planning/phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
+- Pitfalls: HIGH - the failure modes follow directly from locked phase decisions and the current transcription/state implementation. [VERIFIED: .planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-CONTEXT.md] [VERIFIED: codebase grep]
 
 **Research date:** 2026-07-23 [VERIFIED: local command `date -Iseconds`]
 **Valid until:** 2026-08-22 for repo-internal architecture, 2026-07-30 for external runtime/model guidance. [VERIFIED: synthesis from source stability]

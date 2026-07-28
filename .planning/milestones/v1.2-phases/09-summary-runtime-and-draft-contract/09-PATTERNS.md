@@ -577,6 +577,6 @@ update(episodeId: number, input: EpisodeInput): EpisodeRow | null {
 
 ## Metadata
 
-**Analog search scope:** `src/config`, `src/services`, `src/routes`, `src/database/repositories`, `src/schemas`, `docs`, `.planning/phases/09-summary-runtime-and-draft-contract`
+**Analog search scope:** `src/config`, `src/services`, `src/routes`, `src/database/repositories`, `src/schemas`, `docs`, `.planning/milestones/v1.2-phases/09-summary-runtime-and-draft-contract`
 **Files scanned:** 9 primary files plus phase context artifacts
 **Pattern extraction date:** 2026-07-23
