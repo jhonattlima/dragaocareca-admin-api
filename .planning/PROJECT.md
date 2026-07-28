@@ -14,6 +14,15 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
 
+## Current Milestone: v1.3 Episode Artifact Downloads
+
+**Goal:** Allow administrators to download the final media artifacts for one episode as a controlled ZIP archive.
+
+**Target features:**
+- Protected artifact-download endpoint with all-artifact and selected-artifact modes.
+- English artifact selectors: `episode`, `trailer`, `transcript`, `image`, and `image-low`.
+- ZIP response that reports partially missing requested artifacts without exposing internal paths.
+
 ## Requirements
 
 ### Validated
@@ -32,8 +41,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 
 ### Active
 
-- No active v1.2 requirements remain.
-- Define the next milestone requirements with `$gsd-new-milestone`.
+- Define and deliver the v1.3 episode artifact-download requirements.
 
 ### Out of Scope
 
@@ -43,11 +51,11 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Replacing the admin authentication model — auth bypass and admin auth behavior remain as-is.
 - `admin-web` integration for pre-filling the summary field — defer to a later milestone in the frontend project.
 - Finalizing Gemini as the permanent transcription provider — tracked in `.planning/STATE.md` as deferred technical debt.
-- Generating anything beyond summary text (title, tags, guests, etc.) — summary only in this milestone.
+- Staging, backup, and arbitrary-path downloads — v1.3 is limited to final episode artifacts.
 
 ## Context
 
-The backend already owns episode media layout and transcript generation. Transcripts are written into the episode folder and are now the source input for the next AI feature track: generating a summary suggestion inside `admin-api`. This milestone intentionally focuses on the backend workflow only; the frontend integration that consumes the suggestion will happen later in the frontend project.
+The backend already owns episode media layout, transcript generation, summary drafting, and final media storage. v1.3 adds an administrator-only ZIP download surface over the final episode folder, with a fixed artifact allowlist and explicit partial-availability behavior.
 
 ## Constraints
 
@@ -58,6 +66,7 @@ The backend already owns episode media layout and transcript generation. Transcr
 - **Terminology**: Use `supporters` naming in public contracts instead of `patreon`.
 - **Runtime**: The Hostinger VPS target has 4 GB RAM — AI work must run sequentially and stay lightweight.
 - **Integration**: Reuse the existing transcript workflow rather than redesigning transcription in this milestone.
+- **Security**: Artifact download must use a fixed allowlist and final media layout only — never accept filesystem paths from a request.
 
 ## Key Decisions
 
@@ -123,4 +132,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-28 after consolidating the Gemini AI-authoring follow-up*
+*Last updated: 2026-07-28 after starting milestone v1.3*

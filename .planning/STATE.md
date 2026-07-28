@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Episode AI authoring API
-status: shipped
-last_updated: "2026-07-28T00:00:00.000Z"
+milestone: v1.3
+milestone_name: Episode Artifact Downloads
+status: planning
+last_updated: "2026-07-28T22:07:35.632Z"
 last_activity: 2026-07-28
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Milestone v1.2 shipped; next milestone not yet defined
+**Current focus:** Define requirements and roadmap for v1.3 Episode Artifact Downloads
 
 ## Current Position
 
-Phase: Complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Milestone shipped
-Last activity: 2026-07-28 — Gemini transcript/summary hardening, verification, and documentation consolidation completed
+Status: Defining requirements
+Last activity: 2026-07-28 — Milestone v1.3 started
 
 ## Accumulated Context
 
@@ -47,7 +47,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Define the next milestone with `$gsd-new-milestone`.
+- Define v1.3 requirements and roadmap, then begin with `$gsd-plan-phase [N]`.
 
 ### Blockers/Concerns
 
@@ -70,5 +70,5 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 ## Session Continuity
 
 Last session: 2026-07-28
-Stopped at: Completed documentation consolidation and GSD planning-structure review; waiting for next milestone definition
+Stopped at: Milestone v1.3 started; awaiting research decision before requirements and roadmap definition
 Resume file: None
