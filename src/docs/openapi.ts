@@ -699,6 +699,68 @@ export const swaggerSpec = swaggerJsdoc({
           responses: { "201": { description: "Created" }, "401": { description: "Unauthorized" } },
         },
       },
+      "/v1/episodes/{episodeId}/artifacts/download": {
+        get: {
+          tags: ["Episodes"],
+          summary: "Download final episode artifacts as a ZIP archive",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: "episodeId",
+              in: "path",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+              description: "Positive episode identifier.",
+            },
+            {
+              name: "artifacts",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] },
+              description: "One CSV query value selecting episode, trailer, transcript, image, and/or image-low. Omit to select all.",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "ZIP archive containing available requested final artifacts.",
+              headers: {
+                "Content-Disposition": {
+                  description: "Deterministic attachment filename: episode-{episodeId}-artifacts.zip.",
+                  schema: { type: "string" },
+                },
+                "X-Missing-Artifacts": {
+                  description: "Comma-separated selector names for requested final artifacts that were unavailable.",
+                  schema: { type: "string" },
+                },
+              },
+              content: { "application/zip": { schema: { type: "string", format: "binary" } } },
+            },
+            "400": { description: "Invalid positive episodeId or artifacts selector query." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "404": {
+              description: "Either `{ message: \"Episode not found\" }` or `{ message: \"No requested artifacts found\" }`.",
+              content: {
+                "application/json": {
+                  schema: {
+                    oneOf: [
+                      {
+                        type: "object",
+                        required: ["message"],
+                        properties: { message: { type: "string", enum: ["Episode not found"] } },
+                      },
+                      {
+                        type: "object",
+                        required: ["message"],
+                        properties: { message: { type: "string", enum: ["No requested artifacts found"] } },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/v1/episodes/{episodeId}": {
         get: {
           tags: ["Episodes"],
