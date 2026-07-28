@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Archiver } from "archiver" with { "resolution-mode": "import" };
+import type { ZipArchive } from "archiver" with { "resolution-mode": "import" };
 import multer from "multer";
 import { Router } from "express";
 import { config } from "../config/env";
@@ -33,6 +33,8 @@ import {
 } from "../services/episode-media-layout.service";
 
 export const episodesRouter = Router();
+
+type ArchiverZip = ZipArchive;
 
 const queueCoverMosaicRefresh = (): void => {
   void refreshCoverMosaicBackground().catch((error: unknown) => {
@@ -473,7 +475,7 @@ episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, re
       return;
     }
 
-    const archiver = require("archiver") as (format: "zip") => Archiver;
+    const { ZipArchive } = require("archiver") as { ZipArchive: new () => ArchiverZip };
     res.status(200);
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
@@ -481,7 +483,7 @@ episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, re
       res.setHeader("X-Missing-Artifacts", preflight.missing.join(","));
     }
 
-    const archive = archiver("zip");
+    const archive = new ZipArchive();
     const logArchiveFailure = (event: "warning" | "error"): void => {
       console.error("Episode artifact archive failure", {
         event,
