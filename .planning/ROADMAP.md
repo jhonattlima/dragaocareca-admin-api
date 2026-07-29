@@ -73,7 +73,7 @@ Plans:
 **Goal:** Let authenticated administrators prepare a final-artifact ZIP on the server, poll its queue and assembly progress, then download a validated cached archive.
 **Requirements**: ZIP-01, ZIP-02, ZIP-03, ZIP-04, ZIP-05, ZIP-06, ZIP-07
 **Depends on:** Phase 12
-**Plans:** 0 plans
+**Plans:** 1/3 plans executed
 
 **Success criteria:**
 
@@ -85,7 +85,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 13-01-PLAN.md — preparation lifecycle verifier and persisted FIFO core.
+- [x] 13-01-PLAN.md — preparation lifecycle verifier and persisted FIFO core.
 - [ ] 13-02-PLAN.md — startup recovery worker and protected lifecycle routes.
 
 **Wave 2** *(blocked on Wave 1 completion)*

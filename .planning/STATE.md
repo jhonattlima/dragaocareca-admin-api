@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Episode Artifact Downloads
-current_phase: 12
+current_phase: 13
+current_phase_name: return-zip-progress-to-user
 status: executing
-stopped_at: Phase 13 context gathered
-last_updated: "2026-07-29T03:48:00.463Z"
-last_activity: 2026-07-28
-last_activity_desc: Phase 12 marked complete
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-07-29T03:55:27.631Z"
+last_activity: 2026-07-29
+last_activity_desc: Phase 13 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
-current_phase_name: Secure Episode Artifact Downloads
+  completed_plans: 5
 ---
 
 # Project State
@@ -23,14 +23,14 @@ current_phase_name: Secure Episode Artifact Downloads
 See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 12 — Secure Episode Artifact Downloads
+**Current focus:** Phase 13 — return-zip-progress-to-user
 
 ## Current Position
 
-Phase: 12 — COMPLETE
-Plan: 4 of 4
+Phase: 13 (return-zip-progress-to-user) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-07-28 — Phase 12 marked complete
+Last activity: 2026-07-29 — Phase 13 execution started
 
 ## Accumulated Context
 
@@ -53,6 +53,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Use lstat so only regular canonical final files can enter artifact preflight; symlinks and directories are treated as missing.
 - [Phase ?]: Accept duplicate selector values only within one valid CSV and normalize them into the fixed catalog order; reject repeated query keys.
 - [Phase ?]: Use Archiver v8 ZipArchive at runtime and install @types/archiver only after compiler evidence.
+- [Phase ?]: Persist selector names, generated basenames, and SHA-256-or-missing evidence only; never persist source paths.
+- [Phase ?]: Revalidate the complete evidence map before ready reuse, status exposure, and archive streaming.
+- [Phase ?]: Publish ZIP output only after same-directory temporary output closes and renames successfully.
 
 ### Pending Todos
 
@@ -82,9 +85,9 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-29T02:14:39.048Z
-Stopped at: Phase 13 context gathered
-Resume file: .planning/phases/13-return-zip-progress-to-user/13-CONTEXT.md
+Last session: 2026-07-29T03:55:27.625Z
+Stopped at: Completed 13-01-PLAN.md
+Resume file: None
 
 ## Performance Metrics
 
@@ -94,3 +97,4 @@ Resume file: .planning/phases/13-return-zip-progress-to-user/13-CONTEXT.md
 | Phase 12 P02 | 3min | 2 tasks | 3 files |
 | Phase 12 P03 | 1min | 2 tasks | 2 files |
 | Phase 12 P04 | 8min | 2 tasks | 5 files |
+| Phase 13-return-zip-progress-to-user P01 | 24min | 2 tasks | 2 files |
