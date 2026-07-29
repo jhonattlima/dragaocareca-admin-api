@@ -33,6 +33,11 @@ type PreparationStatus = {
   expiresAt: string | null;
 };
 
+type OpenApiStringSchema = {
+  type?: unknown;
+  pattern?: unknown;
+};
+
 type PreparationService = {
   initializeEpisodeArtifactPreparations: (options?: { now?: Date }) => Promise<void>;
   prepareEpisodeArtifactArchive: (
@@ -98,6 +103,9 @@ const selectors = (artifacts: unknown): string[] => parseEpisodeArtifactSelector
 const assertInvalidSelectorInput = (artifacts: unknown): void => {
   assert.throws(() => parseEpisodeArtifactSelectors(artifacts), EpisodeArtifactSelectorValidationError);
 };
+
+const schemaAcceptsString = (schema: OpenApiStringSchema | undefined, value: string): boolean =>
+  schema?.type === "string" && typeof schema.pattern === "string" && new RegExp(schema.pattern).test(value);
 
 const assertNoInternalFields = (value: unknown): void => {
   const forbidden = new Set(["path", "manifest", "fingerprint", "cacheKey", "archiveFileName", "storageRoot", "errorCode"]);
@@ -226,6 +234,9 @@ const verifyPreparationLifecycle = async (): Promise<void> => {
   const cacheHistory = matchingManifests.filter((manifest) => manifest.cacheKey === cacheKey);
   assert.equal(cacheHistory.filter((manifest) => manifest.state === "expired").length, 1);
   assert.equal(cacheHistory.filter((manifest) => manifest.state === "queued" || manifest.state === "preparing").length, 1);
+  const retriedReady = await preparationService.processNextEpisodeArtifactPreparation({ now: start });
+  assert.ok(retriedReady);
+  assertPreparationStatus(retriedReady, "ready");
 
   const missingJob = await preparationService.prepareEpisodeArtifactArchive(
     fixtureEpisodeId,
@@ -358,10 +369,18 @@ const verifyOpenApiContract = (): void => {
   const download = paths?.["/v1/episodes/{episodeId}/artifacts/preparations/{jobId}/download"]?.get;
   const legacy = paths?.["/v1/episodes/{episodeId}/artifacts/download"]?.get;
   const statusSchema = (swaggerSpec as { components?: { schemas?: Record<string, any> } }).components?.schemas?.EpisodeArtifactPreparationStatus;
+  const artifactsSchema = prepare?.parameters?.find((parameter: { name?: string; in?: string }) =>
+    parameter.name === "artifacts" && parameter.in === "query"
+  )?.schema as OpenApiStringSchema | undefined;
+  const representativeCsv = "episode,transcript";
+  const outsideSelector = "outside";
 
   for (const operation of [prepare, status, download, legacy]) assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
   assert.equal(prepare?.parameters?.[0]?.schema?.minimum, 1);
-  assert.equal(prepare?.parameters?.[1]?.schema?.type, "string");
+  assert.deepEqual(selectors(representativeCsv), ["episode", "transcript"]);
+  assert.equal(schemaAcceptsString(artifactsSchema, representativeCsv), true);
+  assertInvalidSelectorInput(outsideSelector);
+  assert.equal(schemaAcceptsString(artifactsSchema, outsideSelector), false);
   assert.ok(prepare?.responses?.["200"] && prepare?.responses?.["202"] && prepare?.responses?.["400"] && prepare?.responses?.["401"] && prepare?.responses?.["404"]);
   assert.equal(prepare?.responses?.["202"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
   assert.equal(status?.responses?.["200"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
@@ -409,11 +428,12 @@ const verifyRouteContract = async (): Promise<void> => {
   assert.equal(absent.statusCode, 404);
   assert.deepEqual(absent.jsonBody, { message: "Episode not found" });
   assert.equal(absent.getHeader("cache-control"), "no-store");
-  const prepared = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "transcript");
+  const prepared = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode,transcript");
   assert.equal(prepared.statusCode, 202);
   assert.equal(prepared.getHeader("cache-control"), "no-store");
   const queued = prepared.jsonBody as PreparationStatus;
   assertPreparationStatus(queued, "queued");
+  assert.deepEqual(queued.requested, ["episode", "transcript"]);
   const queuedAgain = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode");
   assert.equal(queuedAgain.statusCode, 202);
   const secondQueued = queuedAgain.jsonBody as PreparationStatus;
@@ -472,10 +492,13 @@ const verifyRouteContract = async (): Promise<void> => {
   assert.equal(download.statusCode, 200);
   assert.equal(download.getHeader("cache-control"), "no-store");
   assert.equal(download.getHeader("content-type"), "application/zip");
-  assert.deepEqual(readZipEntryNames(Buffer.concat(download.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
+  assert.deepEqual(readZipEntryNames(Buffer.concat(download.chunks)), [
+    `episode-${fixtureEpisodeId}/audio.mp3`,
+    `episode-${fixtureEpisodeId}/transcript.txt`,
+  ]);
   await preparationService.processNextEpisodeArtifactPreparation();
 
-  const readyAgain = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "transcript");
+  const readyAgain = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode,transcript");
   assert.equal(readyAgain.statusCode, 200);
   assert.equal((readyAgain.jsonBody as PreparationStatus).jobId, queued.jobId);
 
@@ -560,6 +583,7 @@ export const main = async (): Promise<void> => {
     await verifyPreflightContract();
     verifyOpenApiContract();
     await verifyRouteContract();
+    await fs.promises.rm(preparationRoot, { recursive: true, force: true });
     await createFixtures();
     await verifyPreparationLifecycle();
   } finally {
