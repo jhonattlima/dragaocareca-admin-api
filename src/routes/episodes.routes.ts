@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ZipArchive } from "archiver" with { "resolution-mode": "import" };
 import multer from "multer";
 import { Router } from "express";
 import { config } from "../config/env";
@@ -24,6 +23,11 @@ import {
   preflightEpisodeArtifactDownloads,
 } from "../services/episode-artifact-download.service";
 import {
+  getEpisodeArtifactPreparationStatus,
+  getValidatedEpisodeArtifactPreparationDownload,
+  prepareEpisodeArtifactArchive,
+} from "../services/episode-artifact-preparation.service";
+import {
   getEpisodeMediaBackupPath,
   findExistingEpisodeMediaPath,
   getEpisodeMediaFinalPath,
@@ -34,21 +38,18 @@ import {
 
 export const episodesRouter = Router();
 
-type ArchiverZip = ZipArchive;
-
 const queueCoverMosaicRefresh = (): void => {
   void refreshCoverMosaicBackground().catch((error: unknown) => {
     console.warn("Cover mosaic refresh failed", error instanceof Error ? error.message : String(error));
   });
 };
 
-const logArtifactDownload = (details: {
+const logArtifactPreparation = (details: {
+  event: "queued" | "cache-hit" | "downloaded" | "not-ready" | "expired" | "not-found";
   episodeId: number;
-  requested: string[];
-  available: string[];
-  missing: string[];
+  selectors: string[];
 }): void => {
-  console.info("Episode artifact download", details);
+  console.info("Episode artifact preparation", details);
 };
 
 for (const directory of [config.media.episodesDir, config.media.episodesStagingDir, config.media.backupEpisodesDir]) {
@@ -427,13 +428,10 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, res, next) => {
-  let streaming = false;
-
+episodesRouter.post("/:episodeId/artifacts/prepare", requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
-      logArtifactDownload({ episodeId, requested: [], available: [], missing: [] });
       res.status(400).json({ message: "Invalid episodeId" });
       return;
     }
@@ -443,7 +441,6 @@ episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, re
       selectedArtifacts = parseEpisodeArtifactSelectors(req.query.artifacts);
     } catch (error) {
       if (error instanceof EpisodeArtifactSelectorValidationError) {
-        logArtifactDownload({ episodeId, requested: [], available: [], missing: [] });
         res.status(400).json({ message: error.message });
         return;
       }
@@ -452,77 +449,131 @@ episodesRouter.get("/:episodeId/artifacts/download", requireAuth, async (req, re
 
     const episode = episodeRepository.findByEpisodeId(episodeId);
     if (!episode) {
-      logArtifactDownload({
-        episodeId,
-        requested: selectedArtifacts.map((artifact) => artifact.selector),
-        available: [],
-        missing: [],
-      });
       res.status(404).json({ message: "Episode not found" });
       return;
     }
 
     const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
-    logArtifactDownload({
-      episodeId,
-      requested: preflight.requested,
-      available: preflight.available.map((artifact) => artifact.selector),
-      missing: preflight.missing,
-    });
-
     if (preflight.available.length === 0) {
       res.status(404).json({ message: "No requested artifacts found" });
       return;
     }
 
-    const { ZipArchive } = require("archiver") as { ZipArchive: new () => ArchiverZip };
-    res.status(200);
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
-    if (preflight.missing.length > 0) {
-      res.setHeader("X-Missing-Artifacts", preflight.missing.join(","));
-    }
-
-    const archive = new ZipArchive();
-    const logArchiveFailure = (event: "warning" | "error"): void => {
-      console.error("Episode artifact archive failure", {
-        event,
-        episodeId,
-        requested: preflight.requested,
-        available: preflight.available.map((artifact) => artifact.selector),
-        missing: preflight.missing,
-      });
-    };
-
-    archive.on("warning", () => logArchiveFailure("warning"));
-    archive.on("error", (error: Error) => {
-      logArchiveFailure("error");
-      if (!res.destroyed) {
-        res.destroy(error);
-      }
+    const status = await prepareEpisodeArtifactArchive(episodeId, selectedArtifacts);
+    logArtifactPreparation({
+      event: status.state === "ready" ? "cache-hit" : "queued",
+      episodeId,
+      selectors: status.requested,
     });
-    streaming = true;
-    archive.pipe(res);
-
-    for (const artifact of preflight.available) {
-      archive.file(artifact.path, { name: artifact.archiveEntryName });
-    }
-
-    void archive.finalize().catch((error: unknown) => {
-      logArchiveFailure("error");
-      if (!res.destroyed) {
-        res.destroy(error as Error);
-      }
-    });
+    res.setHeader("Cache-Control", "no-store");
+    res.status(status.state === "ready" ? 200 : 202).json(status);
   } catch (error) {
-    if (streaming) {
-      if (!res.destroyed) {
-        res.destroy(error as Error);
-      }
-      return;
-    }
     next(error);
   }
+});
+
+episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const jobId = req.params.jobId;
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (typeof jobId !== "string" || jobId.length === 0) {
+      res.status(404).json({ message: "Artifact preparation not found" });
+      return;
+    }
+
+    const status = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
+    if (!status) {
+      logArtifactPreparation({ event: "not-found", episodeId, selectors: [] });
+      res.status(404).json({ message: "Artifact preparation not found" });
+      return;
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json(status);
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const jobId = req.params.jobId;
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (typeof jobId !== "string" || jobId.length === 0) {
+      res.status(404).json({ message: "Artifact preparation not found" });
+      return;
+    }
+
+    const status = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
+    if (!status) {
+      logArtifactPreparation({ event: "not-found", episodeId, selectors: [] });
+      res.status(404).json({ message: "Artifact preparation not found" });
+      return;
+    }
+    if (status.state === "expired") {
+      logArtifactPreparation({ event: "expired", episodeId, selectors: status.requested });
+      res.status(410).json({ message: "Artifact preparation expired" });
+      return;
+    }
+    if (status.state !== "ready") {
+      logArtifactPreparation({ event: "not-ready", episodeId, selectors: status.requested });
+      res.status(409).json({ message: "Artifact archive is not ready" });
+      return;
+    }
+
+    const download = await getValidatedEpisodeArtifactPreparationDownload(episodeId, jobId);
+    if (!download) {
+      const refreshed = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
+      if (refreshed?.state === "expired") {
+        logArtifactPreparation({ event: "expired", episodeId, selectors: status.requested });
+        res.status(410).json({ message: "Artifact preparation expired" });
+        return;
+      }
+      logArtifactPreparation({ event: "not-ready", episodeId, selectors: status.requested });
+      res.status(409).json({ message: "Artifact archive is not ready" });
+      return;
+    }
+
+    res.status(200);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
+    if (download.status.missing.length > 0) {
+      res.setHeader("X-Missing-Artifacts", download.status.missing.join(","));
+    }
+    download.stream.on("error", () => {
+      console.error("Episode artifact preparation download failed", {
+        episodeId,
+        selectors: download.status.requested,
+      });
+      if (!res.destroyed) res.destroy();
+    });
+    logArtifactPreparation({ event: "downloaded", episodeId, selectors: download.status.requested });
+    download.stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/artifacts/download", requireAuth, (req, res) => {
+  const episodeId = Number(req.params.episodeId);
+  if (!Number.isInteger(episodeId) || episodeId <= 0) {
+    res.status(400).json({ message: "Invalid episodeId" });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.status(410).json({
+    message: "Artifact downloads now require preparation",
+    prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
+  });
 });
 
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {

@@ -56,7 +56,7 @@ type PreparationService = {
 type RouteHandler = (req: FakeRequest, res: MemoryResponse, next: (error?: unknown) => void) => void | Promise<void>;
 
 type FakeRequest = {
-  params: { episodeId: string };
+  params: { episodeId: string; jobId?: string };
   query: { artifacts?: unknown };
   headers: { authorization?: string };
   user?: { email: string };
@@ -261,16 +261,24 @@ const createFixtureEpisode = (): void => {
   });
 };
 
-const getDownloadHandlers = (): RouteHandler[] => {
-  const router = episodesRouter as unknown as { stack?: Array<{ route?: { path?: string; stack?: Array<{ handle: RouteHandler }> } }> };
-  const route = router.stack?.find((layer) => layer.route?.path === "/:episodeId/artifacts/download")?.route;
-  if (!route?.stack || route.stack.length !== 2) throw new Error("artifact download route stack not found");
+const getRouteHandlers = (path: string, method: "get" | "post"): RouteHandler[] => {
+  const router = episodesRouter as unknown as {
+    stack?: Array<{ route?: { path?: string; methods?: Record<string, boolean>; stack?: Array<{ handle: RouteHandler }> } }>;
+  };
+  const route = router.stack?.find((layer) => layer.route?.path === path && layer.route.methods?.[method])?.route;
+  if (!route?.stack || route.stack.length !== 2) throw new Error(`artifact route stack not found: ${method} ${path}`);
   return route.stack.map((layer) => layer.handle);
 };
 
-const invokeDownload = async (episodeId: string, artifacts?: unknown, authorization?: string): Promise<MemoryResponse> => {
-  const handlers = getDownloadHandlers();
-  const req: FakeRequest = { params: { episodeId }, query: artifacts === undefined ? {} : { artifacts }, headers: { authorization } };
+const invokeRoute = async (
+  path: string,
+  method: "get" | "post",
+  params: FakeRequest["params"],
+  artifacts?: unknown,
+  authorization?: string
+): Promise<MemoryResponse> => {
+  const handlers = getRouteHandlers(path, method);
+  const req: FakeRequest = { params, query: artifacts === undefined ? {} : { artifacts }, headers: { authorization } };
   const res = new MemoryResponse();
   await new Promise<void>((resolve, reject) => {
     let index = 0;
@@ -320,34 +328,74 @@ const verifyRouteContract = async (): Promise<void> => {
   const originalBypass = config.auth.bypassInDev;
   config.auth.bypassInDev = false;
   try {
-    const unauthorized = await invokeDownload(String(fixtureEpisodeId));
-    assert.equal(unauthorized.statusCode, 401);
-    assert.deepEqual(unauthorized.jsonBody, { message: "Missing Bearer token" });
+    for (const [path, method, params] of [
+      ["/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }],
+      ["/:episodeId/artifacts/preparations/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: "missing" }],
+      ["/:episodeId/artifacts/preparations/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: "missing" }],
+      ["/:episodeId/artifacts/download", "get", { episodeId: String(fixtureEpisodeId) }],
+    ] as const) {
+      const unauthorized = await invokeRoute(path, method, params);
+      assert.equal(unauthorized.statusCode, 401);
+      assert.deepEqual(unauthorized.jsonBody, { message: "Missing Bearer token" });
+    }
   } finally {
     config.auth.bypassInDev = originalBypass;
   }
 
-  const invalid = await invokeDownload(String(fixtureEpisodeId), "episode,,trailer");
+  const invalid = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode,,trailer");
   assert.equal(invalid.statusCode, 400);
-  const absent = await invokeDownload("987654322");
+  const absent = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: "987654322" });
   assert.equal(absent.statusCode, 404);
   assert.deepEqual(absent.jsonBody, { message: "Episode not found" });
-  const partial = await invokeDownload(String(fixtureEpisodeId));
-  assert.equal(partial.statusCode, 200);
-  assert.equal(partial.getHeader("content-type"), "application/zip");
-  assert.equal(partial.getHeader("content-disposition"), `attachment; filename="episode-${fixtureEpisodeId}-artifacts.zip"`);
-  assert.equal(partial.getHeader("x-missing-artifacts"), "trailer,image,image-low");
-  assert.deepEqual(readZipEntryNames(Buffer.concat(partial.chunks)), [
-    `episode-${fixtureEpisodeId}/audio.mp3`,
-    `episode-${fixtureEpisodeId}/transcript.txt`,
-  ]);
-  const oneFile = await invokeDownload(String(fixtureEpisodeId), "transcript");
-  assert.deepEqual(readZipEntryNames(Buffer.concat(oneFile.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
-  await fs.promises.rm(getEpisodeMediaFinalPath(fixtureEpisodeId, "audio"));
-  await fs.promises.rm(getEpisodeMediaFinalPath(fixtureEpisodeId, "transcript"));
-  const none = await invokeDownload(String(fixtureEpisodeId));
-  assert.equal(none.statusCode, 404);
-  assert.deepEqual(none.jsonBody, { message: "No requested artifacts found" });
+  const prepared = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "transcript");
+  assert.equal(prepared.statusCode, 202);
+  assert.equal(prepared.getHeader("cache-control"), "no-store");
+  const queued = prepared.jsonBody as PreparationStatus;
+  assertPreparationStatus(queued, "queued");
+
+  const queuedStatus = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assert.equal(queuedStatus.statusCode, 200);
+  assert.equal(queuedStatus.getHeader("cache-control"), "no-store");
+  assertPreparationStatus(queuedStatus.jsonBody as PreparationStatus, "queued");
+
+  const notReady = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId/download",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assert.equal(notReady.statusCode, 409);
+  assert.deepEqual(notReady.jsonBody, { message: "Artifact archive is not ready" });
+
+  const preparationService = loadPreparationService();
+  await preparationService.processNextEpisodeArtifactPreparation();
+  const readyStatus = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assertPreparationStatus(readyStatus.jsonBody as PreparationStatus, "ready");
+
+  const download = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId/download",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assert.equal(download.statusCode, 200);
+  assert.equal(download.getHeader("cache-control"), "no-store");
+  assert.equal(download.getHeader("content-type"), "application/zip");
+  assert.deepEqual(readZipEntryNames(Buffer.concat(download.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
+
+  const migration = await invokeRoute("/:episodeId/artifacts/download", "get", { episodeId: String(fixtureEpisodeId) });
+  assert.equal(migration.statusCode, 410);
+  assert.equal(migration.getHeader("cache-control"), "no-store");
+  assert.deepEqual(migration.jsonBody, {
+    message: "Artifact downloads now require preparation",
+    prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
+  });
 };
 
 export const main = async (): Promise<void> => {
