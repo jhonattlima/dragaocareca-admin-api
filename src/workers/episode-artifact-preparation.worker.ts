@@ -1,4 +1,5 @@
 import {
+  cleanupExpiredEpisodeArtifactPreparations,
   initializeEpisodeArtifactPreparations,
   processNextEpisodeArtifactPreparation,
 } from "../services/episode-artifact-preparation.service";
@@ -16,6 +17,8 @@ const runOnce = async (): Promise<void> => {
 
   activeRun = (async () => {
     try {
+      // D-05 through D-07: polling cleans completed TTL rows before taking the FIFO job.
+      await cleanupExpiredEpisodeArtifactPreparations();
       await initializeEpisodeArtifactPreparations({ recoverInterrupted: !recoveredAtStartup });
       recoveredAtStartup = true;
       await processNextEpisodeArtifactPreparation();
@@ -30,6 +33,7 @@ const runOnce = async (): Promise<void> => {
 };
 
 export const startEpisodeArtifactPreparationWorker = async (): Promise<() => void> => {
+  recoveredAtStartup = false;
   await runOnce();
 
   if (!pollTimer) {

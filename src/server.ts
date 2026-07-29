@@ -25,6 +25,7 @@ const bootstrap = async (): Promise<void> => {
   if (backgroundWorkersDisabled) {
     console.info("Background workers disabled by DISABLE_BACKGROUND_WORKERS=true");
   } else {
+    // Artifact jobs are persisted and restart-safe; the worker owns recovery and TTL cleanup.
     await startEpisodeArtifactPreparationWorker();
     await startEpisodeTranscriptionWorker();
     await startLaunchNotificationWorker();
