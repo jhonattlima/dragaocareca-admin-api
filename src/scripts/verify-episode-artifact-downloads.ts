@@ -99,6 +99,19 @@ const assertInvalidSelectorInput = (artifacts: unknown): void => {
   assert.throws(() => parseEpisodeArtifactSelectors(artifacts), EpisodeArtifactSelectorValidationError);
 };
 
+const assertNoInternalFields = (value: unknown): void => {
+  const forbidden = new Set(["path", "manifest", "fingerprint", "cacheKey", "archiveFileName", "storageRoot", "errorCode"]);
+  if (Array.isArray(value)) {
+    value.forEach(assertNoInternalFields);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    assert.equal(forbidden.has(key), false, `unexpected internal field: ${key}`);
+    assertNoInternalFields(child);
+  }
+};
+
 const verifySelectorContract = (): void => {
   assert.deepEqual(selectors(undefined), ["episode", "trailer", "transcript", "image", "image-low"]);
   assert.deepEqual(selectors("image-low,episode,episode,image"), ["episode", "image", "image-low"]);
@@ -266,7 +279,7 @@ const getRouteHandlers = (path: string, method: "get" | "post"): RouteHandler[] 
     stack?: Array<{ route?: { path?: string; methods?: Record<string, boolean>; stack?: Array<{ handle: RouteHandler }> } }>;
   };
   const route = router.stack?.find((layer) => layer.route?.path === path && layer.route.methods?.[method])?.route;
-  if (!route?.stack || route.stack.length !== 2) throw new Error(`artifact route stack not found: ${method} ${path}`);
+  if (!route?.stack || route.stack.length < 2) throw new Error(`artifact route stack not found: ${method} ${path}`);
   return route.stack.map((layer) => layer.handle);
 };
 
@@ -316,12 +329,27 @@ const verifyPreflightContract = async (): Promise<void> => {
 
 const verifyOpenApiContract = (): void => {
   const paths = (swaggerSpec as { paths?: Record<string, any> }).paths;
-  const operation = paths?.["/v1/episodes/{episodeId}/artifacts/download"]?.get;
-  assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
-  assert.equal(operation?.parameters?.[0]?.schema?.minimum, 1);
-  assert.equal(operation?.parameters?.[1]?.schema?.type, "string");
-  assert.ok(operation?.responses?.["200"]?.headers?.["X-Missing-Artifacts"]);
-  assert.ok(operation?.responses?.["400"] && operation?.responses?.["401"] && operation?.responses?.["404"]);
+  const prepare = paths?.["/v1/episodes/{episodeId}/artifacts/prepare"]?.post;
+  const status = paths?.["/v1/episodes/{episodeId}/artifacts/preparations/{jobId}"]?.get;
+  const download = paths?.["/v1/episodes/{episodeId}/artifacts/preparations/{jobId}/download"]?.get;
+  const legacy = paths?.["/v1/episodes/{episodeId}/artifacts/download"]?.get;
+  const statusSchema = (swaggerSpec as { components?: { schemas?: Record<string, any> } }).components?.schemas?.EpisodeArtifactPreparationStatus;
+
+  for (const operation of [prepare, status, download, legacy]) assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+  assert.equal(prepare?.parameters?.[0]?.schema?.minimum, 1);
+  assert.equal(prepare?.parameters?.[1]?.schema?.type, "string");
+  assert.ok(prepare?.responses?.["200"] && prepare?.responses?.["202"] && prepare?.responses?.["400"] && prepare?.responses?.["401"] && prepare?.responses?.["404"]);
+  assert.equal(prepare?.responses?.["202"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
+  assert.equal(status?.responses?.["200"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
+  assert.ok(status?.responses?.["400"] && status?.responses?.["401"] && status?.responses?.["404"]);
+  assert.equal(download?.responses?.["200"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
+  assert.ok(download?.responses?.["200"]?.headers?.["X-Missing-Artifacts"]);
+  assert.ok(download?.responses?.["400"] && download?.responses?.["401"] && download?.responses?.["404"] && download?.responses?.["409"] && download?.responses?.["410"]);
+  assert.equal(legacy?.deprecated, true);
+  assert.equal(legacy?.responses?.["410"]?.headers?.["Cache-Control"]?.schema?.example, "no-store");
+  assert.match(JSON.stringify(legacy?.responses?.["410"]), /POST \/v1\/episodes\/:episodeId\/artifacts\/prepare/);
+  assert.deepEqual(Object.keys(statusSchema?.properties ?? {}).sort(), ["available", "downloadUrl", "episodeId", "expiresAt", "jobId", "missing", "progress", "queuePosition", "requested", "state", "stateText"]);
+  assertNoInternalFields({ prepare, status, download, legacy, statusSchema });
 };
 
 const verifyRouteContract = async (): Promise<void> => {
@@ -337,6 +365,7 @@ const verifyRouteContract = async (): Promise<void> => {
       const unauthorized = await invokeRoute(path, method, params);
       assert.equal(unauthorized.statusCode, 401);
       assert.deepEqual(unauthorized.jsonBody, { message: "Missing Bearer token" });
+      assert.equal(unauthorized.getHeader("cache-control"), "no-store");
     }
   } finally {
     config.auth.bypassInDev = originalBypass;
@@ -344,14 +373,21 @@ const verifyRouteContract = async (): Promise<void> => {
 
   const invalid = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode,,trailer");
   assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.getHeader("cache-control"), "no-store");
   const absent = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: "987654322" });
   assert.equal(absent.statusCode, 404);
   assert.deepEqual(absent.jsonBody, { message: "Episode not found" });
+  assert.equal(absent.getHeader("cache-control"), "no-store");
   const prepared = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "transcript");
   assert.equal(prepared.statusCode, 202);
   assert.equal(prepared.getHeader("cache-control"), "no-store");
   const queued = prepared.jsonBody as PreparationStatus;
   assertPreparationStatus(queued, "queued");
+  const queuedAgain = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode");
+  assert.equal(queuedAgain.statusCode, 202);
+  const secondQueued = queuedAgain.jsonBody as PreparationStatus;
+  assertPreparationStatus(secondQueued, "queued");
+  assert.equal(secondQueued.queuePosition, 2);
 
   const queuedStatus = await invokeRoute(
     "/:episodeId/artifacts/preparations/:jobId",
@@ -362,6 +398,22 @@ const verifyRouteContract = async (): Promise<void> => {
   assert.equal(queuedStatus.getHeader("cache-control"), "no-store");
   assertPreparationStatus(queuedStatus.jsonBody as PreparationStatus, "queued");
 
+  const manifestPath = path.join(preparationRoot, "manifests", `${queued.jobId}.json`);
+  const queuedManifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  await fs.promises.writeFile(manifestPath, JSON.stringify({ ...queuedManifest, state: "preparing", progress: 42, stateText: "Preparing archive" }));
+  const preparingStatus = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  const preparing = preparingStatus.jsonBody as PreparationStatus;
+  assertPreparationStatus(preparing, "preparing");
+  assert.equal(preparing.progress, 42);
+  assert.equal(preparing.stateText, "Preparing archive");
+  assert.equal(preparing.queuePosition, null);
+  assert.equal(preparing.downloadUrl, null);
+  await fs.promises.writeFile(manifestPath, JSON.stringify(queuedManifest));
+
   const notReady = await invokeRoute(
     "/:episodeId/artifacts/preparations/:jobId/download",
     "get",
@@ -369,6 +421,7 @@ const verifyRouteContract = async (): Promise<void> => {
   );
   assert.equal(notReady.statusCode, 409);
   assert.deepEqual(notReady.jsonBody, { message: "Artifact archive is not ready" });
+  assert.equal(notReady.getHeader("cache-control"), "no-store");
 
   const preparationService = loadPreparationService();
   await preparationService.processNextEpisodeArtifactPreparation();
@@ -378,6 +431,7 @@ const verifyRouteContract = async (): Promise<void> => {
     { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
   );
   assertPreparationStatus(readyStatus.jsonBody as PreparationStatus, "ready");
+  assert.equal(readyStatus.getHeader("cache-control"), "no-store");
 
   const download = await invokeRoute(
     "/:episodeId/artifacts/preparations/:jobId/download",
@@ -388,6 +442,64 @@ const verifyRouteContract = async (): Promise<void> => {
   assert.equal(download.getHeader("cache-control"), "no-store");
   assert.equal(download.getHeader("content-type"), "application/zip");
   assert.deepEqual(readZipEntryNames(Buffer.concat(download.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
+  await preparationService.processNextEpisodeArtifactPreparation();
+
+  const readyAgain = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "transcript");
+  assert.equal(readyAgain.statusCode, 200);
+  assert.equal((readyAgain.jsonBody as PreparationStatus).jobId, queued.jobId);
+
+  const audioPath = getEpisodeMediaFinalPath(fixtureEpisodeId, "transcript");
+  const originalStat = await fs.promises.stat(audioPath);
+  await fs.promises.writeFile(audioPath, "altered transcript!".padEnd(originalStat.size, "!"));
+  await fs.promises.utimes(audioPath, originalStat.atime, originalStat.mtime);
+  const invalidatedStatus = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assert.equal((invalidatedStatus.jsonBody as PreparationStatus).state, "expired");
+  assert.equal(invalidatedStatus.getHeader("cache-control"), "no-store");
+  const invalidatedDownload = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId/download",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+  );
+  assert.equal(invalidatedDownload.statusCode, 410);
+  assert.equal(invalidatedDownload.getHeader("cache-control"), "no-store");
+
+  await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "transcript"), "final transcript fixture");
+  const partialPrepared = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "trailer,transcript");
+  const partial = partialPrepared.jsonBody as PreparationStatus;
+  await preparationService.processNextEpisodeArtifactPreparation();
+  const partialDownload = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId/download",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: partial.jobId }
+  );
+  assert.equal(partialDownload.statusCode, 200);
+  assert.equal(partialDownload.getHeader("x-missing-artifacts"), "trailer");
+  assert.deepEqual(readZipEntryNames(Buffer.concat(partialDownload.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
+  await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailer"), "new final trailer");
+  const appearedStatus = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: partial.jobId }
+  );
+  assert.equal((appearedStatus.jsonBody as PreparationStatus).state, "expired");
+  const appearedDownload = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId/download",
+    "get",
+    { episodeId: String(fixtureEpisodeId), jobId: partial.jobId }
+  );
+  assert.equal(appearedDownload.statusCode, 410);
+
+  const mismatched = await invokeRoute(
+    "/:episodeId/artifacts/preparations/:jobId",
+    "get",
+    { episodeId: "987654322", jobId: queued.jobId }
+  );
+  assert.equal(mismatched.statusCode, 404);
+  assert.equal(mismatched.getHeader("cache-control"), "no-store");
 
   const migration = await invokeRoute("/:episodeId/artifacts/download", "get", { episodeId: String(fixtureEpisodeId) });
   assert.equal(migration.statusCode, 410);
@@ -396,6 +508,9 @@ const verifyRouteContract = async (): Promise<void> => {
     message: "Artifact downloads now require preparation",
     prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
   });
+  assert.equal(migration.getHeader("cache-control"), "no-store");
+  const captured = JSON.stringify([prepared.jsonBody, queuedStatus.jsonBody, preparingStatus.jsonBody, readyStatus.jsonBody, invalidatedStatus.jsonBody, partialDownload.jsonBody, appearedStatus.jsonBody, mismatched.jsonBody, migration.jsonBody]);
+  assert.equal(captured.includes(config.media.storageRoot), false);
 };
 
 export const main = async (): Promise<void> => {
