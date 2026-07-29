@@ -129,6 +129,34 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes(pub_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_launch_state ON episodes(launch_notification_state, pub_date);
 
+-- D-12/D-13: durable opaque artifact-job state and bounded public progress.
+CREATE TABLE IF NOT EXISTS artifact_jobs (
+  job_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  selector_key TEXT NOT NULL,
+  requested_selectors_json TEXT NOT NULL,
+  available_selectors_json TEXT NOT NULL,
+  missing_selectors_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  archive_file_name TEXT,
+  archive_path TEXT,
+  snapshot_path TEXT,
+  temporary_archive_path TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  expires_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_jobs_active_selector
+  ON artifact_jobs(episode_id, selector_key, status);
+CREATE INDEX IF NOT EXISTS idx_artifact_jobs_pending_fifo
+  ON artifact_jobs(status, created_at, job_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_jobs_episode_job
+  ON artifact_jobs(episode_id, job_id);
+
 CREATE TABLE IF NOT EXISTS guests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,

@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
+import { randomUUID } from "node:crypto";
 import type { ZipArchive } from "archiver" with { "resolution-mode": "import" };
 import { config } from "../config/env";
+import { artifactJobRepository, type ArtifactJobRow } from "../database/repositories/artifact-job.repository";
 import {
   parseEpisodeArtifactSelectors,
   preflightEpisodeArtifactDownloads,
@@ -12,31 +13,12 @@ import {
 } from "./episode-artifact-download.service";
 
 const preparationRoot = path.join(config.media.storageRoot, ".artifact-preparations");
-const manifestsRoot = path.join(preparationRoot, "manifests");
 const snapshotsRoot = path.join(preparationRoot, "snapshots");
 const archivesRoot = path.join(preparationRoot, "archives");
-const retentionMs = 24 * 60 * 60 * 1000;
+const retentionMs = 45 * 60 * 1000;
 
-export type EpisodeArtifactPreparationState = "queued" | "preparing" | "ready" | "failed" | "expired";
-
-type SourceEvidence = { digest: string } | { missing: true };
-
-type PreparationManifest = {
-  jobId: string;
-  cacheKey: string;
-  episodeId: number;
-  requested: EpisodeArtifactSelector[];
-  available: EpisodeArtifactSelector[];
-  missing: EpisodeArtifactSelector[];
-  evidence: Record<EpisodeArtifactSelector, SourceEvidence>;
-  state: EpisodeArtifactPreparationState;
-  progress: number;
-  stateText: string;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string | null;
-  archiveFileName: string | null;
-};
+export type EpisodeArtifactPreparationState = "pending" | "processing" | "completed" | "failed";
+export type EpisodeArtifactPreparationStage = "pending" | "processing-preflight" | "processing-archive" | "processing-finalization" | "terminal";
 
 export type EpisodeArtifactPreparationStatus = {
   jobId: string;
@@ -44,319 +26,278 @@ export type EpisodeArtifactPreparationStatus = {
   requested: EpisodeArtifactSelector[];
   available: EpisodeArtifactSelector[];
   missing: EpisodeArtifactSelector[];
-  state: EpisodeArtifactPreparationState;
+  state: string;
   progress: number;
   stateText: string;
   queuePosition: number | null;
   downloadUrl: string | null;
   expiresAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export type EpisodeArtifactPreparationDownload = {
-  status: EpisodeArtifactPreparationStatus;
-  stream: fs.ReadStream;
+export type EpisodeArtifactPreparationDownload = { status: EpisodeArtifactPreparationStatus; stream: fs.ReadStream };
+
+export type EpisodeArtifactPreparationStageController = {
+  waitFor(stage: EpisodeArtifactPreparationStage): Promise<void>;
+  waitForCompletion(stage: EpisodeArtifactPreparationStage): Promise<void>;
+  complete(stage: EpisodeArtifactPreparationStage): void;
+  release(stage: EpisodeArtifactPreparationStage): void;
+  releaseAll(): void;
 };
 
 let activeProcess: Promise<EpisodeArtifactPreparationStatus | null> | null = null;
-const activePreparationByCacheKey = new Map<string, Promise<EpisodeArtifactPreparationStatus>>();
+let failureMessage: string | null = null;
+let stageController: EpisodeArtifactPreparationStageController | null = null;
 
-const isMissingPathError = (error: unknown): boolean => {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
-
-const logPreparation = (event: string, manifest: PreparationManifest): void => {
-  console.info("[artifact-preparation]", { event, episodeId: manifest.episodeId, selectors: manifest.requested });
-};
-
-const nowIso = (now: Date): string => now.toISOString();
-const manifestPath = (jobId: string): string => path.join(manifestsRoot, `${jobId}.json`);
-const snapshotDirectory = (jobId: string): string => path.join(snapshotsRoot, jobId);
-const archivePath = (fileName: string): string => path.join(archivesRoot, fileName);
+const isMissingPathError = (error: unknown): boolean => ["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException | undefined)?.code ?? "");
 const cacheKey = (episodeId: number, requested: readonly EpisodeArtifactSelector[]): string => `${episodeId}:${requested.join(",")}`;
+const snapshotDirectory = (jobId: string): string => path.join(snapshotsRoot, jobId);
+const finalArchivePath = (jobId: string): string => path.join(archivesRoot, `episode-${jobId}-artifacts.zip`);
+const temporaryArchivePath = (jobId: string): string => path.join(archivesRoot, `.episode-${jobId}-artifacts.zip.part`);
 
 const ensureRoots = async (): Promise<void> => {
-  await Promise.all([manifestsRoot, snapshotsRoot, archivesRoot].map((directory) => fs.promises.mkdir(directory, { recursive: true })));
+  await Promise.all([snapshotsRoot, archivesRoot].map((directory) => fs.promises.mkdir(directory, { recursive: true })));
 };
 
-const writeManifest = async (manifest: PreparationManifest): Promise<void> => {
-  await ensureRoots();
-  const target = manifestPath(manifest.jobId);
-  const temporary = path.join(manifestsRoot, `.${manifest.jobId}.${randomUUID()}.part`);
-  await fs.promises.writeFile(temporary, JSON.stringify(manifest));
-  await fs.promises.rename(temporary, target);
+const controllerFor = (stage: EpisodeArtifactPreparationStage): Promise<void> => stageController?.waitFor(stage) ?? Promise.resolve();
+const publicStateText = (job: ArtifactJobRow): string => {
+  if (job.status === "pending") return "Queued for preparation";
+  if (job.status === "completed") return "Archive ready";
+  if (job.status === "failed") return "Preparation failed";
+  return job.progress < 25 ? "Preparing artifact snapshot" : job.progress < 90 ? "Assembling archive" : "Finalizing archive";
 };
 
-const readManifest = async (jobId: string): Promise<PreparationManifest | null> => {
-  try {
-    return JSON.parse(await fs.promises.readFile(manifestPath(jobId), "utf8")) as PreparationManifest;
-  } catch (error) {
-    if (isMissingPathError(error)) return null;
-    throw error;
-  }
-};
-
-const listManifests = async (): Promise<PreparationManifest[]> => {
-  await ensureRoots();
-  const entries = await fs.promises.readdir(manifestsRoot, { withFileTypes: true });
-  const manifests = await Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => readManifest(entry.name.slice(0, -5))));
-  return manifests.filter((manifest): manifest is PreparationManifest => manifest !== null)
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-};
-
-const digestFile = async (filePath: string): Promise<string> => {
-  const hash = createHash("sha256");
-  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk);
-  return hash.digest("hex");
-};
-
-const buildEvidence = async (
-  episodeId: number,
-  selectedArtifacts: readonly EpisodeArtifactCatalogEntry[]
-): Promise<{ available: EpisodeArtifactSelector[]; missing: EpisodeArtifactSelector[]; evidence: Record<EpisodeArtifactSelector, SourceEvidence> }> => {
-  const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
-  const evidence = {} as Record<EpisodeArtifactSelector, SourceEvidence>;
-  for (const artifact of preflight.available) evidence[artifact.selector] = { digest: await digestFile(artifact.path) };
-  for (const selector of preflight.missing) evidence[selector] = { missing: true };
-  return { available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing, evidence };
-};
-
-const evidenceMatches = (left: Record<EpisodeArtifactSelector, SourceEvidence>, right: Record<EpisodeArtifactSelector, SourceEvidence>): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
-
-const toStatus = async (manifest: PreparationManifest, now: Date): Promise<EpisodeArtifactPreparationStatus> => {
-  const queued = manifest.state === "queued";
-  const queuePosition = queued
-    ? (await listManifests()).filter((candidate) => candidate.state === "queued").findIndex((candidate) => candidate.jobId === manifest.jobId) + 1
+const toStatus = (job: ArtifactJobRow): EpisodeArtifactPreparationStatus => {
+  const queuePosition = job.status === "pending"
+    ? artifactJobRepository.listPending().findIndex((candidate) => candidate.jobId === job.jobId) + 1
     : null;
   return {
-    jobId: manifest.jobId,
-    episodeId: manifest.episodeId,
-    requested: manifest.requested,
-    available: manifest.available,
-    missing: manifest.missing,
-    state: manifest.state,
-    progress: Math.max(0, Math.min(100, Math.trunc(manifest.progress))),
-    stateText: manifest.stateText,
+    jobId: job.jobId,
+    episodeId: job.episodeId,
+    requested: job.requested as EpisodeArtifactSelector[],
+    available: job.available as EpisodeArtifactSelector[],
+    missing: job.missing as EpisodeArtifactSelector[],
+    state: job.status,
+    progress: Math.max(0, Math.min(100, Math.trunc(job.progress))),
+    stateText: publicStateText(job),
     queuePosition: queuePosition && queuePosition > 0 ? queuePosition : null,
-    downloadUrl: manifest.state === "ready" ? `/v1/episodes/${manifest.episodeId}/artifacts/preparations/${manifest.jobId}/download` : null,
-    expiresAt: manifest.expiresAt,
+    downloadUrl: job.status === "completed" ? `/v1/episodes/${job.episodeId}/artifacts/preparations/${job.jobId}/download` : null,
+    expiresAt: job.expiresAt,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
   };
 };
 
-const expireManifest = async (manifest: PreparationManifest, now: Date, event: "expired" | "invalidated"): Promise<PreparationManifest> => {
-  if (manifest.archiveFileName) await fs.promises.rm(archivePath(manifest.archiveFileName), { force: true });
-  await fs.promises.rm(snapshotDirectory(manifest.jobId), { recursive: true, force: true });
-  const expired = { ...manifest, state: "expired" as const, progress: 0, stateText: event === "invalidated" ? "Artifact sources changed" : "Preparation expired", updatedAt: nowIso(now), archiveFileName: null };
-  await writeManifest(expired);
-  logPreparation(event, expired);
-  return expired;
+const removeJobFiles = async (jobId: string, job?: ArtifactJobRow | null): Promise<void> => {
+  await Promise.all([
+    fs.promises.rm(snapshotDirectory(jobId), { recursive: true, force: true }),
+    fs.promises.rm(job?.archivePath ?? finalArchivePath(jobId), { force: true }),
+    fs.promises.rm(job?.temporaryArchivePath ?? temporaryArchivePath(jobId), { force: true }),
+  ]);
 };
 
-const revalidateReadyManifest = async (manifest: PreparationManifest, now: Date): Promise<PreparationManifest> => {
-  if (manifest.state !== "ready") return manifest;
-  if (!manifest.expiresAt || Date.parse(manifest.expiresAt) <= now.getTime()) return expireManifest(manifest, now, "expired");
-  if (!manifest.archiveFileName) return expireManifest(manifest, now, "invalidated");
-  try {
-    if (!(await fs.promises.lstat(archivePath(manifest.archiveFileName))).isFile()) return expireManifest(manifest, now, "invalidated");
-  } catch (error) {
-    if (isMissingPathError(error)) return expireManifest(manifest, now, "invalidated");
-    throw error;
-  }
-  const current = await buildEvidence(manifest.episodeId, parseEpisodeArtifactSelectors(manifest.requested.join(",")));
-  return evidenceMatches(manifest.evidence, current.evidence) ? manifest : expireManifest(manifest, now, "invalidated");
+const removeTemporaryJobFiles = async (jobId: string): Promise<void> => {
+  await Promise.all([
+    fs.promises.rm(snapshotDirectory(jobId), { recursive: true, force: true }),
+    fs.promises.rm(temporaryArchivePath(jobId), { force: true }),
+  ]);
 };
 
-const copySnapshot = async (sourcePath: string, destinationPath: string): Promise<{ digest: string; bytes: number }> => {
-  const hash = createHash("sha256");
+const digestSnapshot = async (sourcePath: string, destinationPath: string): Promise<number> => {
   let bytes = 0;
   const output = fs.createWriteStream(destinationPath, { flags: "wx" });
   try {
     for await (const chunk of fs.createReadStream(sourcePath)) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      hash.update(buffer);
       bytes += buffer.length;
       if (!output.write(buffer)) await once(output, "drain");
     }
     output.end();
     await once(output, "finish");
-    return { digest: hash.digest("hex"), bytes };
+    return bytes;
   } catch (error) {
     output.destroy();
     throw error;
   }
 };
 
-const createArchive = async (manifest: PreparationManifest, snapshots: Array<{ filePath: string; entryName: string; bytes: number }>): Promise<string> => {
-  const fileName = `${manifest.jobId}-${randomUUID()}.zip`;
-  const finalPath = archivePath(fileName);
-  const temporaryPath = path.join(archivesRoot, `.${fileName}.part`);
+const assembleArchive = async (job: ArtifactJobRow, snapshots: Array<{ filePath: string; entryName: string }>): Promise<void> => {
+  const temporaryPath = job.temporaryArchivePath as string;
+  const finalPath = job.archivePath as string;
+  await fs.promises.mkdir(archivesRoot, { recursive: true });
   const output = fs.createWriteStream(temporaryPath, { flags: "wx" });
   const { ZipArchive } = require("archiver") as { ZipArchive: new () => ZipArchive };
   const archive = new ZipArchive();
-  const totalBytes = snapshots.reduce((total, snapshot) => total + snapshot.bytes, 0);
-  let progressWrite = Promise.resolve();
-  archive.on("progress", (progress: { fs: { processedBytes: number } }) => {
-    const percentage = totalBytes === 0 ? 0 : Math.min(99, Math.floor((progress.fs.processedBytes / totalBytes) * 100));
-    progressWrite = progressWrite.then(() => writeManifest({
-      ...manifest,
-      progress: percentage,
-      stateText: "Preparing archive",
-      updatedAt: nowIso(new Date()),
-    }));
-  });
   try {
-    archive.on("error", (error: Error) => output.destroy(error));
     for (const snapshot of snapshots) archive.file(snapshot.filePath, { name: snapshot.entryName });
-    const completed = once(output, "close");
+    await controllerFor("processing-archive");
+    if (failureMessage) throw new Error(failureMessage);
+    archive.on("error", (error: Error) => output.destroy(error));
+    const closed = once(output, "close");
     archive.pipe(output);
     await archive.finalize();
-    await completed;
-    await progressWrite;
+    await closed;
+    artifactJobRepository.updateProgress(job.jobId, 90);
+    stageController?.complete("processing-archive");
+    await controllerFor("processing-finalization");
     await fs.promises.rename(temporaryPath, finalPath);
-    return fileName;
+    const stat = await fs.promises.lstat(finalPath);
+    if (!stat.isFile()) throw new Error("Final archive is not a regular file");
+    stageController?.complete("processing-finalization");
   } catch (error) {
     await fs.promises.rm(temporaryPath, { force: true });
     throw error;
   }
 };
 
-export const initializeEpisodeArtifactPreparations = async (
-  options: { now?: Date; recoverInterrupted?: boolean } = {}
-): Promise<void> => {
-  const now = options.now ?? new Date();
-  const recoverInterrupted = options.recoverInterrupted ?? true;
+export const createEpisodeArtifactPreparationStageController = (): EpisodeArtifactPreparationStageController => {
+  const released = new Set<EpisodeArtifactPreparationStage>();
+  const waiters = new Map<EpisodeArtifactPreparationStage, Array<() => void>>();
+  const completed = new Set<EpisodeArtifactPreparationStage>();
+  const completionWaiters = new Map<EpisodeArtifactPreparationStage, Array<() => void>>();
+  return {
+    waitFor(stage) {
+      if (released.has(stage)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const stageWaiters = waiters.get(stage) ?? [];
+        stageWaiters.push(resolve);
+        waiters.set(stage, stageWaiters);
+      });
+    },
+    waitForCompletion(stage) {
+      if (completed.has(stage)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const stageWaiters = completionWaiters.get(stage) ?? [];
+        stageWaiters.push(resolve);
+        completionWaiters.set(stage, stageWaiters);
+      });
+    },
+    complete(stage) {
+      completed.add(stage);
+      for (const resolve of completionWaiters.get(stage) ?? []) resolve();
+      completionWaiters.delete(stage);
+    },
+    release(stage) {
+      released.add(stage);
+      for (const resolve of waiters.get(stage) ?? []) resolve();
+      waiters.delete(stage);
+    },
+    releaseAll() {
+      for (const stage of ["pending", "processing-preflight", "processing-archive", "processing-finalization", "terminal"] as const) this.release(stage);
+    },
+  };
+};
+
+export const injectEpisodeArtifactPreparationStageController = (controller: EpisodeArtifactPreparationStageController): void => {
+  if (config.nodeEnv === "production") throw new Error("Stage controller is verifier-only");
+  stageController = controller;
+};
+
+export const resetEpisodeArtifactPreparationStageController = (): void => { stageController = null; };
+export const injectEpisodeArtifactPreparationFailure = (message = "Verifier-forced archive failure"): void => {
+  if (config.nodeEnv === "production") throw new Error("Failure injection is verifier-only");
+  failureMessage = message;
+};
+export const resetEpisodeArtifactPreparationFailure = (): void => { failureMessage = null; };
+
+export const initializeEpisodeArtifactPreparations = async (options: { now?: Date; recoverInterrupted?: boolean } = {}): Promise<void> => {
   await ensureRoots();
-  const manifests = await listManifests();
-  for (const manifest of manifests) {
-    if (recoverInterrupted && manifest.state === "preparing") {
-      await fs.promises.rm(snapshotDirectory(manifest.jobId), { recursive: true, force: true });
-      await writeManifest({ ...manifest, state: "queued", progress: 0, stateText: "Queued for preparation", updatedAt: nowIso(now) });
-    } else if (manifest.state === "ready") {
-      await revalidateReadyManifest(manifest, now);
+  const now = options.now ?? new Date();
+  const expired = artifactJobRepository.cleanupExpired(now);
+  for (const job of expired) await removeJobFiles(job.jobId, job);
+  if (options.recoverInterrupted ?? true) {
+    const recovered = artifactJobRepository.recoverProcessing();
+    for (const job of recovered) await removeJobFiles(job.jobId, job);
+  }
+  if (options.recoverInterrupted ?? true) {
+    const archiveEntries = await fs.promises.readdir(archivesRoot, { withFileTypes: true });
+    await Promise.all(archiveEntries.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
+      .map((entry) => fs.promises.rm(path.join(archivesRoot, entry.name), { force: true })));
+  }
+};
+
+export const prepareEpisodeArtifactArchive = async (episodeId: number, selectedArtifacts: readonly EpisodeArtifactCatalogEntry[], options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus> => {
+  await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
+  const requested = selectedArtifacts.map((artifact) => artifact.selector);
+  const selectorKey = cacheKey(episodeId, requested);
+  const active = artifactJobRepository.findActive(episodeId, selectorKey);
+  if (active) return toStatus(active);
+  const completed = artifactJobRepository.findCompleted(episodeId, selectorKey);
+  if (completed && completed.expiresAt && Date.parse(completed.expiresAt) > (options.now ?? new Date()).getTime()) {
+    const finalPath = completed.archivePath;
+    if (finalPath) {
+      try { if ((await fs.promises.lstat(finalPath)).isFile()) return toStatus(completed); } catch (error) { if (!isMissingPathError(error)) throw error; }
     }
   }
-  const knownJobIds = new Set(manifests.map((manifest) => manifest.jobId));
-  const [rootFiles, archiveFiles, snapshotDirectories] = await Promise.all([
-    fs.promises.readdir(preparationRoot, { withFileTypes: true }),
-    fs.promises.readdir(archivesRoot, { withFileTypes: true }),
-    fs.promises.readdir(snapshotsRoot, { withFileTypes: true }),
-  ]);
-  await Promise.all([
-    ...rootFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
-      .map((entry) => fs.promises.rm(path.join(preparationRoot, entry.name), { force: true })),
-    ...archiveFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
-      .map((entry) => fs.promises.rm(path.join(archivesRoot, entry.name), { force: true })),
-    ...snapshotDirectories.filter((entry) => entry.isDirectory() && !knownJobIds.has(entry.name))
-      .map((entry) => fs.promises.rm(path.join(snapshotsRoot, entry.name), { recursive: true, force: true })),
-  ]);
-};
-
-export const prepareEpisodeArtifactArchive = async (
-  episodeId: number,
-  selectedArtifacts: readonly EpisodeArtifactCatalogEntry[],
-  options: { now?: Date } = {}
-): Promise<EpisodeArtifactPreparationStatus> => {
-  const now = options.now ?? new Date();
-  const requested = selectedArtifacts.map((artifact) => artifact.selector);
-  const requestedCacheKey = cacheKey(episodeId, requested);
-  const existingOperation = activePreparationByCacheKey.get(requestedCacheKey);
-  if (existingOperation) return existingOperation;
-
-  let operation: Promise<EpisodeArtifactPreparationStatus>;
-  operation = (async (): Promise<EpisodeArtifactPreparationStatus> => {
-    await initializeEpisodeArtifactPreparations({ now, recoverInterrupted: false });
-    const candidates = (await listManifests()).filter((manifest) => manifest.cacheKey === requestedCacheKey);
-    const activeManifest = candidates.find((manifest) => manifest.state === "queued" || manifest.state === "preparing");
-    if (activeManifest) return toStatus(activeManifest, now);
-
-    for (const candidate of candidates) {
-      if (candidate.state !== "ready") continue;
-      const refreshed = await revalidateReadyManifest(candidate, now);
-      if (refreshed.state === "ready") {
-        logPreparation("cache-hit", refreshed);
-        return toStatus(refreshed, now);
-      }
-    }
-
-    const source = await buildEvidence(episodeId, selectedArtifacts);
-    const manifest: PreparationManifest = {
-      jobId: randomUUID(), cacheKey: requestedCacheKey, episodeId, requested,
-      available: source.available, missing: source.missing, evidence: source.evidence,
-      state: "queued", progress: 0, stateText: "Queued for preparation", createdAt: nowIso(now), updatedAt: nowIso(now), expiresAt: null, archiveFileName: null,
-    };
-    await writeManifest(manifest);
-    logPreparation("queued", manifest);
-    return toStatus(manifest, now);
-  })().finally(() => {
-    if (activePreparationByCacheKey.get(requestedCacheKey) === operation) activePreparationByCacheKey.delete(requestedCacheKey);
+  const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
+  const jobId = randomUUID();
+  const archivePath = finalArchivePath(jobId);
+  const job = artifactJobRepository.create({
+    jobId, episodeId, selectorKey, requested, available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing,
+    archiveFileName: path.basename(archivePath), archivePath, snapshotPath: snapshotDirectory(jobId), temporaryArchivePath: temporaryArchivePath(jobId),
   });
-  activePreparationByCacheKey.set(requestedCacheKey, operation);
-  return operation;
+  return toStatus(job);
 };
 
-export const getEpisodeArtifactPreparationStatus = async (
-  episodeId: number,
-  jobId: string,
-  options: { now?: Date } = {}
-): Promise<EpisodeArtifactPreparationStatus | null> => {
-  const manifest = await readManifest(jobId);
-  if (!manifest || manifest.episodeId !== episodeId) return null;
-  return toStatus(await revalidateReadyManifest(manifest, options.now ?? new Date()), options.now ?? new Date());
+export const getEpisodeArtifactPreparationStatus = async (episodeId: number, jobId: string, options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus | null> => {
+  await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
+  const job = artifactJobRepository.findByJobId(episodeId, jobId);
+  return job ? toStatus(job) : null;
 };
 
-export const getValidatedEpisodeArtifactPreparationDownload = async (
-  episodeId: number,
-  jobId: string,
-  options: { now?: Date } = {}
-): Promise<EpisodeArtifactPreparationDownload | null> => {
+export const getValidatedEpisodeArtifactPreparationDownload = async (episodeId: number, jobId: string, options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationDownload | null> => {
   const status = await getEpisodeArtifactPreparationStatus(episodeId, jobId, options);
-  if (!status || status.state !== "ready") return null;
-  const manifest = await readManifest(jobId);
-  if (!manifest?.archiveFileName) return null;
-  return { status, stream: fs.createReadStream(archivePath(manifest.archiveFileName)) };
+  if (!status || status.state !== "completed") return null;
+  const job = artifactJobRepository.findByJobId(episodeId, jobId);
+  if (!job?.archivePath) return null;
+  const stat = await fs.promises.lstat(job.archivePath);
+  if (!stat.isFile()) return null;
+  return { status, stream: fs.createReadStream(job.archivePath) };
 };
 
 export const processNextEpisodeArtifactPreparation = async (options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus | null> => {
   if (activeProcess) return activeProcess;
-  activeProcess = (async (): Promise<EpisodeArtifactPreparationStatus | null> => {
-    const now = options.now ?? new Date();
-    const manifest = (await listManifests()).find((candidate) => candidate.state === "queued");
-    if (!manifest) return null;
-    const preparing = { ...manifest, state: "preparing" as const, progress: 0, stateText: "Preparing archive", updatedAt: nowIso(now) };
-    await writeManifest(preparing);
-    logPreparation("started", preparing);
+  activeProcess = (async () => {
+    await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
+    const pending = artifactJobRepository.listPending()[0];
+    if (!pending) return null;
+    const processing = artifactJobRepository.transitionToProcessing(pending.jobId);
+    if (!processing) return null;
+    await controllerFor("processing-preflight");
     try {
-      const selected = parseEpisodeArtifactSelectors(preparing.requested.join(","));
-      const preflight = await preflightEpisodeArtifactDownloads(preparing.episodeId, selected);
-      const snapshots: Array<{ filePath: string; entryName: string; bytes: number }> = [];
-      const evidence = {} as Record<EpisodeArtifactSelector, SourceEvidence>;
-      await fs.promises.mkdir(snapshotDirectory(preparing.jobId), { recursive: true });
+      const selected = parseEpisodeArtifactSelectors(processing.requested.join(","));
+      const preflight = await preflightEpisodeArtifactDownloads(processing.episodeId, selected);
+      const snapshots: Array<{ filePath: string; entryName: string }> = [];
+      await fs.promises.mkdir(snapshotDirectory(processing.jobId), { recursive: true });
       for (const artifact of preflight.available) {
-        const snapshotPath = path.join(snapshotDirectory(preparing.jobId), artifact.fileName);
-        const copied = await copySnapshot(artifact.path, snapshotPath);
-        snapshots.push({ filePath: snapshotPath, entryName: artifact.archiveEntryName, bytes: copied.bytes });
-        evidence[artifact.selector] = { digest: copied.digest };
+        const snapshotPath = path.join(snapshotDirectory(processing.jobId), artifact.fileName);
+        await digestSnapshot(artifact.path, snapshotPath);
+        snapshots.push({ filePath: snapshotPath, entryName: artifact.archiveEntryName });
       }
-      for (const selector of preflight.missing) evidence[selector] = { missing: true };
-      const afterSnapshot = await buildEvidence(preparing.episodeId, selected);
-      if (!evidenceMatches(evidence, afterSnapshot.evidence)) throw new Error("Artifact sources changed during preparation");
-      const archiveFileName = await createArchive(preparing, snapshots);
-      const ready: PreparationManifest = {
-        ...preparing, available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing, evidence,
-        state: "ready", progress: 100, stateText: "Archive ready", updatedAt: nowIso(now), expiresAt: new Date(now.getTime() + retentionMs).toISOString(), archiveFileName,
-      };
-      await writeManifest(ready);
-      logPreparation("completed", ready);
-      return toStatus(ready, now);
-    } catch (_error) {
-      await fs.promises.rm(snapshotDirectory(preparing.jobId), { recursive: true, force: true });
-      const failed = { ...preparing, state: "failed" as const, progress: 0, stateText: "Preparation failed", updatedAt: nowIso(now) };
-      await writeManifest(failed);
-      logPreparation("failed", failed);
-      return toStatus(failed, now);
+      artifactJobRepository.updateProgress(processing.jobId, 25);
+      stageController?.complete("processing-preflight");
+      const after = await preflightEpisodeArtifactDownloads(processing.episodeId, selected);
+      if (JSON.stringify(after.available.map((artifact) => artifact.selector)) !== JSON.stringify(preflight.available.map((artifact) => artifact.selector))) {
+        throw new Error("Artifact sources changed during preparation");
+      }
+      await assembleArchive({ ...processing, archivePath: processing.archivePath ?? finalArchivePath(processing.jobId), temporaryArchivePath: processing.temporaryArchivePath ?? temporaryArchivePath(processing.jobId) }, snapshots);
+      const completed = artifactJobRepository.complete(processing.jobId, path.basename(processing.archivePath ?? finalArchivePath(processing.jobId)), processing.archivePath ?? finalArchivePath(processing.jobId), new Date((options.now ?? new Date()).getTime() + retentionMs).toISOString());
+      await removeTemporaryJobFiles(processing.jobId);
+      await controllerFor("terminal");
+      return completed ? toStatus(completed) : null;
+    } catch (error) {
+      await removeJobFiles(processing.jobId, processing);
+      const failed = artifactJobRepository.fail(processing.jobId, error instanceof Error ? error.message : String(error));
+      await controllerFor("terminal");
+      return failed ? toStatus(failed) : null;
     }
   })().finally(() => { activeProcess = null; });
   return activeProcess;
+};
+
+export const cleanupExpiredEpisodeArtifactPreparations = async (now = new Date()): Promise<void> => {
+  for (const job of artifactJobRepository.cleanupExpired(now)) await removeJobFiles(job.jobId, job);
 };
