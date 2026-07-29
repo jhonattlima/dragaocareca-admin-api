@@ -221,21 +221,35 @@ const createArchive = async (manifest: PreparationManifest, snapshots: Array<{ f
   }
 };
 
-export const initializeEpisodeArtifactPreparations = async (options: { now?: Date } = {}): Promise<void> => {
+export const initializeEpisodeArtifactPreparations = async (
+  options: { now?: Date; recoverInterrupted?: boolean } = {}
+): Promise<void> => {
   const now = options.now ?? new Date();
+  const recoverInterrupted = options.recoverInterrupted ?? true;
   await ensureRoots();
   const manifests = await listManifests();
   for (const manifest of manifests) {
-    if (manifest.state === "preparing") {
+    if (recoverInterrupted && manifest.state === "preparing") {
       await fs.promises.rm(snapshotDirectory(manifest.jobId), { recursive: true, force: true });
       await writeManifest({ ...manifest, state: "queued", progress: 0, stateText: "Queued for preparation", updatedAt: nowIso(now) });
     } else if (manifest.state === "ready") {
       await revalidateReadyManifest(manifest, now);
     }
   }
-  const files = await fs.promises.readdir(preparationRoot, { withFileTypes: true });
-  await Promise.all(files.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
-    .map((entry) => fs.promises.rm(path.join(preparationRoot, entry.name), { force: true })));
+  const knownJobIds = new Set(manifests.map((manifest) => manifest.jobId));
+  const [rootFiles, archiveFiles, snapshotDirectories] = await Promise.all([
+    fs.promises.readdir(preparationRoot, { withFileTypes: true }),
+    fs.promises.readdir(archivesRoot, { withFileTypes: true }),
+    fs.promises.readdir(snapshotsRoot, { withFileTypes: true }),
+  ]);
+  await Promise.all([
+    ...rootFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
+      .map((entry) => fs.promises.rm(path.join(preparationRoot, entry.name), { force: true })),
+    ...archiveFiles.filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
+      .map((entry) => fs.promises.rm(path.join(archivesRoot, entry.name), { force: true })),
+    ...snapshotDirectories.filter((entry) => entry.isDirectory() && !knownJobIds.has(entry.name))
+      .map((entry) => fs.promises.rm(path.join(snapshotsRoot, entry.name), { recursive: true, force: true })),
+  ]);
 };
 
 export const prepareEpisodeArtifactArchive = async (
@@ -244,7 +258,7 @@ export const prepareEpisodeArtifactArchive = async (
   options: { now?: Date } = {}
 ): Promise<EpisodeArtifactPreparationStatus> => {
   const now = options.now ?? new Date();
-  await initializeEpisodeArtifactPreparations({ now });
+  await initializeEpisodeArtifactPreparations({ now, recoverInterrupted: false });
   const requested = selectedArtifacts.map((artifact) => artifact.selector);
   const existing = (await listManifests()).find((manifest) => manifest.cacheKey === cacheKey(episodeId, requested));
   if (existing) {
