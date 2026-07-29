@@ -139,6 +139,12 @@ const assertPreparationStatus = (status: PreparationStatus, state: PreparationSt
   }
 };
 
+const readStreamBytes = async (stream: fs.ReadStream): Promise<Buffer> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+};
+
 const verifyPreparationLifecycle = async (): Promise<void> => {
   const preparationService = loadPreparationService();
   const start = new Date("2026-07-29T12:00:00.000Z");
@@ -170,7 +176,10 @@ const verifyPreparationLifecycle = async (): Promise<void> => {
   assertPreparationStatus(cached, "ready");
   const download = await preparationService.getValidatedEpisodeArtifactPreparationDownload(fixtureEpisodeId, queued.jobId, { now: start });
   assert.ok(download);
-  download.stream.destroy();
+  assert.deepEqual(readZipEntryNames(await readStreamBytes(download.stream)), [
+    `episode-${fixtureEpisodeId}/audio.mp3`,
+    `episode-${fixtureEpisodeId}/transcript.txt`,
+  ]);
 
   const audioPath = getEpisodeMediaFinalPath(fixtureEpisodeId, "audio");
   const originalStat = await fs.promises.stat(audioPath);
@@ -205,15 +214,35 @@ const verifyPreparationLifecycle = async (): Promise<void> => {
   const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
   manifest.state = "preparing";
   await fs.promises.writeFile(manifestPath, JSON.stringify(manifest));
+  const interrupted = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, recovering.jobId, { now: start });
+  assert.ok(interrupted);
+  assertPreparationStatus(interrupted, "preparing");
   await preparationService.initializeEpisodeArtifactPreparations({ now: start });
   const recovered = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, recovering.jobId, { now: start });
   assert.ok(recovered);
   assertPreparationStatus(recovered, "queued");
   await assert.rejects(fs.promises.stat(path.join(preparationRoot, "stale.part")));
 
+  manifest.state = "failed";
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest));
+  const failed = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, recovering.jobId, { now: start });
+  assert.ok(failed);
+  assertPreparationStatus(failed, "failed");
+
+  const expiring = await preparationService.prepareEpisodeArtifactArchive(
+    fixtureEpisodeId,
+    parseEpisodeArtifactSelectors("image"),
+    { now: start }
+  );
+  assertPreparationStatus(expiring, "queued");
+  await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "cover"), "final cover fixture");
+  const expiringReady = await preparationService.processNextEpisodeArtifactPreparation({ now: start });
+  assert.ok(expiringReady);
+  assertPreparationStatus(expiringReady, "ready");
+
   const expired = await preparationService.getEpisodeArtifactPreparationStatus(
     fixtureEpisodeId,
-    missingJob.jobId,
+    expiring.jobId,
     { now: new Date(start.getTime() + 24 * 60 * 60 * 1000 + 1) }
   );
   assert.ok(expired);
@@ -332,6 +361,7 @@ export const main = async (): Promise<void> => {
     await verifyPreflightContract();
     verifyOpenApiContract();
     await verifyRouteContract();
+    await createFixtures();
     await verifyPreparationLifecycle();
   } finally {
     episodeRepository.delete(fixtureEpisodeId);
