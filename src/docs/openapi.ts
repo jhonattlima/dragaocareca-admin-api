@@ -66,22 +66,25 @@ export const swaggerSpec = swaggerJsdoc({
             coverCredits: { type: "array", items: { type: "string" } },
           },
         },
-        EpisodeArtifactPreparationStatus: {
+        EpisodeArtifactJobSnapshot: {
           type: "object",
-          description: "Public state of an asynchronous final-artifact ZIP preparation. Progress is server-side ZIP assembly progress, not browser download-transfer progress.",
-          required: ["jobId", "episodeId", "requested", "available", "missing", "state", "progress", "stateText", "queuePosition", "downloadUrl", "expiresAt"],
+          description: "Public state of an asynchronous final-artifact ZIP job. Internal archive and snapshot paths are never exposed.",
+          required: ["jobId", "episodeId", "requested", "available", "missing", "state", "progress", "stateText", "queuePosition", "downloadUrl", "expiresAt", "error", "createdAt", "updatedAt"],
           properties: {
-            jobId: { type: "string", description: "Opaque preparation identifier." },
+            jobId: { type: "string", description: "Opaque job identifier." },
             episodeId: { type: "integer", minimum: 1 },
             requested: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Normalized requested selectors in catalog order." },
             available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready." },
             missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time." },
-            state: { type: "string", enum: ["queued", "preparing", "ready", "failed", "expired"] },
-            progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage. It is separate from stateText and is never browser transfer progress." },
-            stateText: { type: "string", description: "Human-readable preparation state text." },
-            queuePosition: { type: "integer", minimum: 1, nullable: true, description: "Queue position only while state is queued; otherwise null." },
-            downloadUrl: { type: "string", nullable: true, description: "Protected ready-download URL only while state is ready; otherwise null." },
-            expiresAt: { type: "string", format: "date-time", nullable: true, description: "Ready archive expiry (24 hours after publication); null before ready." },
+            state: { type: "string", enum: ["pending", "processing", "completed", "failed"] },
+            progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage; never browser transfer progress." },
+            stateText: { type: "string", description: "Human-readable job state text." },
+            queuePosition: { type: "integer", minimum: 1, nullable: true, description: "Queue position only while state is pending; otherwise null." },
+            downloadUrl: { type: "string", nullable: true, description: "Protected download URL only while state is completed; otherwise null." },
+            expiresAt: { type: "string", format: "date-time", nullable: true, description: "Completed archive expiry exactly 45 minutes after publication; null before completion." },
+            error: { type: "string", nullable: true, description: "Sanitized failure message for failed jobs; otherwise null." },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
           },
         },
         PublicEpisodeCatalogGuest: {
@@ -717,83 +720,73 @@ export const swaggerSpec = swaggerJsdoc({
           responses: { "201": { description: "Created" }, "401": { description: "Unauthorized" } },
         },
       },
-      "/v1/episodes/{episodeId}/artifacts/prepare": {
+      "/v1/episodes/{episodeId}/artifacts/jobs": {
         post: {
           tags: ["Episodes"],
-          summary: "Prepare final episode artifacts as a ZIP archive",
-          description: "Starts or reuses an authenticated, server-side ZIP preparation. Poll the returned status URL; JSON lifecycle responses use Cache-Control: no-store. A 200 response is a valid ready-cache hit, while 202 means queued or preparing work. Ready archives expire after 24 hours.",
+          summary: "Start an episode artifact ZIP job",
+          description: "Starts or reuses an authenticated server-side ZIP job. The request accepts only canonical selectors; paths, filenames, and internal media kinds are not accepted. Poll the Location URL. JSON responses use Cache-Control: no-store and completed archives expire exactly 45 minutes after publication.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
-            { name: "artifacts", in: "query", required: false, schema: { type: "string", pattern: "^(?:episode|trailer|transcript|image|image-low)(?:,(?:episode|trailer|transcript|image|image-low))*$", example: "episode,transcript" }, description: "One nonempty CSV query value selecting only episode, trailer, transcript, image, and/or image-low. Omit to select all. Equivalent values are normalized into fixed catalog order." },
           ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["artifacts"],
+                  properties: {
+                    artifacts: { type: "array", minItems: 1, items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, example: ["episode", "transcript"] },
+                  },
+                },
+              },
+            },
+          },
           responses: {
-            "200": { description: "A valid ready archive cache was reused.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactPreparationStatus" } } } },
-            "202": { description: "Preparation is queued or assembling server-side.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactPreparationStatus" } } } },
-            "400": { description: "Invalid positive episodeId or artifacts selector query." },
+            "200": { description: "An existing completed job was reused.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } }, Location: { description: "Status URL for the job.", schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactJobSnapshot" } } } },
+            "202": { description: "A new or already-active job is pending or processing.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } }, Location: { description: "Status URL for the job.", schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactJobSnapshot" } } } },
+            "400": { description: "Invalid positive episodeId, JSON body, or artifact selector array." },
             "401": { description: "Missing, invalid, or expired bearer token." },
             "404": { description: "Either `{ message: \"Episode not found\" }` or `{ message: \"No requested artifacts found\" }`." },
           },
         },
       },
-      "/v1/episodes/{episodeId}/artifacts/preparations/{jobId}": {
+      "/v1/episodes/{episodeId}/artifacts/jobs/{jobId}": {
         get: {
           tags: ["Episodes"],
-          summary: "Poll artifact ZIP preparation status",
-          description: "Poll the public preparation state with Cache-Control: no-store. queuePosition is populated only while queued; downloadUrl is populated only after the archive is ready. progress is byte-based server ZIP assembly progress, not browser transfer progress.",
+          summary: "Poll an episode artifact ZIP job",
+          description: "Returns the public pending, processing, completed, or failed snapshot only. Unknown, expired, and episode/job-mismatched identifiers return the same 404 response. Cache-Control is no-store.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
-            { name: "jobId", in: "path", required: true, schema: { type: "string" }, description: "Opaque preparation identifier returned by the prepare operation." },
+            { name: "jobId", in: "path", required: true, schema: { type: "string", minLength: 1 }, description: "Opaque job identifier returned by the start operation." },
           ],
           responses: {
-            "200": { description: "Current preparation status.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactPreparationStatus" } } } },
+            "200": { description: "Current public job snapshot.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactJobSnapshot" } } } },
             "400": { description: "Invalid positive episodeId." },
             "401": { description: "Missing, invalid, or expired bearer token." },
-            "404": { description: "`{ message: \"Artifact preparation not found\" }` for an unknown or mismatched job." },
+            "404": { description: "`{ message: \"Artifact job not found\" }` for an unknown, expired, or mismatched job." },
           },
         },
       },
-      "/v1/episodes/{episodeId}/artifacts/preparations/{jobId}/download": {
+      "/v1/episodes/{episodeId}/artifacts/jobs/{jobId}/download": {
         get: {
           tags: ["Episodes"],
           summary: "Download a ready final-artifact ZIP archive",
-          description: "Streams only a revalidated ready archive. The response is no-store and retains the Phase 12 canonical ZIP filename and selector-only missing-artifact header. Ready archives expire 24 hours after publication.",
+          description: "Streams only a revalidated completed job archive. The response is no-store, uses a server-generated safe filename, and includes only selector names in X-Missing-Artifacts. Expired jobs return the same 404 as unknown or mismatched jobs.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
-            { name: "jobId", in: "path", required: true, schema: { type: "string" }, description: "Opaque preparation identifier." },
+            { name: "jobId", in: "path", required: true, schema: { type: "string", minLength: 1 }, description: "Opaque job identifier." },
           ],
           responses: {
             "200": { description: "ZIP archive containing available requested final artifacts.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } }, "Content-Disposition": { description: "Deterministic attachment filename: episode-{episodeId}-artifacts.zip.", schema: { type: "string" } }, "X-Missing-Artifacts": { description: "Comma-separated selector names for requested final artifacts that were unavailable.", schema: { type: "string" } } }, content: { "application/zip": { schema: { type: "string", format: "binary" } } } },
             "400": { description: "Invalid positive episodeId." },
             "401": { description: "Missing, invalid, or expired bearer token." },
-            "404": { description: "`{ message: \"Artifact preparation not found\" }` for an unknown or mismatched job." },
-            "409": { description: "`{ message: \"Artifact archive is not ready\" }` while queued, preparing, or failed." },
-            "410": { description: "`{ message: \"Artifact preparation expired\" }` after expiry or source-cache invalidation." },
-          },
-        },
-      },
-      "/v1/episodes/{episodeId}/artifacts/download": {
-        get: {
-          tags: ["Episodes"],
-          summary: "Deprecated direct artifact-download route",
-          description: "Authenticated migration route retained for one release. It never streams a ZIP; use POST /v1/episodes/:episodeId/artifacts/prepare instead.",
-          deprecated: true,
-          security: [{ bearerAuth: [] }],
-          parameters: [
-            {
-              name: "episodeId",
-              in: "path",
-              required: true,
-              schema: { type: "integer", minimum: 1 },
-              description: "Positive episode identifier.",
-            },
-          ],
-          responses: {
-            "400": { description: "Invalid positive episodeId." },
-            "401": { description: "Missing, invalid, or expired bearer token." },
-            "410": { description: "Migration response `{ message: \"Artifact downloads now require preparation\", prepareEndpoint: \"POST /v1/episodes/:episodeId/artifacts/prepare\" }`.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { type: "object", required: ["message", "prepareEndpoint"], properties: { message: { type: "string", enum: ["Artifact downloads now require preparation"] }, prepareEndpoint: { type: "string", enum: ["POST /v1/episodes/:episodeId/artifacts/prepare"] } } } } } },
+            "404": { description: "`{ message: \"Artifact job not found\" }` for an unknown, expired, or mismatched job." },
+            "409": { description: "`{ message: \"Artifact archive is not ready\" }` while pending, processing, or failed." },
           },
         },
       },
