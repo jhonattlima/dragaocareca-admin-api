@@ -16,6 +16,7 @@ import { config } from "../config/env";
 
 const fixtureEpisodeId = 987654321;
 const preparationRoot = path.join(config.media.storageRoot, ".artifact-preparations");
+const liveProgressFixtureBytes = 64 * 1024 * 1024;
 
 type PreparationState = "queued" | "preparing" | "ready" | "failed" | "expired";
 
@@ -128,12 +129,12 @@ const verifySelectorContract = (): void => {
   }
 };
 
-const createFixtures = async (): Promise<{ directory: string }> => {
+const createFixtures = async (options: { liveProgress?: boolean } = {}): Promise<{ directory: string }> => {
   const audioPath = getEpisodeMediaFinalPath(fixtureEpisodeId, "audio");
   const directory = path.dirname(audioPath);
   await fs.promises.rm(directory, { recursive: true, force: true });
   await fs.promises.mkdir(directory, { recursive: true });
-  await fs.promises.writeFile(audioPath, "final audio fixture");
+  await fs.promises.writeFile(audioPath, options.liveProgress ? Buffer.alloc(liveProgressFixtureBytes, 0x61) : "final audio fixture");
   await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "transcript"), "final transcript fixture");
   return { directory };
 };
@@ -449,22 +450,6 @@ const verifyRouteContract = async (): Promise<void> => {
   assert.equal(queuedStatus.getHeader("cache-control"), "no-store");
   assertPreparationStatus(queuedStatus.jsonBody as PreparationStatus, "queued");
 
-  const manifestPath = path.join(preparationRoot, "manifests", `${queued.jobId}.json`);
-  const queuedManifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
-  await fs.promises.writeFile(manifestPath, JSON.stringify({ ...queuedManifest, state: "preparing", progress: 42, stateText: "Preparing archive" }));
-  const preparingStatus = await invokeRoute(
-    "/:episodeId/artifacts/preparations/:jobId",
-    "get",
-    { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
-  );
-  const preparing = preparingStatus.jsonBody as PreparationStatus;
-  assertPreparationStatus(preparing, "preparing");
-  assert.equal(preparing.progress, 42);
-  assert.equal(preparing.stateText, "Preparing archive");
-  assert.equal(preparing.queuePosition, null);
-  assert.equal(preparing.downloadUrl, null);
-  await fs.promises.writeFile(manifestPath, JSON.stringify(queuedManifest));
-
   const notReady = await invokeRoute(
     "/:episodeId/artifacts/preparations/:jobId/download",
     "get",
@@ -562,13 +547,75 @@ const verifyRouteContract = async (): Promise<void> => {
     message: "Artifact downloads now require preparation",
     prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
   });
-  const captured = JSON.stringify([prepared.jsonBody, queuedStatus.jsonBody, preparingStatus.jsonBody, readyStatus.jsonBody, invalidatedStatus.jsonBody, partialDownload.jsonBody, appearedStatus.jsonBody, mismatched.jsonBody, migration.jsonBody]);
+  const captured = JSON.stringify([prepared.jsonBody, queuedStatus.jsonBody, readyStatus.jsonBody, invalidatedStatus.jsonBody, partialDownload.jsonBody, appearedStatus.jsonBody, mismatched.jsonBody, migration.jsonBody]);
   assert.equal(captured.includes(config.media.storageRoot), false);
   assert.equal(capturedLogs.join("\n").includes(config.media.storageRoot), false);
   } finally {
     config.auth.bypassInDev = originalBypass;
     console.info = originalInfo;
     console.error = originalError;
+  }
+};
+
+const verifyLiveRouteProgress = async (): Promise<void> => {
+  const originalBypass = config.auth.bypassInDev;
+  config.auth.bypassInDev = true;
+  try {
+    const prepared = await invokeRoute(
+      "/:episodeId/artifacts/prepare",
+      "post",
+      { episodeId: String(fixtureEpisodeId) },
+      "episode"
+    );
+    assert.equal(prepared.statusCode, 202);
+    const queued = prepared.jsonBody as PreparationStatus;
+    assertPreparationStatus(queued, "queued");
+
+    const preparationService = loadPreparationService();
+    const processing = preparationService.processNextEpisodeArtifactPreparation();
+    const preparingSamples: number[] = [];
+    let observedPreparing: PreparationStatus | undefined;
+
+    for (let attempt = 0; attempt < 10_000; attempt += 1) {
+      const response = await invokeRoute(
+        "/:episodeId/artifacts/preparations/:jobId",
+        "get",
+        { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+      );
+      assert.equal(response.statusCode, 200);
+      const status = response.jsonBody as PreparationStatus;
+      if (status.state === "preparing") {
+        assert.ok(Number.isInteger(status.progress));
+        assert.ok(status.progress >= 0 && status.progress < 100);
+        assert.equal(status.queuePosition, null);
+        assert.equal(status.downloadUrl, null);
+        preparingSamples.push(status.progress);
+        const hasSourceByteProgress = status.progress >= 1 && status.progress <= 99;
+        const hasIncreasingProgress = preparingSamples.some((sample, index) => index > 0 && sample > preparingSamples[index - 1]);
+        if (hasSourceByteProgress || hasIncreasingProgress) {
+          observedPreparing = status;
+          break;
+        }
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    assert.ok(observedPreparing, "expected live Archiver source-byte progress before publication");
+    assert.ok(observedPreparing.progress < 100);
+    assert.equal(observedPreparing.downloadUrl, null);
+    const ready = await processing;
+    assert.ok(ready);
+    assertPreparationStatus(ready, "ready");
+
+    const published = await invokeRoute(
+      "/:episodeId/artifacts/preparations/:jobId",
+      "get",
+      { episodeId: String(fixtureEpisodeId), jobId: queued.jobId }
+    );
+    assert.equal(published.statusCode, 200);
+    assertPreparationStatus(published.jsonBody as PreparationStatus, "ready");
+  } finally {
+    config.auth.bypassInDev = originalBypass;
   }
 };
 
@@ -582,6 +629,10 @@ export const main = async (): Promise<void> => {
     verifySelectorContract();
     await verifyPreflightContract();
     verifyOpenApiContract();
+    await createFixtures({ liveProgress: true });
+    await verifyLiveRouteProgress();
+    await fs.promises.rm(preparationRoot, { recursive: true, force: true });
+    await createFixtures();
     await verifyRouteContract();
     await fs.promises.rm(preparationRoot, { recursive: true, force: true });
     await createFixtures();
