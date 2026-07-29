@@ -48,6 +48,7 @@ export type EpisodeArtifactPreparationStageController = {
 };
 
 let activeProcess: Promise<EpisodeArtifactPreparationStatus | null> | null = null;
+const activeCreationByCacheKey = new Map<string, Promise<EpisodeArtifactPreparationStatus>>();
 let failureMessage: string | null = null;
 let stageController: EpisodeArtifactPreparationStageController | null = null;
 
@@ -92,10 +93,12 @@ const toStatus = (job: ArtifactJobRow): EpisodeArtifactPreparationStatus => {
 };
 
 const removeJobFiles = async (jobId: string, job?: ArtifactJobRow | null): Promise<void> => {
+  // Persisted paths are metadata, not authority. Cleanup must remain scoped to
+  // the server-derived paths for this opaque job ID, even if a row is tampered.
   await Promise.all([
     fs.promises.rm(snapshotDirectory(jobId), { recursive: true, force: true }),
-    fs.promises.rm(job?.archivePath ?? finalArchivePath(jobId), { force: true }),
-    fs.promises.rm(job?.temporaryArchivePath ?? temporaryArchivePath(jobId), { force: true }),
+    fs.promises.rm(finalArchivePath(jobId), { force: true }),
+    fs.promises.rm(temporaryArchivePath(jobId), { force: true }),
   ]);
 };
 
@@ -220,26 +223,37 @@ export const initializeEpisodeArtifactPreparations = async (options: { now?: Dat
 };
 
 export const prepareEpisodeArtifactArchive = async (episodeId: number, selectedArtifacts: readonly EpisodeArtifactCatalogEntry[], options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus> => {
-  await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
   const requested = selectedArtifacts.map((artifact) => artifact.selector);
   const selectorKey = cacheKey(episodeId, requested);
-  const active = artifactJobRepository.findActive(episodeId, selectorKey);
-  if (active) return toStatus(active);
-  const completed = artifactJobRepository.findCompleted(episodeId, selectorKey);
-  if (completed && completed.expiresAt && Date.parse(completed.expiresAt) > (options.now ?? new Date()).getTime()) {
-    const finalPath = completed.archivePath;
-    if (finalPath) {
-      try { if ((await fs.promises.lstat(finalPath)).isFile()) return toStatus(completed); } catch (error) { if (!isMissingPathError(error)) throw error; }
+  const existingCreation = activeCreationByCacheKey.get(selectorKey);
+  if (existingCreation) return existingCreation;
+
+  const creation = (async (): Promise<EpisodeArtifactPreparationStatus> => {
+    await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
+    const active = artifactJobRepository.findActive(episodeId, selectorKey);
+    if (active) return toStatus(active);
+    const completed = artifactJobRepository.findCompleted(episodeId, selectorKey);
+    if (completed && completed.expiresAt && Date.parse(completed.expiresAt) > (options.now ?? new Date()).getTime()) {
+      const finalPath = completed.archivePath;
+      if (finalPath) {
+        try { if ((await fs.promises.lstat(finalPath)).isFile()) return toStatus(completed); } catch (error) { if (!isMissingPathError(error)) throw error; }
+      }
     }
+    const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
+    const jobId = randomUUID();
+    const archivePath = finalArchivePath(jobId);
+    const job = artifactJobRepository.create({
+      jobId, episodeId, selectorKey, requested, available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing,
+      archiveFileName: path.basename(archivePath), archivePath, snapshotPath: snapshotDirectory(jobId), temporaryArchivePath: temporaryArchivePath(jobId),
+    });
+    return toStatus(job);
+  })();
+  activeCreationByCacheKey.set(selectorKey, creation);
+  try {
+    return await creation;
+  } finally {
+    if (activeCreationByCacheKey.get(selectorKey) === creation) activeCreationByCacheKey.delete(selectorKey);
   }
-  const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
-  const jobId = randomUUID();
-  const archivePath = finalArchivePath(jobId);
-  const job = artifactJobRepository.create({
-    jobId, episodeId, selectorKey, requested, available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing,
-    archiveFileName: path.basename(archivePath), archivePath, snapshotPath: snapshotDirectory(jobId), temporaryArchivePath: temporaryArchivePath(jobId),
-  });
-  return toStatus(job);
 };
 
 export const getEpisodeArtifactPreparationStatus = async (episodeId: number, jobId: string, options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus | null> => {

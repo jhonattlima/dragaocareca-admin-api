@@ -146,8 +146,10 @@ export const artifactJobRepository = {
 
   recoverProcessing(): ArtifactJobRow[] {
     const now = nowIso();
+    const interrupted = (getDb().prepare("SELECT * FROM artifact_jobs WHERE status = 'processing' ORDER BY datetime(created_at) ASC, job_id ASC").all() as SqliteArtifactJobRow[])
+      .map((row) => mapRow(row) as ArtifactJobRow);
     getDb().prepare("UPDATE artifact_jobs SET status = 'pending', progress = 0, updated_at = ? WHERE status = 'processing'").run(now);
-    return artifactJobRepository.listPending();
+    return interrupted;
   },
 
   cleanupExpired(referenceTime = new Date()): ArtifactJobRow[] {
