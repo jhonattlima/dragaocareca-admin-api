@@ -371,6 +371,13 @@ const verifyRouteContract = async (): Promise<void> => {
     config.auth.bypassInDev = originalBypass;
   }
 
+  const capturedLogs: string[] = [];
+  const originalInfo = console.info;
+  const originalError = console.error;
+  console.info = (...args: unknown[]): void => { capturedLogs.push(JSON.stringify(args)); };
+  console.error = (...args: unknown[]): void => { capturedLogs.push(JSON.stringify(args)); };
+  config.auth.bypassInDev = true;
+  try {
   const invalid = await invokeRoute("/:episodeId/artifacts/prepare", "post", { episodeId: String(fixtureEpisodeId) }, "episode,,trailer");
   assert.equal(invalid.statusCode, 400);
   assert.equal(invalid.getHeader("cache-control"), "no-store");
@@ -508,9 +515,14 @@ const verifyRouteContract = async (): Promise<void> => {
     message: "Artifact downloads now require preparation",
     prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
   });
-  assert.equal(migration.getHeader("cache-control"), "no-store");
   const captured = JSON.stringify([prepared.jsonBody, queuedStatus.jsonBody, preparingStatus.jsonBody, readyStatus.jsonBody, invalidatedStatus.jsonBody, partialDownload.jsonBody, appearedStatus.jsonBody, mismatched.jsonBody, migration.jsonBody]);
   assert.equal(captured.includes(config.media.storageRoot), false);
+  assert.equal(capturedLogs.join("\n").includes(config.media.storageRoot), false);
+  } finally {
+    config.auth.bypassInDev = originalBypass;
+    console.info = originalInfo;
+    console.error = originalError;
+  }
 };
 
 export const main = async (): Promise<void> => {

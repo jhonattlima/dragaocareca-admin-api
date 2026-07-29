@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { config } from "../config/env";
 import { episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -50,6 +50,11 @@ const logArtifactPreparation = (details: {
   selectors: string[];
 }): void => {
   console.info("Episode artifact preparation", details);
+};
+
+const noStoreArtifactPreparation: RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
 };
 
 for (const directory of [config.media.episodesDir, config.media.episodesStagingDir, config.media.backupEpisodesDir]) {
@@ -428,7 +433,7 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
   }
 });
 
-episodesRouter.post("/:episodeId/artifacts/prepare", requireAuth, async (req, res, next) => {
+episodesRouter.post("/:episodeId/artifacts/prepare", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -472,7 +477,7 @@ episodesRouter.post("/:episodeId/artifacts/prepare", requireAuth, async (req, re
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", requireAuth, async (req, res, next) => {
+episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     const jobId = req.params.jobId;
@@ -499,7 +504,7 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", requireAuth, asy
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", requireAuth, async (req, res, next) => {
+episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     const jobId = req.params.jobId;
@@ -563,7 +568,7 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", require
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/download", requireAuth, (req, res) => {
+episodesRouter.get("/:episodeId/artifacts/download", noStoreArtifactPreparation, requireAuth, (req, res) => {
   const episodeId = Number(req.params.episodeId);
   if (!Number.isInteger(episodeId) || episodeId <= 0) {
     res.status(400).json({ message: "Invalid episodeId" });
