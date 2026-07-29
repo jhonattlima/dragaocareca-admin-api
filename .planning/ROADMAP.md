@@ -70,14 +70,22 @@ Plans:
 
 ### Phase 13: return zip progress to user
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Let authenticated administrators prepare a final-artifact ZIP on the server, poll its queue and assembly progress, then download a validated cached archive.
+**Requirements**: ZIP-01, ZIP-02, ZIP-03, ZIP-04, ZIP-05, ZIP-06, ZIP-07
 **Depends on:** Phase 12
 **Plans:** 0 plans
 
+**Success criteria:**
+1. An authenticated preparation request validates the Phase 12 selector contract and returns an idempotent queued, preparing, or ready job.
+2. Status polling reports the global queue position, a 0-100 source-byte assembly percentage, and a ready-only download URL without internal paths.
+3. A ready archive is reusable for 24 hours only while SHA-256 fingerprints and missing markers for every selected artifact still match.
+4. Startup recovery, expiry cleanup, authenticated ready-only download, migration response, OpenAPI, and compiled verification preserve the Phase 12 final-only security boundary.
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — preparation lifecycle verifier and persisted FIFO core.
+- [ ] 13-02-PLAN.md — startup recovery worker and protected lifecycle routes.
+- [ ] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
 
 ---
 *Last updated: 2026-07-28 after defining v1.3 Phase 12*

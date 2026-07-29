@@ -5,13 +5,13 @@ milestone_name: Episode Artifact Downloads
 current_phase: 12
 status: completed
 stopped_at: Phase 13 context gathered
-last_updated: "2026-07-29T02:14:39.055Z"
+last_updated: "2026-07-29T03:38:21.073Z"
 last_activity: 2026-07-28
 last_activity_desc: Phase 12 marked complete
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 4
+  total_plans: 7
   completed_plans: 4
 current_phase_name: Secure Episode Artifact Downloads
 ---
@@ -62,6 +62,10 @@ Recent decisions affecting current work:
 
 - Milestone v1.1 was archived as an override closeout because Phases 6-8 did not retain their original GSD phase directories and summaries.
 - Phase 5 runtime validation is now captured through `npm run verify:public-episodes`, which verifies the shipped route handler without relying on sandboxed localhost networking.
+
+### Roadmap Evolution
+
+- Phase 13 edited: formalized ZIP preparation goal, success criteria, and ZIP-01 through ZIP-07 requirements
 
 ## Deferred Items
 

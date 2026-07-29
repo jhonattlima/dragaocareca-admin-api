@@ -367,22 +367,16 @@ Do not make the archive downloadable until `finished(output)`, rename, and manif
 | A5 | `size`, `mtimeMs`, `ctimeMs`, and optional inode are sufficient cache fingerprints after snapshot revalidation. | Architecture Patterns | If producers preserve these fields while replacing bytes, a stronger content digest is required. |
 | A6 | Snapshot-copy then post-copy fingerprint comparison is adequate for the repository's final-media promotion model. | Architecture Patterns / Pitfalls | If writers modify final files in place concurrently, use descriptor-bound reads or content hashing. |
 
-## Open Questions
+## Resolved Operational Decisions
 
-1. **Legacy direct-download migration window**
-   - What we know: Phase 13 allows a deliberate replacement if migration-safe. [VERIFIED: CONTEXT.md]
-   - What's unclear: Whether any deployed admin-web or operator tooling calls the direct route today. [ASSUMED]
-   - Recommendation: Search the companion admin-web before implementation; retain `410` guidance for one release only if callers exist. [ASSUMED]
+1. **Legacy direct-download migration window — RESOLVED**
+   - Keep `GET /v1/episodes/:episodeId/artifacts/download` behind `requireAuth` for one release as `410 Gone` JSON that names the prepare endpoint. It must not stream a live ZIP or silently change its successful response shape.
 
-2. **Fingerprint strength versus disk I/O**
-   - What we know: The VPS has a 4 GB constraint and the selected artifacts can include large audio files. [VERIFIED: PROJECT.md]
-   - What's unclear: Whether final-media writers can preserve timestamps/size while altering bytes. [ASSUMED]
-   - Recommendation: Start with regular-file type + size + mtime/ctime (+ inode where exposed) and snapshot revalidation; add a streaming SHA-256 only if the writer behavior makes metadata fingerprints insufficient. [ASSUMED]
+2. **Fingerprint strength versus disk I/O — RESOLVED**
+   - Compute a streaming SHA-256 digest for every selected regular source file and persist an explicit `missing` marker for every unavailable selected artifact. Revalidate that complete selector map before reporting a cache as ready or opening a download stream. Metadata may support diagnostics but cannot be the cache-validity invariant.
 
-3. **Cache-root configuration**
-   - What we know: Existing media roots are centralized in `config.media`. [VERIFIED: codebase grep]
-   - What's unclear: Whether operations want an environment override separate from the media root. [ASSUMED]
-   - Recommendation: Default to a hidden generated subdirectory under `config.media.storageRoot`; expose a narrowly named optional env override only if deployment needs it. [ASSUMED]
+3. **Cache-root configuration — RESOLVED**
+   - Store manifests, snapshots, partial archives, and ready ZIPs only under the fixed server-owned path `path.join(config.media.storageRoot, ".artifact-preparations")`. Do not add an environment override in this phase.
 
 ## Environment Availability
 
