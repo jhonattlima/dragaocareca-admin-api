@@ -15,6 +15,43 @@ import { getEpisodeMediaFinalPath } from "../services/episode-media-layout.servi
 import { config } from "../config/env";
 
 const fixtureEpisodeId = 987654321;
+const preparationRoot = path.join(config.media.storageRoot, ".artifact-preparations");
+
+type PreparationState = "queued" | "preparing" | "ready" | "failed" | "expired";
+
+type PreparationStatus = {
+  jobId: string;
+  episodeId: number;
+  requested: string[];
+  available: string[];
+  missing: string[];
+  state: PreparationState;
+  progress: number;
+  stateText: string;
+  queuePosition: number | null;
+  downloadUrl: string | null;
+  expiresAt: string | null;
+};
+
+type PreparationService = {
+  initializeEpisodeArtifactPreparations: (options?: { now?: Date }) => Promise<void>;
+  prepareEpisodeArtifactArchive: (
+    episodeId: number,
+    selectedArtifacts: ReturnType<typeof parseEpisodeArtifactSelectors>,
+    options?: { now?: Date }
+  ) => Promise<PreparationStatus>;
+  getEpisodeArtifactPreparationStatus: (
+    episodeId: number,
+    jobId: string,
+    options?: { now?: Date }
+  ) => Promise<PreparationStatus | null>;
+  getValidatedEpisodeArtifactPreparationDownload: (
+    episodeId: number,
+    jobId: string,
+    options?: { now?: Date }
+  ) => Promise<{ status: PreparationStatus; stream: fs.ReadStream } | null>;
+  processNextEpisodeArtifactPreparation: (options?: { now?: Date }) => Promise<PreparationStatus | null>;
+};
 
 type RouteHandler = (req: FakeRequest, res: MemoryResponse, next: (error?: unknown) => void) => void | Promise<void>;
 
@@ -78,6 +115,109 @@ const createFixtures = async (): Promise<{ directory: string }> => {
   await fs.promises.writeFile(audioPath, "final audio fixture");
   await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "transcript"), "final transcript fixture");
   return { directory };
+};
+
+const loadPreparationService = (): PreparationService => {
+  // Keep the Wave 0 RED gate runtime-only until the planned service exists.
+  const modulePath = path.resolve(__dirname, "../services/episode-artifact-preparation.service");
+  return require(modulePath) as PreparationService;
+};
+
+const assertPreparationStatus = (status: PreparationStatus, state: PreparationState): void => {
+  assert.equal(status.state, state);
+  assert.ok(Number.isInteger(status.progress));
+  assert.ok(status.progress >= 0 && status.progress <= 100);
+  assert.ok(status.stateText.length > 0);
+  if (state === "queued") {
+    assert.ok(status.queuePosition && status.queuePosition >= 1);
+    assert.equal(status.downloadUrl, null);
+  }
+  if (state === "ready") {
+    assert.equal(status.progress, 100);
+    assert.equal(status.queuePosition, null);
+    assert.ok(status.downloadUrl);
+  }
+};
+
+const verifyPreparationLifecycle = async (): Promise<void> => {
+  const preparationService = loadPreparationService();
+  const start = new Date("2026-07-29T12:00:00.000Z");
+  await preparationService.initializeEpisodeArtifactPreparations({ now: start });
+
+  const normalized = parseEpisodeArtifactSelectors("transcript,episode,episode");
+  const queued = await preparationService.prepareEpisodeArtifactArchive(fixtureEpisodeId, normalized, { now: start });
+  assertPreparationStatus(queued, "queued");
+  assert.deepEqual(queued.requested, ["episode", "transcript"]);
+  const duplicate = await preparationService.prepareEpisodeArtifactArchive(
+    fixtureEpisodeId,
+    parseEpisodeArtifactSelectors("episode,transcript"),
+    { now: start }
+  );
+  assert.equal(duplicate.jobId, queued.jobId);
+  assertInvalidSelectorInput(["episode", "transcript"]);
+
+  const processing = preparationService.processNextEpisodeArtifactPreparation({ now: start });
+  const concurrent = preparationService.processNextEpisodeArtifactPreparation({ now: start });
+  const [ready, concurrentResult] = await Promise.all([processing, concurrent]);
+  assert.ok(ready);
+  assert.equal(concurrentResult?.jobId, ready.jobId);
+  assertPreparationStatus(ready, "ready");
+  assert.deepEqual(ready.available, ["episode", "transcript"]);
+  assert.deepEqual(ready.missing, []);
+
+  const cached = await preparationService.prepareEpisodeArtifactArchive(fixtureEpisodeId, normalized, { now: start });
+  assert.equal(cached.jobId, queued.jobId);
+  assertPreparationStatus(cached, "ready");
+  const download = await preparationService.getValidatedEpisodeArtifactPreparationDownload(fixtureEpisodeId, queued.jobId, { now: start });
+  assert.ok(download);
+  download.stream.destroy();
+
+  const audioPath = getEpisodeMediaFinalPath(fixtureEpisodeId, "audio");
+  const originalStat = await fs.promises.stat(audioPath);
+  await fs.promises.writeFile(audioPath, "altered final audio");
+  await fs.promises.utimes(audioPath, originalStat.atime, originalStat.mtime);
+  const invalidated = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, queued.jobId, { now: start });
+  assert.ok(invalidated);
+  assertPreparationStatus(invalidated, "expired");
+  assert.equal(await preparationService.getValidatedEpisodeArtifactPreparationDownload(fixtureEpisodeId, queued.jobId, { now: start }), null);
+
+  const missingJob = await preparationService.prepareEpisodeArtifactArchive(
+    fixtureEpisodeId,
+    parseEpisodeArtifactSelectors("trailer"),
+    { now: start }
+  );
+  assertPreparationStatus(missingJob, "queued");
+  const missingReady = await preparationService.processNextEpisodeArtifactPreparation({ now: start });
+  assert.ok(missingReady);
+  assert.deepEqual(missingReady.missing, ["trailer"]);
+  await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailer"), "new final trailer");
+  const appeared = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, missingJob.jobId, { now: start });
+  assert.ok(appeared);
+  assertPreparationStatus(appeared, "expired");
+
+  const recovering = await preparationService.prepareEpisodeArtifactArchive(
+    fixtureEpisodeId,
+    parseEpisodeArtifactSelectors("transcript"),
+    { now: start }
+  );
+  await fs.promises.writeFile(path.join(preparationRoot, "stale.part"), "stale output");
+  const manifestPath = path.join(preparationRoot, "manifests", `${recovering.jobId}.json`);
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest.state = "preparing";
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest));
+  await preparationService.initializeEpisodeArtifactPreparations({ now: start });
+  const recovered = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, recovering.jobId, { now: start });
+  assert.ok(recovered);
+  assertPreparationStatus(recovered, "queued");
+  await assert.rejects(fs.promises.stat(path.join(preparationRoot, "stale.part")));
+
+  const expired = await preparationService.getEpisodeArtifactPreparationStatus(
+    fixtureEpisodeId,
+    missingJob.jobId,
+    { now: new Date(start.getTime() + 24 * 60 * 60 * 1000 + 1) }
+  );
+  assert.ok(expired);
+  assertPreparationStatus(expired, "expired");
 };
 
 const createFixtureEpisode = (): void => {
@@ -192,9 +332,11 @@ export const main = async (): Promise<void> => {
     await verifyPreflightContract();
     verifyOpenApiContract();
     await verifyRouteContract();
+    await verifyPreparationLifecycle();
   } finally {
     episodeRepository.delete(fixtureEpisodeId);
     await fs.promises.rm(directory, { recursive: true, force: true });
+    await fs.promises.rm(preparationRoot, { recursive: true, force: true });
   }
   console.log("verified episode artifact download route and OpenAPI contract");
 };
