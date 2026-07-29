@@ -73,7 +73,7 @@ Plans:
 **Goal:** Let authenticated administrators prepare a final-artifact ZIP on the server, poll its queue and assembly progress, then download a validated cached archive.
 **Requirements**: ZIP-01, ZIP-02, ZIP-03, ZIP-04, ZIP-05, ZIP-06, ZIP-07
 **Depends on:** Phase 12
-**Plans:** 6/6 plans executed
+**Plans:** 6/6 plans complete
 
 **Success criteria:**
 
