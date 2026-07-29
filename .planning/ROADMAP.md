@@ -76,15 +76,20 @@ Plans:
 **Plans:** 0 plans
 
 **Success criteria:**
+
 1. An authenticated preparation request validates the Phase 12 selector contract and returns an idempotent queued, preparing, or ready job.
 2. Status polling reports the global queue position, a 0-100 source-byte assembly percentage, and a ready-only download URL without internal paths.
 3. A ready archive is reusable for 24 hours only while SHA-256 fingerprints and missing markers for every selected artifact still match.
 4. Startup recovery, expiry cleanup, authenticated ready-only download, migration response, OpenAPI, and compiled verification preserve the Phase 12 final-only security boundary.
 
 Plans:
+**Wave 1**
 
 - [ ] 13-01-PLAN.md — preparation lifecycle verifier and persisted FIFO core.
 - [ ] 13-02-PLAN.md — startup recovery worker and protected lifecycle routes.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
 
 ---
