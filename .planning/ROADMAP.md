@@ -73,7 +73,7 @@ Plans:
 **Goal:** Let authenticated administrators prepare a final-artifact ZIP on the server, poll its queue and assembly progress, then download a validated cached archive.
 **Requirements**: ZIP-01, ZIP-02, ZIP-03, ZIP-04, ZIP-05, ZIP-06, ZIP-07
 **Depends on:** Phase 12
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 **Success criteria:**
 
@@ -90,7 +90,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
+- [x] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
 
 ---
 *Last updated: 2026-07-28 after defining v1.3 Phase 12*
