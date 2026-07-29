@@ -58,6 +58,7 @@ export type EpisodeArtifactPreparationDownload = {
 };
 
 let activeProcess: Promise<EpisodeArtifactPreparationStatus | null> | null = null;
+const activePreparationByCacheKey = new Map<string, Promise<EpisodeArtifactPreparationStatus>>();
 
 const isMissingPathError = (error: unknown): boolean => {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -258,25 +259,41 @@ export const prepareEpisodeArtifactArchive = async (
   options: { now?: Date } = {}
 ): Promise<EpisodeArtifactPreparationStatus> => {
   const now = options.now ?? new Date();
-  await initializeEpisodeArtifactPreparations({ now, recoverInterrupted: false });
   const requested = selectedArtifacts.map((artifact) => artifact.selector);
-  const existing = (await listManifests()).find((manifest) => manifest.cacheKey === cacheKey(episodeId, requested));
-  if (existing) {
-    const refreshed = await revalidateReadyManifest(existing, now);
-    if (refreshed.state === "queued" || refreshed.state === "preparing" || refreshed.state === "ready") {
-      if (refreshed.state === "ready") logPreparation("cache-hit", refreshed);
-      return toStatus(refreshed, now);
+  const requestedCacheKey = cacheKey(episodeId, requested);
+  const existingOperation = activePreparationByCacheKey.get(requestedCacheKey);
+  if (existingOperation) return existingOperation;
+
+  let operation: Promise<EpisodeArtifactPreparationStatus>;
+  operation = (async (): Promise<EpisodeArtifactPreparationStatus> => {
+    await initializeEpisodeArtifactPreparations({ now, recoverInterrupted: false });
+    const candidates = (await listManifests()).filter((manifest) => manifest.cacheKey === requestedCacheKey);
+    const activeManifest = candidates.find((manifest) => manifest.state === "queued" || manifest.state === "preparing");
+    if (activeManifest) return toStatus(activeManifest, now);
+
+    for (const candidate of candidates) {
+      if (candidate.state !== "ready") continue;
+      const refreshed = await revalidateReadyManifest(candidate, now);
+      if (refreshed.state === "ready") {
+        logPreparation("cache-hit", refreshed);
+        return toStatus(refreshed, now);
+      }
     }
-  }
-  const source = await buildEvidence(episodeId, selectedArtifacts);
-  const manifest: PreparationManifest = {
-    jobId: randomUUID(), cacheKey: cacheKey(episodeId, requested), episodeId, requested,
-    available: source.available, missing: source.missing, evidence: source.evidence,
-    state: "queued", progress: 0, stateText: "Queued for preparation", createdAt: nowIso(now), updatedAt: nowIso(now), expiresAt: null, archiveFileName: null,
-  };
-  await writeManifest(manifest);
-  logPreparation("queued", manifest);
-  return toStatus(manifest, now);
+
+    const source = await buildEvidence(episodeId, selectedArtifacts);
+    const manifest: PreparationManifest = {
+      jobId: randomUUID(), cacheKey: requestedCacheKey, episodeId, requested,
+      available: source.available, missing: source.missing, evidence: source.evidence,
+      state: "queued", progress: 0, stateText: "Queued for preparation", createdAt: nowIso(now), updatedAt: nowIso(now), expiresAt: null, archiveFileName: null,
+    };
+    await writeManifest(manifest);
+    logPreparation("queued", manifest);
+    return toStatus(manifest, now);
+  })().finally(() => {
+    if (activePreparationByCacheKey.get(requestedCacheKey) === operation) activePreparationByCacheKey.delete(requestedCacheKey);
+  });
+  activePreparationByCacheKey.set(requestedCacheKey, operation);
+  return operation;
 };
 
 export const getEpisodeArtifactPreparationStatus = async (
