@@ -5,15 +5,15 @@ milestone_name: Episode Artifact Downloads
 current_phase: 13
 current_phase_name: return-zip-progress-to-user
 status: executing
-stopped_at: Completed 13-05-PLAN.md
-last_updated: "2026-07-29T12:27:45.996Z"
+stopped_at: Completed 13-06-PLAN.md
+last_updated: "2026-07-29T12:32:52.970Z"
 last_activity: 2026-07-29
-last_activity_desc: Completed 13-04 cache-key idempotency closure
+last_activity_desc: Completed 13-05 OpenAPI selector parity closure
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 10
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 ## Current Position
 
 Phase: 13 (return-zip-progress-to-user) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Gap-closure execution in progress
 Last activity: 2026-07-29 — Completed 13-05 OpenAPI selector parity closure
 
@@ -63,6 +63,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Coalesce normalized artifact preparation lookup, ready revalidation, and persistence per cache key to prevent duplicate FIFO jobs.
 - [Phase ?]: Prefer queued or preparing cache-key manifests before valid revalidated ready candidates so stale history never shadows active work.
 - [Phase ?]: Use an anchored OpenAPI pattern for fixed nonempty selector CSV grammar and prove it against parser and route behavior.
+- [Phase ?]: Require a non-zero source-byte progress sample or a strictly increasing preparing pair before accepting live assembly evidence.
+- [Phase ?]: Invoke the exported worker startup path offline and always call its returned stop callback in finally.
 
 ### Pending Todos
 
@@ -92,8 +94,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-29T12:27:45.990Z
-Stopped at: Completed 13-05-PLAN.md
+Last session: 2026-07-29T12:32:52.964Z
+Stopped at: Completed 13-06-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -109,3 +111,4 @@ Resume file: None
 | Phase 13-return-zip-progress-to-user P03 | 5min | 2 tasks | 3 files |
 | Phase 13-return-zip-progress-to-user P04 | 2min | 2 tasks | 2 files |
 | Phase 13-return-zip-progress-to-user P05 | 4min | 2 tasks | 2 files |
+| Phase 13-return-zip-progress-to-user P06 | 5min | 2 tasks | 1 files |
