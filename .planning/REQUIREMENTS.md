@@ -16,7 +16,7 @@
 - [x] **ZIP-02**: The API persists preparation jobs and processes at most one ZIP globally; status exposes `queued`, `preparing`, `ready`, `failed`, or `expired`, plus a queue position only while queued.
 - [x] **ZIP-03**: While preparing, the API reports a 0-100 progress value derived from source bytes processed into the ZIP, distinct from the textual state.
 - [x] **ZIP-04**: A ready ZIP is reusable for 24 hours for the same normalized episode/selector set only while streaming SHA-256 fingerprints and explicit missing markers for every selected artifact remain unchanged.
-- [ ] **ZIP-05**: Only a validated ready archive is downloadable through an authenticated endpoint; the legacy direct route returns an authenticated `410` migration response for one release.
+- [x] **ZIP-05**: Only a validated ready archive is downloadable through an authenticated endpoint; the legacy direct route returns an authenticated `410` migration response for one release.
 - [x] **ZIP-06**: Restart recovery requeues interrupted work, removes partial/snapshot output, expires stale caches, and never exposes request-derived paths, non-final artifacts, or filesystem paths in API data or logs.
 - [ ] **ZIP-07**: OpenAPI and the repository-native compiled verifier document and prove the full preparation, status, cache, invalidation, recovery, download, authentication, and migration contract.
 
