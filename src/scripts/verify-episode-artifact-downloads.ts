@@ -203,6 +203,30 @@ const verifyPreparationLifecycle = async (): Promise<void> => {
   assertPreparationStatus(invalidated, "expired");
   assert.equal(await preparationService.getValidatedEpisodeArtifactPreparationDownload(fixtureEpisodeId, queued.jobId, { now: start }), null);
 
+  const retried = await Promise.all(Array.from({ length: 4 }, () =>
+    preparationService.prepareEpisodeArtifactArchive(
+      fixtureEpisodeId,
+      parseEpisodeArtifactSelectors("transcript,episode,episode"),
+      { now: start }
+    )
+  ));
+  const retryJobIds = new Set(retried.map((status) => status.jobId));
+  assert.equal(retryJobIds.size, 1);
+  for (const retry of retried) assert.ok(retry.state === "queued" || retry.state === "preparing");
+  assert.equal(retryJobIds.has(queued.jobId), false);
+  const cacheKey = `${fixtureEpisodeId}:episode,transcript`;
+  const matchingManifests = await Promise.all(
+    (await fs.promises.readdir(path.join(preparationRoot, "manifests")))
+      .filter((fileName) => fileName.endsWith(".json"))
+      .map(async (fileName) => JSON.parse(await fs.promises.readFile(path.join(preparationRoot, "manifests", fileName), "utf8")) as {
+        cacheKey: string;
+        state: PreparationState;
+      })
+  );
+  const cacheHistory = matchingManifests.filter((manifest) => manifest.cacheKey === cacheKey);
+  assert.equal(cacheHistory.filter((manifest) => manifest.state === "expired").length, 1);
+  assert.equal(cacheHistory.filter((manifest) => manifest.state === "queued" || manifest.state === "preparing").length, 1);
+
   const missingJob = await preparationService.prepareEpisodeArtifactArchive(
     fixtureEpisodeId,
     parseEpisodeArtifactSelectors("trailer"),
