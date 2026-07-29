@@ -12,6 +12,7 @@ import {
   preflightEpisodeArtifactDownloads,
 } from "../services/episode-artifact-download.service";
 import { getEpisodeMediaFinalPath } from "../services/episode-media-layout.service";
+import { startEpisodeArtifactPreparationWorker } from "../workers/episode-artifact-preparation.worker";
 import { config } from "../config/env";
 
 const fixtureEpisodeId = 987654321;
@@ -619,6 +620,37 @@ const verifyLiveRouteProgress = async (): Promise<void> => {
   }
 };
 
+const verifyWorkerStartupRecovery = async (): Promise<void> => {
+  const preparationService = loadPreparationService();
+  const queued = await preparationService.prepareEpisodeArtifactArchive(
+    fixtureEpisodeId,
+    parseEpisodeArtifactSelectors("transcript")
+  );
+  assertPreparationStatus(queued, "queued");
+
+  const manifestPath = path.join(preparationRoot, "manifests", `${queued.jobId}.json`);
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  await fs.promises.writeFile(manifestPath, JSON.stringify({ ...manifest, state: "preparing", progress: 42, stateText: "Preparing archive" }));
+  const interruptedSnapshot = path.join(preparationRoot, "snapshots", queued.jobId, "partial.txt");
+  const interruptedArchive = path.join(preparationRoot, "archives", `.${queued.jobId}.zip.part`);
+  await fs.promises.mkdir(path.dirname(interruptedSnapshot), { recursive: true });
+  await fs.promises.writeFile(interruptedSnapshot, "partial snapshot");
+  await fs.promises.writeFile(interruptedArchive, "partial archive");
+
+  let stopWorker: (() => void) | undefined;
+  try {
+    stopWorker = await startEpisodeArtifactPreparationWorker();
+    const recovered = await preparationService.getEpisodeArtifactPreparationStatus(fixtureEpisodeId, queued.jobId);
+    assert.ok(recovered);
+    assertPreparationStatus(recovered, "ready");
+    await assert.rejects(fs.promises.stat(interruptedSnapshot));
+    await assert.rejects(fs.promises.stat(interruptedArchive));
+    assert.equal(await preparationService.processNextEpisodeArtifactPreparation(), null);
+  } finally {
+    stopWorker?.();
+  }
+};
+
 export const main = async (): Promise<void> => {
   if (path.basename(__filename) !== "verify-episode-artifact-downloads.js") throw new Error("expected compiled verifier execution");
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development for artifact-download verification");
@@ -637,6 +669,9 @@ export const main = async (): Promise<void> => {
     await fs.promises.rm(preparationRoot, { recursive: true, force: true });
     await createFixtures();
     await verifyPreparationLifecycle();
+    await fs.promises.rm(preparationRoot, { recursive: true, force: true });
+    await createFixtures();
+    await verifyWorkerStartupRecovery();
   } finally {
     episodeRepository.delete(fixtureEpisodeId);
     await fs.promises.rm(directory, { recursive: true, force: true });
