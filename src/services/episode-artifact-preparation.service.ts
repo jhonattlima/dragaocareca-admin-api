@@ -83,7 +83,7 @@ const toStatus = (job: ArtifactJobRow): EpisodeArtifactPreparationStatus => {
     progress: Math.max(0, Math.min(100, Math.trunc(job.progress))),
     stateText: publicStateText(job),
     queuePosition: queuePosition && queuePosition > 0 ? queuePosition : null,
-    downloadUrl: job.status === "completed" ? `/v1/episodes/${job.episodeId}/artifacts/preparations/${job.jobId}/download` : null,
+    downloadUrl: job.status === "completed" ? `/v1/episodes/${job.episodeId}/artifacts/jobs/${job.jobId}/download` : null,
     expiresAt: job.expiresAt,
     error: job.error,
     createdAt: job.createdAt,
@@ -253,7 +253,15 @@ export const getValidatedEpisodeArtifactPreparationDownload = async (episodeId: 
   if (!status || status.state !== "completed") return null;
   const job = artifactJobRepository.findByJobId(episodeId, jobId);
   if (!job?.archivePath) return null;
-  const stat = await fs.promises.lstat(job.archivePath);
+  const expectedPath = finalArchivePath(job.jobId);
+  if (path.resolve(job.archivePath) !== path.resolve(expectedPath)) return null;
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.lstat(job.archivePath);
+  } catch (error) {
+    if (isMissingPathError(error)) return null;
+    throw error;
+  }
   if (!stat.isFile()) return null;
   return { status, stream: fs.createReadStream(job.archivePath) };
 };

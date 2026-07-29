@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
 import { Router, type RequestHandler } from "express";
+import { z } from "zod";
 import { config } from "../config/env";
 import { episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -56,6 +57,13 @@ const noStoreArtifactPreparation: RequestHandler = (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 };
+
+const artifactJobRequestSchema = z.object({
+  artifacts: z.array(z.enum(["episode", "trailer", "transcript", "image", "image-low"])).min(1),
+}).strict();
+
+// D-01/D-02/D-03/D-08/D-09/D-10/D-11: the route boundary owns auth, canonical
+// selector validation, preflight availability, opaque job lookup, and safe delivery.
 
 for (const directory of [config.media.episodesDir, config.media.episodesStagingDir, config.media.backupEpisodesDir]) {
   fs.mkdirSync(directory, { recursive: true });
@@ -433,7 +441,7 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
   }
 });
 
-episodesRouter.post("/:episodeId/artifacts/prepare", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
+episodesRouter.post("/:episodeId/artifacts/jobs", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -441,9 +449,15 @@ episodesRouter.post("/:episodeId/artifacts/prepare", noStoreArtifactPreparation,
       return;
     }
 
+    const body = artifactJobRequestSchema.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "artifacts must be a nonempty array of canonical selectors" });
+      return;
+    }
+
     let selectedArtifacts;
     try {
-      selectedArtifacts = parseEpisodeArtifactSelectors(req.query.artifacts);
+      selectedArtifacts = parseEpisodeArtifactSelectors(body.data.artifacts.join(","));
     } catch (error) {
       if (error instanceof EpisodeArtifactSelectorValidationError) {
         res.status(400).json({ message: error.message });
@@ -466,18 +480,18 @@ episodesRouter.post("/:episodeId/artifacts/prepare", noStoreArtifactPreparation,
 
     const status = await prepareEpisodeArtifactArchive(episodeId, selectedArtifacts);
     logArtifactPreparation({
-      event: status.state === "ready" ? "cache-hit" : "queued",
+      event: status.state === "completed" ? "cache-hit" : "queued",
       episodeId,
       selectors: status.requested,
     });
-    res.setHeader("Cache-Control", "no-store");
-    res.status(status.state === "ready" ? 200 : 202).json(status);
+    res.setHeader("Location", `/v1/episodes/${episodeId}/artifacts/jobs/${status.jobId}`);
+    res.status(status.state === "completed" ? 200 : 202).json(status);
   } catch (error) {
     next(error);
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
+episodesRouter.get("/:episodeId/artifacts/jobs/:jobId", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     const jobId = req.params.jobId;
@@ -486,25 +500,24 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId", noStoreArtifactP
       return;
     }
     if (typeof jobId !== "string" || jobId.length === 0) {
-      res.status(404).json({ message: "Artifact preparation not found" });
+      res.status(404).json({ message: "Artifact job not found" });
       return;
     }
 
     const status = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
     if (!status) {
       logArtifactPreparation({ event: "not-found", episodeId, selectors: [] });
-      res.status(404).json({ message: "Artifact preparation not found" });
+      res.status(404).json({ message: "Artifact job not found" });
       return;
     }
 
-    res.setHeader("Cache-Control", "no-store");
     res.json(status);
   } catch (error) {
     next(error);
   }
 });
 
-episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
+episodesRouter.get("/:episodeId/artifacts/jobs/:jobId/download", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     const jobId = req.params.jobId;
@@ -513,22 +526,17 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", noStore
       return;
     }
     if (typeof jobId !== "string" || jobId.length === 0) {
-      res.status(404).json({ message: "Artifact preparation not found" });
+      res.status(404).json({ message: "Artifact job not found" });
       return;
     }
 
     const status = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
     if (!status) {
       logArtifactPreparation({ event: "not-found", episodeId, selectors: [] });
-      res.status(404).json({ message: "Artifact preparation not found" });
+      res.status(404).json({ message: "Artifact job not found" });
       return;
     }
-    if (status.state === "expired") {
-      logArtifactPreparation({ event: "expired", episodeId, selectors: status.requested });
-      res.status(410).json({ message: "Artifact preparation expired" });
-      return;
-    }
-    if (status.state !== "ready") {
+    if (status.state !== "completed") {
       logArtifactPreparation({ event: "not-ready", episodeId, selectors: status.requested });
       res.status(409).json({ message: "Artifact archive is not ready" });
       return;
@@ -536,19 +544,12 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", noStore
 
     const download = await getValidatedEpisodeArtifactPreparationDownload(episodeId, jobId);
     if (!download) {
-      const refreshed = await getEpisodeArtifactPreparationStatus(episodeId, jobId);
-      if (refreshed?.state === "expired") {
-        logArtifactPreparation({ event: "expired", episodeId, selectors: status.requested });
-        res.status(410).json({ message: "Artifact preparation expired" });
-        return;
-      }
-      logArtifactPreparation({ event: "not-ready", episodeId, selectors: status.requested });
-      res.status(409).json({ message: "Artifact archive is not ready" });
+      logArtifactPreparation({ event: "not-found", episodeId, selectors: status.requested });
+      res.status(404).json({ message: "Artifact job not found" });
       return;
     }
 
     res.status(200);
-    res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
     if (download.status.missing.length > 0) {
@@ -566,19 +567,6 @@ episodesRouter.get("/:episodeId/artifacts/preparations/:jobId/download", noStore
   } catch (error) {
     next(error);
   }
-});
-
-episodesRouter.get("/:episodeId/artifacts/download", noStoreArtifactPreparation, requireAuth, (req, res) => {
-  const episodeId = Number(req.params.episodeId);
-  if (!Number.isInteger(episodeId) || episodeId <= 0) {
-    res.status(400).json({ message: "Invalid episodeId" });
-    return;
-  }
-  res.setHeader("Cache-Control", "no-store");
-  res.status(410).json({
-    message: "Artifact downloads now require preparation",
-    prepareEndpoint: "POST /v1/episodes/:episodeId/artifacts/prepare",
-  });
 });
 
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
