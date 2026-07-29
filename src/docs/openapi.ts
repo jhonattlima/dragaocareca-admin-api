@@ -725,7 +725,7 @@ export const swaggerSpec = swaggerJsdoc({
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
-            { name: "artifacts", in: "query", required: false, schema: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "One CSV query value selecting episode, trailer, transcript, image, and/or image-low. Omit to select all. Equivalent values are normalized into fixed catalog order." },
+            { name: "artifacts", in: "query", required: false, schema: { type: "string", pattern: "^(?:episode|trailer|transcript|image|image-low)(?:,(?:episode|trailer|transcript|image|image-low))*$", example: "episode,transcript" }, description: "One nonempty CSV query value selecting only episode, trailer, transcript, image, and/or image-low. Omit to select all. Equivalent values are normalized into fixed catalog order." },
           ],
           responses: {
             "200": { description: "A valid ready archive cache was reused.", headers: { "Cache-Control": { description: "no-store", schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/EpisodeArtifactPreparationStatus" } } } },
