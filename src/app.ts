@@ -19,7 +19,11 @@ import { episodeRepository } from "./database/repositories/episode.repository";
 export const app = express();
 
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    exposedHeaders: ["Content-Disposition", "X-Missing-Artifacts"],
+  }),
+);
 app.use(morgan("dev"));
 app.use(express.json({ limit: "4mb" }));
 app.use("/media", express.static(config.media.storageRoot));
