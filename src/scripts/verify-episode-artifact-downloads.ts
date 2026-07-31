@@ -219,6 +219,7 @@ const verifyLifecycleAndDownload = async (): Promise<{ completed: ArtifactStatus
     await controller.waitForCompletion("processing-preflight");
     const processing = assertRouteSnapshot(await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: pending.jobId }), "processing");
     assert.equal(processing.progress, 0);
+    controller.release("processing-evidence");
     controller.release("processing-archive");
     await controller.waitForCompletion("processing-archive");
     const archived = assertRouteSnapshot(await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: pending.jobId }), "processing");
@@ -289,6 +290,20 @@ const verifyPartialAndFailure = async (): Promise<void> => {
     assert.equal((failedStatus.jsonBody as ArtifactStatus).error, "Artifact archive preparation failed. Please try again.");
     const failedDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: failedJob.jobId });
     assert.equal(failedDownload.statusCode, 409);
+
+    await resetVerifierFixtures();
+    const evidenceStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
+    const evidenceController = createEpisodeArtifactPreparationStageController();
+    injectEpisodeArtifactPreparationStageController(evidenceController);
+    const evidenceProcessing = processNextEpisodeArtifactPreparation({ now: startTime });
+    evidenceController.release("processing-preflight");
+    await evidenceController.waitForCompletion("processing-evidence");
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "audio"), "source changed after snapshot", "utf8");
+    evidenceController.releaseAll();
+    const evidenceFailed = (await evidenceProcessing) as ArtifactStatus;
+    assertPublicSnapshot(evidenceFailed, "failed");
+    assert.equal(evidenceFailed.error, "Artifact archive preparation failed. Please try again.");
+    await assertNoPartialOutput((evidenceStart.jsonBody as ArtifactStatus).jobId);
   } finally {
     resetEpisodeArtifactPreparationFailure();
     resetEpisodeArtifactPreparationStageController();

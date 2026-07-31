@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ZipArchive } from "archiver" with { "resolution-mode": "import" };
 import { config } from "../config/env";
 import { artifactJobRepository, type ArtifactJobRow, type ArtifactSourceEvidence } from "../database/repositories/artifact-job.repository";
@@ -19,7 +19,7 @@ const archivesRoot = path.join(preparationRoot, "archives");
 const retentionMs = 24 * 60 * 60 * 1000;
 
 export type EpisodeArtifactPreparationState = "pending" | "processing" | "completed" | "failed";
-export type EpisodeArtifactPreparationStage = "pending" | "processing-preflight" | "processing-archive" | "processing-finalization" | "terminal";
+export type EpisodeArtifactPreparationStage = "pending" | "processing-preflight" | "processing-evidence" | "processing-archive" | "processing-finalization" | "terminal";
 
 export type EpisodeArtifactPreparationStatus = {
   jobId: string;
@@ -124,18 +124,20 @@ const removeTemporaryJobFiles = async (jobId: string): Promise<void> => {
   ]);
 };
 
-const digestSnapshot = async (sourcePath: string, destinationPath: string): Promise<number> => {
+const digestSnapshot = async (sourcePath: string, destinationPath: string): Promise<{ bytes: number; sha256: string }> => {
   let bytes = 0;
+  const hash = createHash("sha256");
   const output = fs.createWriteStream(destinationPath, { flags: "wx" });
   try {
     for await (const chunk of fs.createReadStream(sourcePath)) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += buffer.length;
+      hash.update(buffer);
       if (!output.write(buffer)) await once(output, "drain");
     }
     output.end();
     await once(output, "finish");
-    return bytes;
+    return { bytes, sha256: hash.digest("hex") };
   } catch (error) {
     output.destroy();
     throw error;
@@ -208,7 +210,7 @@ export const createEpisodeArtifactPreparationStageController = (): EpisodeArtifa
       waiters.delete(stage);
     },
     releaseAll() {
-      for (const stage of ["pending", "processing-preflight", "processing-archive", "processing-finalization", "terminal"] as const) this.release(stage);
+      for (const stage of ["pending", "processing-preflight", "processing-evidence", "processing-archive", "processing-finalization", "terminal"] as const) this.release(stage);
     },
   };
 };
@@ -327,14 +329,18 @@ export const processNextEpisodeArtifactPreparation = async (options: { now?: Dat
       const selected = parseEpisodeArtifactSelectors(processing.requested.join(","));
       const preflight = await preflightEpisodeArtifactDownloads(processing.episodeId, selected);
       const snapshots: Array<{ filePath: string; entryName: string }> = [];
+      const sourceEvidence: ArtifactSourceEvidence[] = preflight.missing.map((selector) => ({ selector, missing: true }));
       await fs.promises.mkdir(snapshotDirectory(processing.jobId), { recursive: true });
       for (const artifact of preflight.available) {
         const snapshotPath = path.join(snapshotDirectory(processing.jobId), artifact.fileName);
-        await digestSnapshot(artifact.path, snapshotPath);
+        const snapshot = await digestSnapshot(artifact.path, snapshotPath);
         snapshots.push({ filePath: snapshotPath, entryName: artifact.archiveEntryName });
+        // Persist the exact bytes consumed by Archiver, not a later live-source read.
+        sourceEvidence.push({ selector: artifact.selector, sha256: snapshot.sha256 });
       }
       stageController?.complete("processing-preflight");
-      const sourceEvidence = await collectEpisodeArtifactSourceEvidence(processing.episodeId, selected);
+      stageController?.complete("processing-evidence");
+      await controllerFor("processing-evidence");
       if (!evidenceMatches(sourceEvidence, await collectEpisodeArtifactSourceEvidence(processing.episodeId, selected))) {
         throw new Error("Artifact sources changed during preparation");
       }
