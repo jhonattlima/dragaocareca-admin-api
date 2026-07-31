@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
+import type { ArtifactSourceEvidence } from "../database/repositories/artifact-job.repository";
 import { getEpisodeMediaFinalPath, type EpisodeMediaKind } from "./episode-media-layout.service";
 
 const artifactCatalog = [
@@ -33,6 +35,8 @@ export type EpisodeArtifactPreflightResult = {
   available: EpisodeArtifactPreflightEntry[];
   missing: EpisodeArtifactSelector[];
 };
+
+export type EpisodeArtifactSourceEvidence = ArtifactSourceEvidence;
 
 const isCatalogSelector = (selector: string): selector is EpisodeArtifactSelector =>
   artifactCatalog.some((entry) => entry.selector === selector);
@@ -104,4 +108,31 @@ export const preflightEpisodeArtifactDownloads = async (
     available,
     missing,
   };
+};
+
+export const collectEpisodeArtifactSourceEvidence = async (
+  episodeId: number,
+  selectedArtifacts: readonly EpisodeArtifactCatalogEntry[]
+): Promise<EpisodeArtifactSourceEvidence[]> => {
+  const evidence: EpisodeArtifactSourceEvidence[] = [];
+  for (const artifact of selectedArtifacts) {
+    const finalPath = getEpisodeMediaFinalPath(episodeId, artifact.kind);
+    try {
+      const stat = await fs.promises.lstat(finalPath);
+      if (!stat.isFile()) {
+        evidence.push({ selector: artifact.selector, missing: true });
+        continue;
+      }
+      const hash = createHash("sha256");
+      for await (const chunk of fs.createReadStream(finalPath)) hash.update(chunk);
+      evidence.push({ selector: artifact.selector, sha256: hash.digest("hex") });
+    } catch (error) {
+      if (isMissingFinalPathError(error)) {
+        evidence.push({ selector: artifact.selector, missing: true });
+        continue;
+      }
+      throw error;
+    }
+  }
+  return evidence;
 };

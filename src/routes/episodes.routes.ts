@@ -59,8 +59,8 @@ const noStoreArtifactPreparation: RequestHandler = (_req, res, next) => {
 };
 
 const artifactJobRequestSchema = z.object({
-  artifacts: z.array(z.enum(["episode", "trailer", "transcript", "image", "image-low"])).min(1),
-}).strict();
+  artifacts: z.array(z.enum(["episode", "trailer", "transcript", "image", "image-low"])).min(1).optional(),
+}).strict().optional();
 
 // D-01/D-02/D-03/D-08/D-09/D-10/D-11: the route boundary owns auth, canonical
 // selector validation, preflight availability, opaque job lookup, and safe delivery.
@@ -451,13 +451,13 @@ episodesRouter.post("/:episodeId/artifacts/jobs", noStoreArtifactPreparation, re
 
     const body = artifactJobRequestSchema.safeParse(req.body);
     if (!body.success) {
-      res.status(400).json({ message: "artifacts must be a nonempty array of canonical selectors" });
+      res.status(400).json({ message: "artifacts must be a nonempty array of canonical selectors when supplied" });
       return;
     }
 
     let selectedArtifacts;
     try {
-      selectedArtifacts = parseEpisodeArtifactSelectors(body.data.artifacts.join(","));
+      selectedArtifacts = parseEpisodeArtifactSelectors(body.data?.artifacts?.join(","));
     } catch (error) {
       if (error instanceof EpisodeArtifactSelectorValidationError) {
         res.status(400).json({ message: error.message });

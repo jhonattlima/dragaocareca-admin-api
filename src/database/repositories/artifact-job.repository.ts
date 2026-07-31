@@ -2,6 +2,12 @@ import { getDb, nowIso } from "../sqlite";
 
 export type ArtifactJobStatus = "pending" | "processing" | "completed" | "failed";
 
+export type ArtifactSourceEvidence = {
+  selector: string;
+  sha256?: string;
+  missing?: true;
+};
+
 export type ArtifactJobRow = {
   jobId: string;
   episodeId: number;
@@ -15,6 +21,7 @@ export type ArtifactJobRow = {
   archivePath: string | null;
   snapshotPath: string | null;
   temporaryArchivePath: string | null;
+  sourceEvidence: ArtifactSourceEvidence[];
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +50,7 @@ type SqliteArtifactJobRow = {
   archive_path: string | null;
   snapshot_path: string | null;
   temporary_archive_path: string | null;
+  source_evidence_json: string;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -51,9 +59,24 @@ type SqliteArtifactJobRow = {
 };
 
 const jsonArray = (value: readonly string[]): string => JSON.stringify(value);
+const jsonSourceEvidence = (value: readonly ArtifactSourceEvidence[]): string => JSON.stringify(value.map((evidence) =>
+  evidence.missing ? { selector: evidence.selector, missing: true } : { selector: evidence.selector, sha256: evidence.sha256 }
+));
 const parseArray = (value: string): string[] => {
   const parsed: unknown = JSON.parse(value);
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+};
+const parseSourceEvidence = (value: string): ArtifactSourceEvidence[] => {
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item): ArtifactSourceEvidence[] => {
+    if (!item || typeof item !== "object") return [];
+    const { selector, sha256, missing } = item as Record<string, unknown>;
+    if (typeof selector !== "string") return [];
+    if (typeof sha256 === "string") return [{ selector, sha256 }];
+    if (missing === true) return [{ selector, missing: true }];
+    return [];
+  });
 };
 
 const mapRow = (row: SqliteArtifactJobRow | undefined): ArtifactJobRow | null => {
@@ -71,6 +94,7 @@ const mapRow = (row: SqliteArtifactJobRow | undefined): ArtifactJobRow | null =>
     archivePath: row.archive_path,
     snapshotPath: row.snapshot_path,
     temporaryArchivePath: row.temporary_archive_path,
+    sourceEvidence: parseSourceEvidence(row.source_evidence_json),
     error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -89,12 +113,12 @@ export const artifactJobRepository = {
       INSERT INTO artifact_jobs (
         job_id, episode_id, selector_key, requested_selectors_json, available_selectors_json,
         missing_selectors_json, status, progress, archive_file_name, archive_path,
-        snapshot_path, temporary_archive_path, error, created_at, updated_at, completed_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        snapshot_path, temporary_archive_path, source_evidence_json, error, created_at, updated_at, completed_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.jobId, input.episodeId, input.selectorKey, jsonArray(input.requested), jsonArray(input.available),
       jsonArray(input.missing), input.status ?? "pending", input.progress ?? 0, input.archiveFileName,
-      input.archivePath, input.snapshotPath, input.temporaryArchivePath, input.error ?? null, now, now,
+      input.archivePath, input.snapshotPath, input.temporaryArchivePath, jsonSourceEvidence(input.sourceEvidence), input.error ?? null, now, now,
       input.completedAt ?? null, input.expiresAt ?? null,
     );
     return artifactJobRepository.findByJobId(input.episodeId, input.jobId) as ArtifactJobRow;
@@ -124,7 +148,7 @@ export const artifactJobRepository = {
   },
 
   updateProgress(jobId: string, progress: number): ArtifactJobRow | null {
-    const bounded = Math.max(0, Math.min(100, Math.trunc(progress)));
+    const bounded = Math.max(0, Math.min(99, Math.trunc(progress)));
     getDb().prepare("UPDATE artifact_jobs SET progress = MAX(progress, ?), updated_at = ? WHERE job_id = ? AND status = 'processing'").run(bounded, nowIso(), jobId);
     return selectBy("job_id = ?", jobId);
   },
@@ -138,9 +162,19 @@ export const artifactJobRepository = {
     return selectBy("job_id = ?", jobId);
   },
 
-  fail(jobId: string, error: string): ArtifactJobRow | null {
-    const message = error.trim().replace(/\s+/g, " ").slice(0, 500) || "Artifact preparation failed";
-    getDb().prepare("UPDATE artifact_jobs SET status = 'failed', error = ?, updated_at = ? WHERE job_id = ? AND status = 'processing'").run(message, nowIso(), jobId);
+  updateSourceEvidence(jobId: string, sourceEvidence: readonly ArtifactSourceEvidence[]): ArtifactJobRow | null {
+    getDb().prepare("UPDATE artifact_jobs SET source_evidence_json = ?, updated_at = ? WHERE job_id = ? AND status = 'processing'")
+      .run(jsonSourceEvidence(sourceEvidence), nowIso(), jobId);
+    return selectBy("job_id = ?", jobId);
+  },
+
+  remove(jobId: string): void {
+    getDb().prepare("DELETE FROM artifact_jobs WHERE job_id = ?").run(jobId);
+  },
+
+  fail(jobId: string): ArtifactJobRow | null {
+    getDb().prepare("UPDATE artifact_jobs SET status = 'failed', error = ?, updated_at = ? WHERE job_id = ? AND status = 'processing'")
+      .run("Artifact archive preparation failed. Please try again.", nowIso(), jobId);
     return selectBy("job_id = ?", jobId);
   },
 

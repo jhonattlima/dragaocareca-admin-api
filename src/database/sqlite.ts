@@ -129,7 +129,8 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes(pub_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_launch_state ON episodes(launch_notification_state, pub_date);
 
--- D-12/D-13: durable opaque artifact-job state and bounded public progress.
+-- D-12/D-13/D-14: durable opaque artifact-job state, bounded public progress,
+-- and selector-only source evidence for cache revalidation.
 CREATE TABLE IF NOT EXISTS artifact_jobs (
   job_id TEXT PRIMARY KEY,
   episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
@@ -143,6 +144,7 @@ CREATE TABLE IF NOT EXISTS artifact_jobs (
   archive_path TEXT,
   snapshot_path TEXT,
   temporary_archive_path TEXT,
+  source_evidence_json TEXT NOT NULL DEFAULT '[]',
   error TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -286,6 +288,7 @@ export const getDb = (): DatabaseSync => {
     db.exec(schema);
     ensureYoutubeMetricSampleColumns(db);
     ensureEpisodeTranscriptColumns(db);
+    ensureArtifactJobColumns(db);
   }
   return db;
 };
@@ -314,5 +317,13 @@ const ensureEpisodeTranscriptColumns = (database: DatabaseSync): void => {
   }
   if (!columnNames.has("transcript_error")) {
     database.exec("ALTER TABLE episodes ADD COLUMN transcript_error TEXT;");
+  }
+};
+
+const ensureArtifactJobColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(artifact_jobs)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("source_evidence_json")) {
+    database.exec("ALTER TABLE artifact_jobs ADD COLUMN source_evidence_json TEXT NOT NULL DEFAULT '[]';");
   }
 };

@@ -4,8 +4,9 @@ import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { ZipArchive } from "archiver" with { "resolution-mode": "import" };
 import { config } from "../config/env";
-import { artifactJobRepository, type ArtifactJobRow } from "../database/repositories/artifact-job.repository";
+import { artifactJobRepository, type ArtifactJobRow, type ArtifactSourceEvidence } from "../database/repositories/artifact-job.repository";
 import {
+  collectEpisodeArtifactSourceEvidence,
   parseEpisodeArtifactSelectors,
   preflightEpisodeArtifactDownloads,
   type EpisodeArtifactCatalogEntry,
@@ -15,7 +16,7 @@ import {
 const preparationRoot = path.join(config.media.storageRoot, ".artifact-preparations");
 const snapshotsRoot = path.join(preparationRoot, "snapshots");
 const archivesRoot = path.join(preparationRoot, "archives");
-const retentionMs = 45 * 60 * 1000;
+const retentionMs = 24 * 60 * 60 * 1000;
 
 export type EpisodeArtifactPreparationState = "pending" | "processing" | "completed" | "failed";
 export type EpisodeArtifactPreparationStage = "pending" | "processing-preflight" | "processing-archive" | "processing-finalization" | "terminal";
@@ -67,7 +68,21 @@ const publicStateText = (job: ArtifactJobRow): string => {
   if (job.status === "pending") return "Queued for preparation";
   if (job.status === "completed") return "Archive ready";
   if (job.status === "failed") return "Preparation failed";
-  return job.progress < 25 ? "Preparing artifact snapshot" : job.progress < 90 ? "Assembling archive" : "Finalizing archive";
+  return job.progress === 0 ? "Preparing artifact snapshot" : job.progress < 99 ? "Assembling archive" : "Finalizing archive";
+};
+
+const evidenceMatches = (left: readonly ArtifactSourceEvidence[], right: readonly ArtifactSourceEvidence[]): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
+
+const hasCurrentSourceEvidence = async (job: ArtifactJobRow): Promise<boolean> => {
+  if (job.sourceEvidence.length !== job.requested.length) return false;
+  const selected = parseEpisodeArtifactSelectors(job.requested.join(","));
+  return evidenceMatches(job.sourceEvidence, await collectEpisodeArtifactSourceEvidence(job.episodeId, selected));
+};
+
+const invalidateCompletedJob = async (job: ArtifactJobRow): Promise<void> => {
+  await removeJobFiles(job.jobId, job);
+  artifactJobRepository.remove(job.jobId);
 };
 
 const toStatus = (job: ArtifactJobRow): EpisodeArtifactPreparationStatus => {
@@ -139,11 +154,15 @@ const assembleArchive = async (job: ArtifactJobRow, snapshots: Array<{ filePath:
     await controllerFor("processing-archive");
     if (failureMessage) throw new Error(failureMessage);
     archive.on("error", (error: Error) => output.destroy(error));
+    archive.on("progress", (progress: { fs?: { processedBytes?: number; totalBytes?: number } }) => {
+      const processedBytes = progress.fs?.processedBytes ?? 0;
+      const totalBytes = progress.fs?.totalBytes ?? 0;
+      if (totalBytes > 0) artifactJobRepository.updateProgress(job.jobId, Math.floor((processedBytes / totalBytes) * 99));
+    });
     const closed = once(output, "close");
     archive.pipe(output);
     await archive.finalize();
     await closed;
-    artifactJobRepository.updateProgress(job.jobId, 90);
     stageController?.complete("processing-archive");
     await controllerFor("processing-finalization");
     await fs.promises.rename(temporaryPath, finalPath);
@@ -236,8 +255,13 @@ export const prepareEpisodeArtifactArchive = async (episodeId: number, selectedA
     if (completed && completed.expiresAt && Date.parse(completed.expiresAt) > (options.now ?? new Date()).getTime()) {
       const finalPath = completed.archivePath;
       if (finalPath) {
-        try { if ((await fs.promises.lstat(finalPath)).isFile()) return toStatus(completed); } catch (error) { if (!isMissingPathError(error)) throw error; }
+        try {
+          if ((await fs.promises.lstat(finalPath)).isFile() && await hasCurrentSourceEvidence(completed)) return toStatus(completed);
+        } catch (error) {
+          if (!isMissingPathError(error)) throw error;
+        }
       }
+      await invalidateCompletedJob(completed);
     }
     const preflight = await preflightEpisodeArtifactDownloads(episodeId, selectedArtifacts);
     const jobId = randomUUID();
@@ -245,6 +269,7 @@ export const prepareEpisodeArtifactArchive = async (episodeId: number, selectedA
     const job = artifactJobRepository.create({
       jobId, episodeId, selectorKey, requested, available: preflight.available.map((artifact) => artifact.selector), missing: preflight.missing,
       archiveFileName: path.basename(archivePath), archivePath, snapshotPath: snapshotDirectory(jobId), temporaryArchivePath: temporaryArchivePath(jobId),
+      sourceEvidence: await collectEpisodeArtifactSourceEvidence(episodeId, selectedArtifacts),
     });
     return toStatus(job);
   })();
@@ -259,7 +284,12 @@ export const prepareEpisodeArtifactArchive = async (episodeId: number, selectedA
 export const getEpisodeArtifactPreparationStatus = async (episodeId: number, jobId: string, options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationStatus | null> => {
   await initializeEpisodeArtifactPreparations({ now: options.now, recoverInterrupted: false });
   const job = artifactJobRepository.findByJobId(episodeId, jobId);
-  return job ? toStatus(job) : null;
+  if (!job) return null;
+  if (job.status === "completed" && !await hasCurrentSourceEvidence(job)) {
+    await invalidateCompletedJob(job);
+    return null;
+  }
+  return toStatus(job);
 };
 
 export const getValidatedEpisodeArtifactPreparationDownload = async (episodeId: number, jobId: string, options: { now?: Date } = {}): Promise<EpisodeArtifactPreparationDownload | null> => {
@@ -276,7 +306,11 @@ export const getValidatedEpisodeArtifactPreparationDownload = async (episodeId: 
     if (isMissingPathError(error)) return null;
     throw error;
   }
-  if (!stat.isFile()) return null;
+  const evidenceIsCurrent = await hasCurrentSourceEvidence(job);
+  if (!stat.isFile() || !evidenceIsCurrent) {
+    if (!evidenceIsCurrent) await invalidateCompletedJob(job);
+    return null;
+  }
   return { status, stream: fs.createReadStream(job.archivePath) };
 };
 
@@ -299,20 +333,21 @@ export const processNextEpisodeArtifactPreparation = async (options: { now?: Dat
         await digestSnapshot(artifact.path, snapshotPath);
         snapshots.push({ filePath: snapshotPath, entryName: artifact.archiveEntryName });
       }
-      artifactJobRepository.updateProgress(processing.jobId, 25);
       stageController?.complete("processing-preflight");
-      const after = await preflightEpisodeArtifactDownloads(processing.episodeId, selected);
-      if (JSON.stringify(after.available.map((artifact) => artifact.selector)) !== JSON.stringify(preflight.available.map((artifact) => artifact.selector))) {
+      const sourceEvidence = await collectEpisodeArtifactSourceEvidence(processing.episodeId, selected);
+      if (!evidenceMatches(sourceEvidence, await collectEpisodeArtifactSourceEvidence(processing.episodeId, selected))) {
         throw new Error("Artifact sources changed during preparation");
       }
+      artifactJobRepository.updateSourceEvidence(processing.jobId, sourceEvidence);
       await assembleArchive({ ...processing, archivePath: processing.archivePath ?? finalArchivePath(processing.jobId), temporaryArchivePath: processing.temporaryArchivePath ?? temporaryArchivePath(processing.jobId) }, snapshots);
       const completed = artifactJobRepository.complete(processing.jobId, path.basename(processing.archivePath ?? finalArchivePath(processing.jobId)), processing.archivePath ?? finalArchivePath(processing.jobId), new Date((options.now ?? new Date()).getTime() + retentionMs).toISOString());
       await removeTemporaryJobFiles(processing.jobId);
       await controllerFor("terminal");
       return completed ? toStatus(completed) : null;
-    } catch (error) {
+    } catch {
       await removeJobFiles(processing.jobId, processing);
-      const failed = artifactJobRepository.fail(processing.jobId, error instanceof Error ? error.message : String(error));
+      console.error("Episode artifact preparation failed", { episodeId: processing.episodeId, selectors: processing.requested, reason: "archive preparation failed" });
+      const failed = artifactJobRepository.fail(processing.jobId);
       await controllerFor("terminal");
       return failed ? toStatus(failed) : null;
     }
