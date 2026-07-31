@@ -38,6 +38,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Suggested summary drafts are persisted beside the episode files and kept separate from the final saved episode summary.
 - Protected backend APIs expose the summary suggestion and generation state.
 - Gemini summary output follows the production feed's editorial structure while using the current transcript as its only factual source.
+- Phase 14 reconciles v1.3 around the authoritative protected artifact-job routes, including evidence-validated archive reuse and compiled verification.
 
 ### Active
 
@@ -82,6 +83,7 @@ The backend already owns episode media layout, transcript generation, summary dr
 | Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
 | Use Gemini for the current transcript and summary configuration, retaining local providers as fallbacks | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback | Under evaluation |
 | Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
+| Preserve `/v1/episodes/:episodeId/artifacts/jobs` as the artifact lifecycle contract | The v1.3 audit found the checked-out implementation, OpenAPI, and verifier already converge on jobs routes | ✓ Good |
 
 ## Archived Milestones
 

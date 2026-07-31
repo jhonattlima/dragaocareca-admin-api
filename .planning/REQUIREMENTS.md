@@ -2,21 +2,21 @@
 
 ## Episode Artifact Downloads
 
-- [x] **ART-01**: An authenticated administrator can download every available final artifact for an existing episode as one ZIP archive when no artifact selector is supplied.
-- [x] **ART-02**: An authenticated administrator can request a ZIP containing selected final artifact types through the English `artifacts` query parameter: `episode`, `trailer`, `transcript`, `image`, and `image-low`.
+- [x] **ART-01**: An authenticated administrator can prepare and download every available final artifact for an existing episode as one ZIP archive when the artifact-job JSON body or its `artifacts` property is omitted.
+- [x] **ART-02**: An authenticated administrator can prepare a ZIP containing selected final artifact types through the English JSON `artifacts` array on `POST /v1/episodes/:episodeId/artifacts/jobs`: `episode`, `trailer`, `transcript`, `image`, and `image-low`.
 - [x] **ART-03**: A request for unavailable items returns `404` when none of its requested artifacts exists; when at least one exists, it returns a ZIP and identifies unavailable requested selector names in `X-Missing-Artifacts`.
-- [x] **ART-04**: The download contract rejects malformed, empty, repeated-query, or unknown artifact selectors with `400` rather than silently omitting them.
+- [x] **ART-04**: The artifact-job contract rejects malformed, empty, or unknown JSON artifact selectors with `400` rather than silently omitting them.
 - [x] **ART-05**: The endpoint exposes only fixed final artifact paths and canonical ZIP entry names; it never accepts client filesystem paths or includes staging, backup, state, summary, or legacy artifacts.
 - [x] **ART-06**: The endpoint uses the existing admin authentication middleware, preserving development-only `AUTH_BYPASS` behavior.
 - [x] **ART-07**: The endpoint is documented in OpenAPI and has executable repository-native validation for default, selected, missing, invalid, authentication, and ZIP-entry behavior.
 
 ## ZIP Preparation Progress
 
-- [x] **ZIP-01**: An authenticated administrator can start or reuse a ZIP preparation for an existing episode using the Phase 12 English artifact selector contract, with `400` and `404` behavior preserved before queueing.
-- [x] **ZIP-02**: The API persists preparation jobs and processes at most one ZIP globally; status exposes `queued`, `preparing`, `ready`, `failed`, or `expired`, plus a queue position only while queued.
+- [x] **ZIP-01**: An authenticated administrator can start or reuse a ZIP preparation for an existing episode through the authoritative jobs routes using default-all or nonempty English JSON selector arrays, with `400` and `404` behavior preserved before queueing.
+- [x] **ZIP-02**: The API persists preparation jobs and processes at most one ZIP globally; status exposes `pending`, `processing`, `completed`, or `failed`, plus a queue position only while pending.
 - [x] **ZIP-03**: While preparing, the API reports a 0-100 progress value derived from source bytes processed into the ZIP, distinct from the textual state.
 - [x] **ZIP-04**: A ready ZIP is reusable for 24 hours for the same normalized episode/selector set only while streaming SHA-256 fingerprints and explicit missing markers for every selected artifact remain unchanged.
-- [x] **ZIP-05**: Only a validated ready archive is downloadable through an authenticated endpoint; the legacy direct route returns an authenticated `410` migration response for one release.
+- [ ] **ZIP-05**: Superseded by the authoritative jobs-route decision; no legacy direct-route migration endpoint is part of the reconciled contract.
 - [x] **ZIP-06**: Restart recovery requeues interrupted work, removes partial/snapshot output, expires stale caches, and never exposes request-derived paths, non-final artifacts, or filesystem paths in API data or logs.
 - [x] **ZIP-07**: OpenAPI and the repository-native compiled verifier document and prove the full preparation, status, cache, invalidation, recovery, download, authentication, and migration contract.
 
@@ -36,20 +36,20 @@
 
 | Requirement | Phase | Status |
 |---|---:|---|
-| ART-01 | 12 | Planned |
-| ART-02 | 12 | Planned |
-| ART-03 | 12 | Planned |
-| ART-04 | 12 | Planned |
-| ART-05 | 12 | Planned |
-| ART-06 | 12 | Planned |
-| ART-07 | 12 | Planned |
-| ZIP-01 | 13 | Planned |
-| ZIP-02 | 13 | Planned |
-| ZIP-03 | 13 | Planned |
-| ZIP-04 | 13 | Planned |
-| ZIP-05 | 13 | Planned |
-| ZIP-06 | 13 | Planned |
-| ZIP-07 | 13 | Planned |
+| ART-01 | 14 | Satisfied |
+| ART-02 | 14 | Satisfied |
+| ART-03 | 14 | Satisfied |
+| ART-04 | 14 | Satisfied |
+| ART-05 | 14 | Satisfied |
+| ART-06 | 14 | Satisfied |
+| ART-07 | 14 | Satisfied |
+| ZIP-01 | 14 | Satisfied |
+| ZIP-02 | 14 | Satisfied |
+| ZIP-03 | 14 | Satisfied |
+| ZIP-04 | 14 | Satisfied |
+| ZIP-05 | 14 | Superseded |
+| ZIP-06 | 14 | Satisfied |
+| ZIP-07 | 14 | Satisfied |
 
 ---
 *Last updated: 2026-07-28*

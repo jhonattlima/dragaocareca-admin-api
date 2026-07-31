@@ -97,5 +97,16 @@ Plans:
 
 - [x] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
 
+### Phase 14: Reconcile artifact job contract and harden ZIP lifecycle
+
+**Goal:** Preserve the authoritative artifact-job routes while making cache reuse, source evidence, progress, errors, documentation, and verification internally consistent.
+**Requirements**: ART-01 through ART-07; ZIP-01 through ZIP-04, ZIP-06, ZIP-07
+**Depends on:** Phase 13
+**Plans:** 1/1 plans complete
+
+Plans:
+
+- [x] 14-01-PLAN.md — reconcile default-all JSON jobs, 24-hour evidence validation, byte progress, safe errors, OpenAPI, and native verification.
+
 ---
 *Last updated: 2026-07-28 after defining v1.3 Phase 12*

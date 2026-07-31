@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Episode Artifact Downloads
-current_phase: 13
+current_phase: 14
 status: completed
-stopped_at: Completed 13-06-PLAN.md
-last_updated: "2026-07-29T12:37:18.797Z"
-last_activity: 2026-07-29
-last_activity_desc: Phase 13 complete
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-07-31T14:40:34.594Z"
+last_activity: 2026-07-31
+last_activity_desc: Phase 14 reconciliation complete
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 10
-  completed_plans: 10
-current_phase_name: return-zip-progress-to-user
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 11
+  completed_plans: 11
+current_phase_name: reconcile-artifact-job-contract-and-harden-zip-lifecycle
 ---
 
 # Project State
@@ -23,14 +23,14 @@ current_phase_name: return-zip-progress-to-user
 See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 13 — return-zip-progress-to-user
+**Current focus:** Phase 14 — reconcile artifact job contract and harden ZIP lifecycle
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-07-29 — Phase 13 complete
+Phase: 14
+Plan: 1 of 1
+Status: Complete
+Last activity: 2026-07-31 — Phase 14 reconciliation complete
 
 ## Accumulated Context
 
@@ -65,6 +65,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Use an anchored OpenAPI pattern for fixed nonempty selector CSV grammar and prove it against parser and route behavior.
 - [Phase ?]: Require a non-zero source-byte progress sample or a strictly increasing preparing pair before accepting live assembly evidence.
 - [Phase ?]: Invoke the exported worker startup path offline and always call its returned stop callback in finally.
+- [Phase ?]: Preserve the current artifact jobs routes; default-all is an omitted JSON body or artifacts property, not a CSV route.
 
 ### Pending Todos
 
@@ -78,6 +79,7 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 13 edited: formalized ZIP preparation goal, success criteria, and ZIP-01 through ZIP-07 requirements
+- Phase 14 added: reconcile the artifact-job API contract and harden its ZIP lifecycle after the v1.3 audit found documentation and verification drift.
 
 ## Deferred Items
 
@@ -94,8 +96,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-29T12:32:52.964Z
-Stopped at: Completed 13-06-PLAN.md
+Last session: 2026-07-31T14:40:34.587Z
+Stopped at: Completed 14-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -112,3 +114,4 @@ Resume file: None
 | Phase 13-return-zip-progress-to-user P04 | 2min | 2 tasks | 2 files |
 | Phase 13-return-zip-progress-to-user P05 | 4min | 2 tasks | 2 files |
 | Phase 13-return-zip-progress-to-user P06 | 5min | 2 tasks | 1 files |
+| Phase 14 P01 | 25min | 2 tasks | 9 files |
