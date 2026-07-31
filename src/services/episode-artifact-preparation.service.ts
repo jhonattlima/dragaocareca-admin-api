@@ -329,15 +329,17 @@ export const processNextEpisodeArtifactPreparation = async (options: { now?: Dat
       const selected = parseEpisodeArtifactSelectors(processing.requested.join(","));
       const preflight = await preflightEpisodeArtifactDownloads(processing.episodeId, selected);
       const snapshots: Array<{ filePath: string; entryName: string }> = [];
-      const sourceEvidence: ArtifactSourceEvidence[] = preflight.missing.map((selector) => ({ selector, missing: true }));
+      const snapshotEvidence = new Map<string, ArtifactSourceEvidence>(preflight.missing.map((selector) => [selector, { selector, missing: true }]));
       await fs.promises.mkdir(snapshotDirectory(processing.jobId), { recursive: true });
       for (const artifact of preflight.available) {
         const snapshotPath = path.join(snapshotDirectory(processing.jobId), artifact.fileName);
         const snapshot = await digestSnapshot(artifact.path, snapshotPath);
         snapshots.push({ filePath: snapshotPath, entryName: artifact.archiveEntryName });
         // Persist the exact bytes consumed by Archiver, not a later live-source read.
-        sourceEvidence.push({ selector: artifact.selector, sha256: snapshot.sha256 });
+        snapshotEvidence.set(artifact.selector, { selector: artifact.selector, sha256: snapshot.sha256 });
       }
+      // Keep the persisted map in the fixed parser/catalog order used by live evidence.
+      const sourceEvidence = selected.map((artifact) => snapshotEvidence.get(artifact.selector) as ArtifactSourceEvidence);
       stageController?.complete("processing-preflight");
       stageController?.complete("processing-evidence");
       await controllerFor("processing-evidence");
