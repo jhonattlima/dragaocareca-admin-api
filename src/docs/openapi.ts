@@ -77,12 +77,12 @@ export const swaggerSpec = swaggerJsdoc({
             available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready." },
             missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time." },
             state: { type: "string", enum: ["pending", "processing", "completed", "failed"] },
-            progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage; never browser transfer progress." },
+            progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage derived from Archiver source bytes; never browser transfer progress. Processing is capped below 100 until atomic archive publication completes." },
             stateText: { type: "string", description: "Human-readable job state text." },
             queuePosition: { type: "integer", minimum: 1, nullable: true, description: "Queue position only while state is pending; otherwise null." },
             downloadUrl: { type: "string", nullable: true, description: "Protected download URL only while state is completed; otherwise null." },
-            expiresAt: { type: "string", format: "date-time", nullable: true, description: "Completed archive expiry exactly 45 minutes after publication; null before completion." },
-            error: { type: "string", nullable: true, description: "Sanitized failure message for failed jobs; otherwise null." },
+            expiresAt: { type: "string", format: "date-time", nullable: true, description: "Completed archive expiry exactly 24 hours after atomic publication; null before completion." },
+            error: { type: "string", nullable: true, description: "Generic safe failure message for failed jobs; otherwise null. Internal filesystem and diagnostic details are never returned." },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
           },
@@ -724,21 +724,20 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Start an episode artifact ZIP job",
-          description: "Starts or reuses an authenticated server-side ZIP job. The request accepts only canonical selectors; paths, filenames, and internal media kinds are not accepted. Poll the Location URL. JSON responses use Cache-Control: no-store and completed archives expire exactly 45 minutes after publication.",
+          description: "Starts or reuses an authenticated server-side ZIP job. An omitted JSON body, or an object with omitted artifacts, selects every catalog artifact. A supplied artifacts value must be a nonempty canonical selector array; paths, filenames, and internal media kinds are not accepted. Ready reuse and download revalidate streamed SHA-256 evidence and explicit missing markers for every selected final source. Poll the Location URL. JSON responses use Cache-Control: no-store and completed archives expire exactly 24 hours after atomic publication.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
           ],
           requestBody: {
-            required: true,
+            required: false,
             content: {
               "application/json": {
                 schema: {
                   type: "object",
                   additionalProperties: false,
-                  required: ["artifacts"],
                   properties: {
-                    artifacts: { type: "array", minItems: 1, items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, example: ["episode", "transcript"] },
+                    artifacts: { type: "array", minItems: 1, description: "Optional. Omit this property (or the entire JSON body) to select all catalog artifacts.", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, example: ["episode", "transcript"] },
                   },
                 },
               },

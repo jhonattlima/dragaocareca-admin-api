@@ -174,12 +174,19 @@ const verifySelectorAndValidation = async (): Promise<void> => {
     assert.equal(unknown.statusCode, 404);
     assert.deepEqual(unknown.jsonBody, { message: "Episode not found" });
 
+    for (const body of [undefined, {}]) {
+      const defaultAll = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, body);
+      assert.equal(defaultAll.statusCode, 202);
+      assert.deepEqual((defaultAll.jsonBody as ArtifactStatus).requested, ["episode", "trailer", "transcript", "image", "image-low"]);
+    }
+
     const noJobCount = (): number => Number((getDb().prepare("SELECT COUNT(*) AS count FROM artifact_jobs WHERE episode_id = ?").get(fixtureEpisodeId) as { count: number }).count);
     const before = noJobCount();
     const noArtifacts = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer"] });
     assert.equal(noArtifacts.statusCode, 404);
     assert.deepEqual(noArtifacts.jsonBody, { message: "No requested artifacts found" });
     assert.equal(noJobCount(), before);
+    await resetVerifierFixtures();
   } finally {
     config.auth.bypassInDev = originalBypass;
   }
@@ -211,18 +218,20 @@ const verifyLifecycleAndDownload = async (): Promise<{ completed: ArtifactStatus
     controller.release("processing-preflight");
     await controller.waitForCompletion("processing-preflight");
     const processing = assertRouteSnapshot(await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: pending.jobId }), "processing");
-    assert.equal(processing.progress, 25);
+    assert.equal(processing.progress, 0);
     controller.release("processing-archive");
     await controller.waitForCompletion("processing-archive");
     const archived = assertRouteSnapshot(await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: pending.jobId }), "processing");
-    assert.ok(archived.progress >= processing.progress && archived.progress < 100);
+    assert.ok(archived.progress > processing.progress && archived.progress < 100);
     controller.release("processing-finalization");
     controller.release("terminal");
     const completed = (await processingPromise) as ArtifactStatus;
     assertPublicSnapshot(completed, "completed");
     assert.equal(completed.progress, 100);
     assert.equal(completed.error, null);
-    assert.equal(Date.parse(completed.expiresAt ?? "") - startTime.getTime(), 45 * 60 * 1000);
+    assert.equal(Date.parse(completed.expiresAt ?? "") - startTime.getTime(), 24 * 60 * 60 * 1000);
+    const persisted = artifactJobRepository.findByJobId(fixtureEpisodeId, pending.jobId);
+    assert.ok(persisted && persisted.sourceEvidence.every((evidence) => typeof evidence.selector === "string" && (evidence.missing === true || /^[a-f0-9]{64}$/.test(evidence.sha256 ?? ""))));
     resetEpisodeArtifactPreparationStageController();
 
     const status = assertRouteSnapshot(await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: pending.jobId }), "completed");
@@ -268,16 +277,16 @@ const verifyPartialAndFailure = async (): Promise<void> => {
     await resetVerifierFixtures();
     const failureStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
     const failedJob = failureStart.jsonBody as ArtifactStatus;
-    injectEpisodeArtifactPreparationFailure("Verifier forced archive failure");
+    injectEpisodeArtifactPreparationFailure("Verifier forced archive failure at /private/media/source.mp3");
     const failed = (await processNextEpisodeArtifactPreparation({ now: startTime })) as ArtifactStatus;
     resetEpisodeArtifactPreparationFailure();
     assertPublicSnapshot(failed, "failed");
-    assert.equal(failed.error, "Verifier forced archive failure");
+    assert.equal(failed.error, "Artifact archive preparation failed. Please try again.");
     assert.ok(failed.error.length > 0);
     assertNoInternalFields(failed);
     await assertNoPartialOutput(failedJob.jobId);
     const failedStatus = await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: failedJob.jobId });
-    assert.equal((failedStatus.jsonBody as ArtifactStatus).error, "Verifier forced archive failure");
+    assert.equal((failedStatus.jsonBody as ArtifactStatus).error, "Artifact archive preparation failed. Please try again.");
     const failedDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: failedJob.jobId });
     assert.equal(failedDownload.statusCode, 409);
   } finally {
@@ -320,17 +329,36 @@ const verifyDuplicateRestartExpiryAndOwnership = async (completed: ArtifactStatu
     const expiryStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
     const expiryJob = expiryStart.jsonBody as ArtifactStatus;
     await processNextEpisodeArtifactPreparation({ now: startTime });
-    const exactExpiry = new Date(startTime.getTime() + 45 * 60 * 1000);
+    const exactExpiry = new Date(startTime.getTime() + 24 * 60 * 60 * 1000);
     assert.equal(await getEpisodeArtifactPreparationStatus(fixtureEpisodeId, expiryJob.jobId, { now: exactExpiry }), null);
 
-    const tamperStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
-    const tamperJob = tamperStart.jsonBody as ArtifactStatus;
-    await processNextEpisodeArtifactPreparation({ now: new Date() });
-    const tampered = artifactJobRepository.findByJobId(fixtureEpisodeId, tamperJob.jobId);
-    assert.ok(tampered);
-    getDb().prepare("UPDATE artifact_jobs SET archive_path = ? WHERE job_id = ?").run(path.join(preparationRoot, "other-job.zip"), tamperJob.jobId);
-    const invalidatedDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: tamperJob.jobId });
-    assert.equal(invalidatedDownload.statusCode, 404);
+  } finally {
+    config.auth.bypassInDev = originalBypass;
+  }
+};
+
+const verifyEvidenceInvalidation = async (): Promise<void> => {
+  const originalBypass = config.auth.bypassInDev;
+  config.auth.bypassInDev = true;
+  try {
+    await resetVerifierFixtures();
+    const changedStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
+    const changedJob = changedStart.jsonBody as ArtifactStatus;
+    await processNextEpisodeArtifactPreparation({ now: startTime });
+    const sourcePath = getEpisodeMediaFinalPath(fixtureEpisodeId, "audio");
+    const originalStat = await fs.promises.stat(sourcePath);
+    await fs.promises.writeFile(sourcePath, "alter audio fixture");
+    await fs.promises.utimes(sourcePath, originalStat.atime, originalStat.mtime);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: changedJob.jobId })).statusCode, 404);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: changedJob.jobId })).statusCode, 404);
+
+    await resetVerifierFixtures();
+    const missingStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer", "transcript"] });
+    const missingJob = missingStart.jsonBody as ArtifactStatus;
+    await processNextEpisodeArtifactPreparation({ now: startTime });
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailer"), "new final trailer");
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: missingJob.jobId })).statusCode, 404);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: missingJob.jobId })).statusCode, 404);
   } finally {
     config.auth.bypassInDev = originalBypass;
   }
@@ -360,9 +388,9 @@ const verifyOpenApi = (): void => {
   const snapshot = spec.components?.schemas?.EpisodeArtifactJobSnapshot;
   assert.ok(start && status && download);
   for (const operation of [start, status, download]) assert.deepEqual(operation.security, [{ bearerAuth: [] }]);
-  assert.equal(start.requestBody.required, true);
+  assert.equal(start.requestBody.required, false);
   const requestSchema = start.requestBody.content["application/json"].schema;
-  assert.deepEqual(requestSchema.required, ["artifacts"]);
+  assert.equal(requestSchema.required, undefined);
   assert.equal(requestSchema.additionalProperties, false);
   assert.equal(requestSchema.properties.artifacts.minItems, 1);
   assert.deepEqual(requestSchema.properties.artifacts.items.enum, ["episode", "trailer", "transcript", "image", "image-low"]);
@@ -370,6 +398,9 @@ const verifyOpenApi = (): void => {
   assert.equal(snapshot.properties.progress.minimum, 0);
   assert.equal(snapshot.properties.progress.maximum, 100);
   assert.equal(snapshot.properties.progress.type, "integer");
+  assert.match(snapshot.properties.progress.description, /Archiver source bytes/i);
+  assert.match(snapshot.properties.expiresAt.description, /24 hours/i);
+  assert.match(snapshot.properties.error.description, /generic safe/i);
   assert.ok(snapshot.properties.error && snapshot.properties.createdAt && snapshot.properties.updatedAt && snapshot.properties.downloadUrl);
   for (const operation of [start, status, download]) assert.ok(operation.responses["400"] && operation.responses["401"] && operation.responses["404"]);
   assert.ok(start.responses["409"] || status.responses["409"] || download.responses["409"]);
@@ -396,6 +427,7 @@ export const main = async (): Promise<void> => {
     const { completed, logs } = await verifyLifecycleAndDownload();
     await verifyPartialAndFailure();
     await verifyDuplicateRestartExpiryAndOwnership(completed);
+    await verifyEvidenceInvalidation();
     assert.equal(logs.join("\n").includes(config.media.storageRoot), false);
     assert.equal(logs.join("\n").includes("cacheKey"), false);
     assert.equal(logs.join("\n").includes("archivePath"), false);
@@ -405,7 +437,7 @@ export const main = async (): Promise<void> => {
     episodeRepository.delete(fixtureEpisodeId);
     await resetDirectory(preparationRoot);
   }
-  console.log("verified artifact-job lifecycle, progress, partial/failure cleanup, duplicate/restart/expiry, auth/ownership, traversal, and OpenAPI parity; Phase 6 manual DC 334 prerequisite recorded");
+  console.log("verified artifact-job routes, default-all, byte progress, 24-hour evidence invalidation, safe failures, auth, ZIP security, and OpenAPI parity");
 };
 
 void main().catch((error: unknown) => {
