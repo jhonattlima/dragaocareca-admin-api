@@ -6,7 +6,7 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 ## Current State
 
-- Latest shipped milestone: **v1.2 Episode AI authoring API** on 2026-07-23, with Gemini provider hardening completed on 2026-07-28
+- Latest shipped milestone: **v1.3 Episode Artifact Downloads** on 2026-07-31
 - Transcript and summary generation can use Gemini or local fallback providers, run sequentially for the 4 GB VPS target, and expose a protected read contract for future frontend reuse
 - Next planning step: define the next milestone with `$gsd-new-milestone`
 
@@ -14,7 +14,7 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
 
-## Current Milestone: v1.3 Episode Artifact Downloads
+## Latest Milestone: v1.3 Episode Artifact Downloads
 
 **Goal:** Allow administrators to download the final media artifacts for one episode as a controlled ZIP archive.
 
@@ -42,7 +42,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 
 ### Active
 
-- Deliver the v1.3 protected final episode artifact-download endpoint and verification contract.
+- Define the next milestone.
 
 ### Out of Scope
 
