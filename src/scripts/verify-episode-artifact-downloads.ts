@@ -174,10 +174,12 @@ const verifySelectorAndValidation = async (): Promise<void> => {
     assert.equal(unknown.statusCode, 404);
     assert.deepEqual(unknown.jsonBody, { message: "Episode not found" });
 
+    let defaultAllJob: ArtifactStatus | undefined;
     for (const body of [undefined, {}]) {
       const defaultAll = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, body);
       assert.equal(defaultAll.statusCode, 202);
       assert.deepEqual((defaultAll.jsonBody as ArtifactStatus).requested, ["episode", "trailer", "transcript", "image", "image-low"]);
+      defaultAllJob = defaultAll.jsonBody as ArtifactStatus;
     }
 
     const noJobCount = (): number => Number((getDb().prepare("SELECT COUNT(*) AS count FROM artifact_jobs WHERE episode_id = ?").get(fixtureEpisodeId) as { count: number }).count);
@@ -186,6 +188,13 @@ const verifySelectorAndValidation = async (): Promise<void> => {
     assert.equal(noArtifacts.statusCode, 404);
     assert.deepEqual(noArtifacts.jsonBody, { message: "No requested artifacts found" });
     assert.equal(noJobCount(), before);
+    assert.ok(defaultAllJob);
+    const completedDefaultAll = await processNextEpisodeArtifactPreparation({ now: startTime });
+    assert.equal(completedDefaultAll?.state, "completed");
+    const defaultAllDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: defaultAllJob.jobId });
+    assert.equal(defaultAllDownload.statusCode, 200);
+    assert.equal(defaultAllDownload.getHeader("x-missing-artifacts"), "trailer,image,image-low");
+    assert.deepEqual(readZipEntryNames(Buffer.concat(defaultAllDownload.chunks)), [`episode-${fixtureEpisodeId}/audio.mp3`, `episode-${fixtureEpisodeId}/transcript.txt`]);
     await resetVerifierFixtures();
   } finally {
     config.auth.bypassInDev = originalBypass;
