@@ -552,6 +552,7 @@ episodesRouter.get("/:episodeId/artifacts/jobs/:jobId/download", noStoreArtifact
     res.status(200);
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="episode-${episodeId}-artifacts.zip"`);
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     if (download.status.missing.length > 0) {
       res.setHeader("X-Missing-Artifacts", download.status.missing.join(","));
     }

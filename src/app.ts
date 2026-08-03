@@ -26,7 +26,12 @@ app.use(
 );
 app.use(morgan("dev"));
 app.use(express.json({ limit: "4mb" }));
-app.use("/media", express.static(config.media.storageRoot));
+app.use(
+  "/media",
+  express.static(config.media.storageRoot, {
+    setHeaders: (res) => res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"),
+  }),
+);
 
 app.get("/health", async (_req, res, next) => {
   try {
