@@ -116,6 +116,9 @@ export const findExistingEpisodeMediaPath = async (
 
   if (kind !== "transcript") {
     candidates.push(getEpisodeMediaFinalPath(episodeId, kind));
+    if (kind === "coverLow") {
+      candidates.push(path.join(getEpisodeMediaDirectory(episodeId), "cover.webp"));
+    }
     if (kind === "audio") {
       candidates.push(getEpisodeMediaStagingPath(episodeId, kind));
     }

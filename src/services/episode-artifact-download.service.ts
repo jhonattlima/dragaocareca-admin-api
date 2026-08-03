@@ -8,7 +8,7 @@ const artifactCatalog = [
   { selector: "trailer", kind: "trailer", fileName: "trailer.mp3" },
   { selector: "transcript", kind: "transcript", fileName: "transcript.txt" },
   { selector: "image", kind: "cover", fileName: "cover.jpeg" },
-  { selector: "image-low", kind: "coverLow", fileName: "cover.webp" },
+  { selector: "image-low", kind: "coverLow", fileName: "cover_low.webp" },
 ] as const satisfies ReadonlyArray<{
   selector: string;
   kind: EpisodeMediaKind;
