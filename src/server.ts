@@ -14,6 +14,8 @@ const backgroundWorkersDisabled =
   (process.env.DISABLE_BACKGROUND_WORKERS ?? "false").toLowerCase() === "true";
 const metricsWorkersEnabled =
   (process.env.ENABLE_METRICS_WORKERS ?? "false").toLowerCase() === "true";
+const telegramWorkersEnabled =
+  (process.env.ENABLE_TELEGRAM_WORKERS ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
   await connectDb();
@@ -35,6 +37,12 @@ const bootstrap = async (): Promise<void> => {
       console.info("Metrics workers enabled explicitly while other external workers remain disabled");
       await startSpotifyMetricsWorker();
       await startYouTubeMetricsWorker();
+    }
+
+    if (telegramWorkersEnabled) {
+      console.info("Telegram workers enabled explicitly while other external workers remain disabled");
+      await startLaunchNotificationWorker();
+      await startTelegramBotWorker();
     }
   } else {
     await startEpisodeTranscriptionWorker();
