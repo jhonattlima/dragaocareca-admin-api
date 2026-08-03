@@ -36,6 +36,7 @@ import {
   getEpisodeMediaStagingDirectory,
   getEpisodeMediaStagingPath,
 } from "../services/episode-media-layout.service";
+import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 
 export const episodesRouter = Router();
 
@@ -69,11 +70,11 @@ for (const directory of [config.media.episodesDir, config.media.episodesStagingD
   fs.mkdirSync(directory, { recursive: true });
 }
 
-type UploadKind = "audio" | "trailer" | "cover" | "coverLow";
+type UploadKind = "audio" | "trailer" | "cover" | "coverLow" | "trailerVideo";
 
 type UploadSpec = {
   kind: UploadKind;
-  field: "fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName";
+  field: "fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" | "trailerVideoFileName";
   buildStagingDirectory: (episodeId: number) => string;
   buildFileName: (episodeId: number) => string;
   buildStagingFileName: (episodeId: number) => string;
@@ -82,7 +83,7 @@ type UploadSpec = {
   maxBytes: number;
 };
 
-const uploadSpecs: Record<UploadKind, UploadSpec> = {
+const uploadSpecs: Record<Exclude<UploadKind, "trailerVideo">, UploadSpec> = {
   audio: {
     kind: "audio",
     field: "fileName",
@@ -123,6 +124,17 @@ const uploadSpecs: Record<UploadKind, UploadSpec> = {
     allowedMimeTypes: ["image/webp"],
     maxBytes: 10 * 1024 * 1024,
   },
+};
+
+const trailerVideoUploadSpec: UploadSpec = {
+  kind: "trailerVideo",
+  field: "trailerVideoFileName",
+  buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "trailerVideo"),
+  buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
+  buildStagingFileName: () => "trailer.mp4",
+  allowedExtensions: [".mp4"],
+  allowedMimeTypes: ["video/mp4", "application/mp4"],
+  maxBytes: config.media.trailerVideoMaxBytes,
 };
 
 const moveFile = async (sourcePath: string, targetPath: string): Promise<void> => {
@@ -362,7 +374,7 @@ const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
 };
 
 const promoteStagedMedia = async (episodeId: number) => {
-  const updates: Partial<Record<"fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName", string>> = {};
+  const updates: Partial<Record<"fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName", string>> = {};
 
   for (const spec of Object.values(uploadSpecs)) {
     const fileName = spec.buildFileName(episodeId);
@@ -388,6 +400,45 @@ makeUploadRoute("audio", uploadSpecs.audio);
 makeUploadRoute("trailer", uploadSpecs.trailer);
 makeUploadRoute("cover", uploadSpecs.cover);
 makeUploadRoute("cover-webp", uploadSpecs.coverLow);
+
+const trailerVideoUpload = buildUploader(trailerVideoUploadSpec);
+
+episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) => {
+  trailerVideoUpload(req, res, async (error) => {
+    if (error) {
+      next(error);
+      return;
+    }
+
+    const episodeId = Number(req.params.episodeId);
+    const file = req.file;
+
+    try {
+      if (!Number.isInteger(episodeId) || episodeId <= 0) {
+        if (file) await fs.promises.unlink(file.path).catch(() => undefined);
+        res.status(400).json({ message: "Invalid episodeId" });
+        return;
+      }
+
+      if (!file) {
+        res.status(400).json({ message: "File upload is required" });
+        return;
+      }
+
+      const updated = await replaceEpisodeTrailerVideo(episodeId, file.path);
+      if (!updated) {
+        res.status(404).json({ message: "Episode not found" });
+        return;
+      }
+
+      res.json(updated);
+    } catch (caught) {
+      if (file) await fs.promises.unlink(file.path).catch(() => undefined);
+      next(caught);
+    }
+  });
+});
+
 makeDeleteRoute("audio", uploadSpecs.audio);
 makeDeleteRoute("trailer", uploadSpecs.trailer);
 makeDeleteRoute("cover", uploadSpecs.cover);
