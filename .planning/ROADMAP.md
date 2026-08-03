@@ -9,104 +9,62 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 - ✅ **v1.0 Backend platform foundation** - Phases 1-4, shipped 2026-06-27. Archive: [v1.0-ROADMAP.md](./milestones/v1.0-ROADMAP.md)
 - ✅ **v1.1 Public frontend API responses** - Phases 5-8, shipped 2026-07-23. Archive: [v1.1-ROADMAP.md](./milestones/v1.1-ROADMAP.md)
 - ✅ **v1.2 Episode AI authoring API** - Phases 9-11, shipped 2026-07-23; Gemini hardening completed 2026-07-28. Archive: [v1.2-ROADMAP.md](./milestones/v1.2-ROADMAP.md)
-- 🚧 **v1.3 Episode Artifact Downloads** - Phase 12, planned 2026-07-28.
+- ✅ **v1.3 Episode Artifact Downloads** - Phases 12-14, shipped 2026-07-31. Archive: [v1.3-ROADMAP.md](./milestones/v1.3-ROADMAP.md)
+- 🚧 **v1.4 Trailer Video Publishing** - Phases 15-16, planned 2026-08-03.
 
-## Next Up
+## Phases
 
-### Phase 12: Secure Episode Artifact Downloads
+- [ ] **Phase 15: Final Trailer Video Artifact** - Give each episode a protected final trailer-video artifact that is safely available in artifact ZIPs.
+- [ ] **Phase 16: YouTube Trailer Publication** - Let administrators publish or update that final video publicly in the configured playlist, persist its URL, and retain local versions safely.
 
-**Goal:** Give authenticated administrators a safe ZIP download of final episode artifacts, with default-all and selected-artifact modes.
+## Phase Details
 
-**Requirements:** ART-01, ART-02, ART-03, ART-04, ART-05, ART-06, ART-07
+### Phase 15: Final Trailer Video Artifact
 
-**Success criteria:**
+**Goal**: Administrators can maintain one final trailer video for an episode and retrieve it through the existing controlled artifact-download workflow.
+**Depends on**: Phase 14
+**Requirements**: TRAILER-01, TRAILER-05
+**Success Criteria** (what must be TRUE):
 
-1. An authenticated request without `artifacts` downloads a ZIP containing every available final file among `episode`, `trailer`, `transcript`, `image`, and `image-low`.
-2. An authenticated request with valid `artifacts` values downloads only those available final artifacts, with deterministic English selector names and canonical ZIP entry names.
-3. If none of the requested artifacts exists, the endpoint returns `404`; if only some exist, it returns a ZIP with `X-Missing-Artifacts` listing exactly the unavailable requested selectors.
-4. Invalid selector shapes/values return `400`, and no request can retrieve staging, backups, state, summary, legacy, or arbitrary filesystem content.
-5. The route remains behind the existing authentication middleware, is described in OpenAPI, and is covered by a built contract verifier alongside typecheck and build validation.
+  1. An authenticated administrator can upload a final trailer video for an existing episode and replace it later without supplying a filesystem path.
+  2. Protected episode responses identify the current final trailer-video artifact after upload or replacement.
+  3. An authenticated artifact ZIP request can include the final trailer video through a fixed selector, while staging, retained prior versions, and arbitrary files remain unavailable.
 
-**Plans:** 0/4 plans complete
+**Plans**: 1/4 plans executed
 
 Plans:
-**Wave 1**
 
-- [x] 12-01-PLAN.md — Approve the flagged archive dependency before installation.
+- [x] 15-01-PLAN.md — Establish durable final trailer-video metadata and canonical MP4 media layout.
+- [ ] 15-02-PLAN.md — Implement protected MP4 upload/replacement with configurable maximum and manual-sync state.
+- [ ] 15-03-PLAN.md — Add the fixed final-video selector to the controlled ZIP artifact workflow.
+- [ ] 15-04-PLAN.md — Verify the protected workflow offline and document its API/configuration contract.
 
-**Wave 2** *(blocked on Wave 1 completion)*
+### Phase 16: YouTube Trailer Publication
 
-- [x] 12-02-PLAN.md — Install the approved dependency and bootstrap the runnable compiled verifier.
+**Goal**: Administrators can explicitly make an episode’s final trailer video public in the configured YouTube playlist and keep a recoverable local publication history.
+**Depends on**: Phase 15
+**Requirements**: TRAILER-02, TRAILER-03, TRAILER-04, TRAILER-06, TRAILER-07
+**Success Criteria** (what must be TRUE):
 
-**Wave 3** *(blocked on Wave 2 completion)*
+  1. An authenticated administrator can manually publish an episode’s final trailer video as `public` in the configured YouTube playlist, using the episode title plus hashtags and the final saved summary.
+  2. Repeating publication for an episode with a recorded YouTube video updates that public video instead of creating an untracked duplicate.
+  3. A successful create or update persists and returns the canonical YouTube URL on the episode; missing final video or required final metadata prevents an external publication call.
+  4. Local trailer-video cleanup keeps the current final video and the newest configured retained versions, defaults to 12 retained versions, and runs only after successful YouTube publication/update.
+  5. The protected API, environment configuration, OpenAPI contract, and executable verification demonstrate upload, publish/update, URL persistence, artifact inclusion, authentication, and success-gated retention behavior.
 
-- [x] 12-03-PLAN.md — Create and verify the final-only selector/preflight service.
+**Plans**: TBD
 
-**Wave 4** *(blocked on Wave 3 completion)*
+## Progress
 
-- [x] 12-04-PLAN.md — Add the protected ZIP route, OpenAPI contract, and completed verifier.
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 15. Final Trailer Video Artifact | 1/4 | In Progress|  |
+| 16. YouTube Trailer Publication | 0/TBD | Not started | - |
 
 ## Archive Index
 
 - [MILESTONES.md](./MILESTONES.md) is the canonical completed-milestone index.
 - [Pre-GSD feature history](./milestones/PRE-GSD-HISTORY.md) preserves completed work that predates retained GSD phase artifacts.
 
-<details>
-<summary>✅ v1.2 archived phases (9-11)</summary>
-
-### Phase 09: Summary Runtime and Draft Contract
-
-**Status:** Complete. Archived artifacts: [09 summary](./milestones/v1.2-phases/09-summary-runtime-and-draft-contract/09-02-SUMMARY.md).
-
-### Phase 10: Summary Generation Workflow and Admin API
-
-**Status:** Complete. Archived artifacts: [10 summary](./milestones/v1.2-phases/10-summary-generation-workflow-and-admin-api/10-02-SUMMARY.md).
-
-### Phase 11: Summary Quality Verification and Documentation
-
-**Status:** Complete. Archived artifacts: [11 summary](./milestones/v1.2-phases/11-summary-quality-verification-and-documentation/11-02-SUMMARY.md).
-
-</details>
-
-### Phase 13: return zip progress to user
-
-**Goal:** Let authenticated administrators prepare a final-artifact ZIP on the server, poll its queue and assembly progress, then download a validated cached archive.
-**Requirements**: ZIP-01, ZIP-02, ZIP-03, ZIP-04, ZIP-05, ZIP-06, ZIP-07
-**Depends on:** Phase 12
-**Plans:** 6/6 plans complete
-
-**Success criteria:**
-
-1. An authenticated preparation request validates the Phase 12 selector contract and returns an idempotent queued, preparing, or ready job.
-2. Status polling reports the global queue position, a 0-100 source-byte assembly percentage, and a ready-only download URL without internal paths.
-3. A ready archive is reusable for 24 hours only while SHA-256 fingerprints and missing markers for every selected artifact still match.
-4. Startup recovery, expiry cleanup, authenticated ready-only download, migration response, OpenAPI, and compiled verification preserve the Phase 12 final-only security boundary.
-
-Plans:
-
-- [x] 13-04-PLAN.md
-- [x] 13-05-PLAN.md
-- [x] 13-06-PLAN.md
-
-**Wave 1**
-
-- [x] 13-01-PLAN.md — preparation lifecycle verifier and persisted FIFO core.
-- [x] 13-02-PLAN.md — startup recovery worker and protected lifecycle routes.
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 13-03-PLAN.md — OpenAPI and compiled lifecycle contract verification.
-
-### Phase 14: Reconcile artifact job contract and harden ZIP lifecycle
-
-**Goal:** Preserve the authoritative artifact-job routes while making cache reuse, source evidence, progress, errors, documentation, and verification internally consistent.
-**Requirements**: ART-01 through ART-07; ZIP-01 through ZIP-04, ZIP-06, ZIP-07
-**Depends on:** Phase 13
-**Plans:** 1/1 plans complete
-
-Plans:
-
-- [x] 14-01-PLAN.md — reconcile default-all JSON jobs, 24-hour evidence validation, byte progress, safe errors, OpenAPI, and native verification.
-
 ---
-*Last updated: 2026-07-28 after defining v1.3 Phase 12*
+*Last updated: 2026-08-03 after defining v1.4 Trailer Video Publishing*

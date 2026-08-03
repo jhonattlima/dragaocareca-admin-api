@@ -1,55 +1,40 @@
-# Milestone v1.3 Requirements
+# Milestone v1.4 Requirements
 
-## Episode Artifact Downloads
+## Trailer Video Publishing
 
-- [x] **ART-01**: An authenticated administrator can prepare and download every available final artifact for an existing episode as one ZIP archive when the artifact-job JSON body or its `artifacts` property is omitted.
-- [x] **ART-02**: An authenticated administrator can prepare a ZIP containing selected final artifact types through the English JSON `artifacts` array on `POST /v1/episodes/:episodeId/artifacts/jobs`: `episode`, `trailer`, `transcript`, `image`, and `image-low`.
-- [x] **ART-03**: A request for unavailable items returns `404` when none of its requested artifacts exists; when at least one exists, it returns a ZIP and identifies unavailable requested selector names in `X-Missing-Artifacts`.
-- [x] **ART-04**: The artifact-job contract rejects malformed, empty, or unknown JSON artifact selectors with `400` rather than silently omitting them.
-- [x] **ART-05**: The endpoint exposes only fixed final artifact paths and canonical ZIP entry names; it never accepts client filesystem paths or includes staging, backup, state, summary, or legacy artifacts.
-- [x] **ART-06**: The endpoint uses the existing admin authentication middleware, preserving development-only `AUTH_BYPASS` behavior.
-- [x] **ART-07**: The endpoint is documented in OpenAPI and has executable repository-native validation for default, selected, missing, invalid, authentication, and ZIP-entry behavior.
-
-## ZIP Preparation Progress
-
-- [x] **ZIP-01**: An authenticated administrator can start or reuse a ZIP preparation for an existing episode through the authoritative jobs routes using default-all or nonempty English JSON selector arrays, with `400` and `404` behavior preserved before queueing.
-- [x] **ZIP-02**: The API persists preparation jobs and processes at most one ZIP globally; status exposes `pending`, `processing`, `completed`, or `failed`, plus a queue position only while pending.
-- [x] **ZIP-03**: While preparing, the API reports a 0-100 progress value derived from source bytes processed into the ZIP, distinct from the textual state.
-- [x] **ZIP-04**: A ready ZIP is reusable for 24 hours for the same normalized episode/selector set only while streaming SHA-256 fingerprints and explicit missing markers for every selected artifact remain unchanged.
-- [ ] **ZIP-05**: Superseded by the authoritative jobs-route decision; no legacy direct-route migration endpoint is part of the reconciled contract.
-- [x] **ZIP-06**: Restart recovery requeues interrupted work, removes partial/snapshot output, expires stale caches, and never exposes request-derived paths, non-final artifacts, or filesystem paths in API data or logs.
-- [x] **ZIP-07**: OpenAPI and the repository-native compiled verifier document and prove the full preparation, status, cache, invalidation, recovery, download, authentication, and migration contract.
+- [ ] **TRAILER-01**: An authenticated administrator can upload or replace one final trailer video for an existing episode through the protected API; the episode exposes the current final trailer-video artifact without accepting arbitrary server paths.
+- [ ] **TRAILER-02**: An authenticated administrator can manually publish a final trailer video to the configured YouTube playlist as `public`, or update the already published YouTube video for that episode when one is recorded.
+- [ ] **TRAILER-03**: YouTube publication uses the episode title with its hashtags and the final saved episode summary; publication rejects an episode that lacks the required final video or final metadata before calling YouTube.
+- [ ] **TRAILER-04**: After a successful YouTube create or update, the API persists the canonical published YouTube URL on that episode and returns it through the existing protected episode contract.
+- [ ] **TRAILER-05**: An authenticated administrator can include the final trailer video in an episode artifact ZIP through the fixed artifact allowlist; the archive never exposes staging, backup, version-history, or arbitrary filesystem files.
+- [ ] **TRAILER-06**: The configured local trailer-video retention count is controlled by an environment variable that defaults to `12`; older local trailer-video versions are removed only after a YouTube create/update succeeds, while the current final video and the configured number of newest retained versions remain available.
+- [ ] **TRAILER-07**: The protected upload, publication/update, URL persistence, artifact-download, configuration, authentication, and retention behavior is documented in OpenAPI/env documentation and covered by a repository-native executable verifier alongside typecheck and build validation.
 
 ## Future Requirements
 
-- **ART-F01**: Admin-web controls for starting artifact downloads, to be planned in the frontend repository.
-- **ART-F02**: Download audit records, if operational compliance requires them.
-- **ART-F03**: Cached/resumable archives, only if observed download volume makes streamed generation insufficient.
+- **TRAILER-F01**: Admin-web controls for trailer-video upload, publishing, and publication status.
+- **TRAILER-F02**: Automatic or scheduled YouTube trailer publishing.
+- **TRAILER-F03**: Publishing to multiple playlists, playlist management, or video analytics beyond the existing metrics connector.
+- **TRAILER-F04**: Cloud/object-storage retention or restoration of locally pruned trailer-video versions.
 
 ## Out of Scope
 
-- Downloading staging, backups, AI state, `summary.txt`, legacy media locations, or arbitrary filesystem paths. These do not belong to the final-artifact contract and would weaken the security boundary.
-- Changing authentication behavior. The endpoint reuses `requireAuth`.
-- Frontend integration. This milestone is API-only.
+- Frontend work; this milestone is API-only.
+- Moving feed, schedule, or publication rules to the frontend.
+- Removing any local trailer-video version before a successful YouTube create/update.
+- Changing existing admin authentication or the development-only `AUTH_BYPASS` behavior.
 
 ## Traceability
 
 | Requirement | Phase | Status |
-|---|---:|---|
-| ART-01 | 14 | Satisfied |
-| ART-02 | 14 | Satisfied |
-| ART-03 | 14 | Satisfied |
-| ART-04 | 14 | Satisfied |
-| ART-05 | 14 | Satisfied |
-| ART-06 | 14 | Satisfied |
-| ART-07 | 14 | Satisfied |
-| ZIP-01 | 14 | Satisfied |
-| ZIP-02 | 14 | Satisfied |
-| ZIP-03 | 14 | Satisfied |
-| ZIP-04 | 14 | Satisfied |
-| ZIP-05 | 14 | Superseded |
-| ZIP-06 | 14 | Satisfied |
-| ZIP-07 | 14 | Satisfied |
+|-------------|-------|--------|
+| TRAILER-01 | 15 | Pending |
+| TRAILER-02 | 16 | Pending |
+| TRAILER-03 | 16 | Pending |
+| TRAILER-04 | 16 | Pending |
+| TRAILER-05 | 15 | Pending |
+| TRAILER-06 | 16 | Pending |
+| TRAILER-07 | 16 | Pending |
 
 ---
-*Last updated: 2026-07-28*
+*Last updated: 2026-08-03*

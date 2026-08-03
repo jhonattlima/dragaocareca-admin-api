@@ -1,19 +1,20 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Episode Artifact Downloads
-status: Awaiting next milestone
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-07-31T19:21:26.576Z"
-last_activity: 2026-07-31
-last_activity_desc: Milestone v1.3 completed and archived
+milestone: v1.4
+milestone_name: Trailer Video Publishing
+current_phase: 15
+current_phase_name: final-trailer-video-artifact
+current_plan: 2
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-08-03T20:13:55.808Z"
+last_activity: 2026-08-03
+last_activity_desc: Milestone v1.4 started
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
-current_phase: 14
-current_phase_name: reconcile-artifact-job-contract-and-harden-zip-lifecycle
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 1
 ---
 
 # Project State
@@ -27,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 
 ## Current Position
 
-Phase: Milestone v1.3 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-31 — Milestone v1.3 completed and archived
+Phase: 15 of 16 (Final Trailer Video Artifact)
+Plan: 2 of 4
+Status: In progress
+Last activity: 2026-08-03 — Completed 15-01-PLAN.md
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Require a non-zero source-byte progress sample or a strictly increasing preparing pair before accepting live assembly evidence.
 - [Phase ?]: Invoke the exported worker startup path offline and always call its returned stop callback in finally.
 - [Phase ?]: Preserve the current artifact jobs routes; default-all is an omitted JSON body or artifacts property, not a CSV route.
+- [Phase ?]: Keep final trailer-video metadata distinct from the existing audio trailer and reserve manual-sync-required for replacements.
 
 ### Pending Todos
 
@@ -96,8 +98,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-07-31T14:40:34.587Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-08-03T20:13:55.803Z
+Stopped at: Completed 15-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -115,6 +117,7 @@ Resume file: None
 | Phase 13-return-zip-progress-to-user P05 | 4min | 2 tasks | 2 files |
 | Phase 13-return-zip-progress-to-user P06 | 5min | 2 tasks | 1 files |
 | Phase 14 P01 | 25min | 2 tasks | 9 files |
+| Phase 15-final-trailer-video-artifact P01 | 10min | 2 tasks | 6 files |
 
 ## Operator Next Steps
 
