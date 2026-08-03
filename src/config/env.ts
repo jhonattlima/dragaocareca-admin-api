@@ -15,6 +15,23 @@ const required = (value: string | undefined, name: string): string => {
   return value;
 };
 
+export const parseTrailerVideoMaxBytes = (value: string | undefined): number => {
+  if (value === undefined || value === "") {
+    return 500 * 1024 * 1024;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new Error("EPISODE_TRAILER_VIDEO_MAX_BYTES must be a positive integer");
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error("EPISODE_TRAILER_VIDEO_MAX_BYTES must be a positive integer");
+  }
+
+  return parsed;
+};
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
@@ -156,6 +173,7 @@ export const config = {
       path.resolve(process.cwd(), "data", "public", "contacts.json"),
   },
   media: {
+    trailerVideoMaxBytes: parseTrailerVideoMaxBytes(process.env.EPISODE_TRAILER_VIDEO_MAX_BYTES),
     storageRoot: process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
     backupRoot:
       process.env.MEDIA_BACKUP_ROOT ??
