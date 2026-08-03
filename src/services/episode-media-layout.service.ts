@@ -14,7 +14,7 @@ const kindFileName = (episodeId: number, kind: EpisodeMediaKind): string => {
     case "cover":
       return "cover.jpeg";
     case "coverLow":
-      return "cover.webp";
+      return "cover_low.webp";
     case "transcript":
       return "transcript.txt";
   }
