@@ -73,9 +73,9 @@ export const swaggerSpec = swaggerJsdoc({
           properties: {
             jobId: { type: "string", description: "Opaque job identifier." },
             episodeId: { type: "integer", minimum: 1 },
-            requested: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Normalized requested selectors in catalog order." },
-            available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready." },
-            missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time." },
+            requested: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Normalized requested selectors in catalog order." },
+            available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready." },
+            missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time." },
             state: { type: "string", enum: ["pending", "processing", "completed", "failed"] },
             progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage derived from Archiver source bytes; never browser transfer progress. Processing is capped below 100 until atomic archive publication completes." },
             stateText: { type: "string", description: "Human-readable job state text." },
@@ -737,7 +737,7 @@ export const swaggerSpec = swaggerJsdoc({
                   type: "object",
                   additionalProperties: false,
                   properties: {
-                    artifacts: { type: "array", minItems: 1, description: "Optional. Omit this property (or the entire JSON body) to select all catalog artifacts.", items: { type: "string", enum: ["episode", "trailer", "transcript", "image", "image-low"] }, example: ["episode", "transcript"] },
+                    artifacts: { type: "array", minItems: 1, description: "Optional. Omit this property (or the entire JSON body) to select all catalog artifacts.", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, example: ["episode", "trailer-video"] },
                   },
                 },
               },

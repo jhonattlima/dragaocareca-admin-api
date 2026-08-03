@@ -178,7 +178,7 @@ const verifySelectorAndValidation = async (): Promise<void> => {
     for (const body of [undefined, {}]) {
       const defaultAll = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, body);
       assert.equal(defaultAll.statusCode, 202);
-      assert.deepEqual((defaultAll.jsonBody as ArtifactStatus).requested, ["episode", "trailer", "transcript", "image", "image-low"]);
+      assert.deepEqual((defaultAll.jsonBody as ArtifactStatus).requested, ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"]);
       defaultAllJob = defaultAll.jsonBody as ArtifactStatus;
     }
 
@@ -188,12 +188,21 @@ const verifySelectorAndValidation = async (): Promise<void> => {
     assert.equal(noArtifacts.statusCode, 404);
     assert.deepEqual(noArtifacts.jsonBody, { message: "No requested artifacts found" });
     assert.equal(noJobCount(), before);
+
+    const trailerVideoPath = getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo");
+    await fs.promises.mkdir(trailerVideoPath);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer-video"] })).statusCode, 404);
+    await fs.promises.rm(trailerVideoPath, { recursive: true, force: true });
+    await fs.promises.symlink(getEpisodeMediaFinalPath(fixtureEpisodeId, "audio"), trailerVideoPath);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer-video"] })).statusCode, 404);
+    await fs.promises.unlink(trailerVideoPath);
+
     assert.ok(defaultAllJob);
     const completedDefaultAll = await processNextEpisodeArtifactPreparation({ now: startTime });
     assert.equal(completedDefaultAll?.state, "completed");
     const defaultAllDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: defaultAllJob.jobId });
     assert.equal(defaultAllDownload.statusCode, 200);
-    assert.equal(defaultAllDownload.getHeader("x-missing-artifacts"), "trailer,image,image-low");
+    assert.equal(defaultAllDownload.getHeader("x-missing-artifacts"), "trailer,trailer-video,image,image-low");
     assert.deepEqual(readZipEntryNames(Buffer.concat(defaultAllDownload.chunks)), [`episode-${fixtureEpisodeId}/audio.mp3`, `episode-${fixtureEpisodeId}/transcript.txt`]);
     await resetVerifierFixtures();
   } finally {
@@ -267,11 +276,12 @@ const verifyPartialAndFailure = async (): Promise<void> => {
   const originalBypass = config.auth.bypassInDev;
   config.auth.bypassInDev = true;
   try {
-    const partialStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer", "transcript"] });
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo"), "final trailer video fixture");
+    const partialStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer", "trailer-video", "transcript"] });
     assert.equal(partialStart.statusCode, 202);
     const partial = partialStart.jsonBody as ArtifactStatus;
-    assert.deepEqual(partial.requested, ["trailer", "transcript"]);
-    assert.deepEqual(partial.available, ["transcript"]);
+    assert.deepEqual(partial.requested, ["trailer", "trailer-video", "transcript"]);
+    assert.deepEqual(partial.available, ["trailer-video", "transcript"]);
     assert.deepEqual(partial.missing, ["trailer"]);
     const controller = createEpisodeArtifactPreparationStageController();
     injectEpisodeArtifactPreparationStageController(controller);
@@ -282,7 +292,7 @@ const verifyPartialAndFailure = async (): Promise<void> => {
     const partialDownload = await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: partial.jobId });
     assert.equal(partialDownload.statusCode, 200);
     assert.equal(partialDownload.getHeader("x-missing-artifacts"), "trailer");
-    assert.deepEqual(readZipEntryNames(Buffer.concat(partialDownload.chunks)), [`episode-${fixtureEpisodeId}/transcript.txt`]);
+    assert.deepEqual(readZipEntryNames(Buffer.concat(partialDownload.chunks)), [`episode-${fixtureEpisodeId}/trailer.mp4`, `episode-${fixtureEpisodeId}/transcript.txt`]);
 
     await resetVerifierFixtures();
     const failureStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["episode"] });
@@ -383,6 +393,23 @@ const verifyEvidenceInvalidation = async (): Promise<void> => {
     await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailer"), "new final trailer");
     assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: missingJob.jobId })).statusCode, 404);
     assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: missingJob.jobId })).statusCode, 404);
+
+    await resetVerifierFixtures();
+    const videoMissingStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer-video", "transcript"] });
+    const videoMissingJob = videoMissingStart.jsonBody as ArtifactStatus;
+    await processNextEpisodeArtifactPreparation({ now: startTime });
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo"), "final trailer video fixture");
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: videoMissingJob.jobId })).statusCode, 404);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: videoMissingJob.jobId })).statusCode, 404);
+
+    await resetVerifierFixtures();
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo"), "final trailer video fixture");
+    const videoChangedStart = await invokeRoute("/:episodeId/artifacts/jobs", "post", { episodeId: String(fixtureEpisodeId) }, { artifacts: ["trailer-video"] });
+    const videoChangedJob = videoChangedStart.jsonBody as ArtifactStatus;
+    await processNextEpisodeArtifactPreparation({ now: startTime });
+    await fs.promises.writeFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo"), "replaced final trailer video fixture");
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId", "get", { episodeId: String(fixtureEpisodeId), jobId: videoChangedJob.jobId })).statusCode, 404);
+    assert.equal((await invokeRoute("/:episodeId/artifacts/jobs/:jobId/download", "get", { episodeId: String(fixtureEpisodeId), jobId: videoChangedJob.jobId })).statusCode, 404);
   } finally {
     config.auth.bypassInDev = originalBypass;
   }
@@ -417,7 +444,7 @@ const verifyOpenApi = (): void => {
   assert.equal(requestSchema.required, undefined);
   assert.equal(requestSchema.additionalProperties, false);
   assert.equal(requestSchema.properties.artifacts.minItems, 1);
-  assert.deepEqual(requestSchema.properties.artifacts.items.enum, ["episode", "trailer", "transcript", "image", "image-low"]);
+  assert.deepEqual(requestSchema.properties.artifacts.items.enum, ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"]);
   assert.deepEqual(snapshot.properties.state.enum, ["pending", "processing", "completed", "failed"]);
   assert.equal(snapshot.properties.progress.minimum, 0);
   assert.equal(snapshot.properties.progress.maximum, 100);

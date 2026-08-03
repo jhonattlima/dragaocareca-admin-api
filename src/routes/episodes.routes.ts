@@ -60,7 +60,7 @@ const noStoreArtifactPreparation: RequestHandler = (_req, res, next) => {
 };
 
 const artifactJobRequestSchema = z.object({
-  artifacts: z.array(z.enum(["episode", "trailer", "transcript", "image", "image-low"])).min(1).optional(),
+  artifacts: z.array(z.enum(["episode", "trailer", "trailer-video", "transcript", "image", "image-low"])).min(1).optional(),
 }).strict().optional();
 
 // D-01/D-02/D-03/D-08/D-09/D-10/D-11: the route boundary owns auth, canonical
