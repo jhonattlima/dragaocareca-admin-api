@@ -18,7 +18,11 @@ import { episodeRepository } from "./database/repositories/episode.repository";
 
 export const app = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
 app.use(
   cors({
     exposedHeaders: ["Content-Disposition", "X-Missing-Artifacts"],
