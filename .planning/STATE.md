@@ -4,16 +4,16 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 15
 current_phase_name: final-trailer-video-artifact
-status: executing
-stopped_at: Completed 15-03-PLAN.md
-last_updated: "2026-08-03T22:19:59.104Z"
+status: verifying
+stopped_at: Completed 15-04-PLAN.md
+last_updated: "2026-08-03T23:03:42.828Z"
 last_activity: 2026-08-03
-last_activity_desc: Completed 15-03-PLAN.md
+last_activity_desc: Completed 15-04-PLAN.md
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 current_plan: 4
 ---
 
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 
 Phase: 15 of 16 (Final Trailer Video Artifact)
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-08-03 — Completed 15-03-PLAN.md
+Status: Phase complete — ready for verification
+Last activity: 2026-08-03 — Completed 15-04-PLAN.md
 
 ## Accumulated Context
 
@@ -72,6 +72,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Promote trailer video through a final-directory temporary file and rollback copy so metadata persistence failures preserve the previous canonical artifact.
 - [Phase ?]: Keep trailer-video separate from the existing audio trailer selector and fixed ZIP filename.
 - [Phase ?]: Use existing canonical-final lstat and source-evidence revalidation for trailer-video artifacts.
+- [Phase ?]: Use in-memory multipart streams against the direct protected route stack for offline trailer-video verification.
+- [Phase ?]: Keep final-video OpenAPI and closed selector documentation under compiled verifier assertions.
 
 ### Pending Todos
 
@@ -102,8 +104,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-03T22:19:59.098Z
-Stopped at: Completed 15-03-PLAN.md
+Last session: 2026-08-03T23:03:42.822Z
+Stopped at: Completed 15-04-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -124,6 +126,7 @@ Resume file: None
 | Phase 15-final-trailer-video-artifact P01 | 10min | 2 tasks | 6 files |
 | Phase 15-final-trailer-video-artifact P02 | 18min | 2 tasks | 5 files |
 | Phase 15-final-trailer-video-artifact P03 | 12min | 2 tasks | 4 files |
+| Phase 15 P04 | 34min | 2 tasks | 5 files |
 
 ## Operator Next Steps
 
