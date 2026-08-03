@@ -12,6 +12,8 @@ import { startTelegramBotWorker } from "./services/telegram-bot.worker";
 
 const backgroundWorkersDisabled =
   (process.env.DISABLE_BACKGROUND_WORKERS ?? "false").toLowerCase() === "true";
+const metricsWorkersEnabled =
+  (process.env.ENABLE_METRICS_WORKERS ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
   await connectDb();
@@ -28,6 +30,12 @@ const bootstrap = async (): Promise<void> => {
 
   if (backgroundWorkersDisabled) {
     console.info("External background workers disabled by DISABLE_BACKGROUND_WORKERS=true");
+
+    if (metricsWorkersEnabled) {
+      console.info("Metrics workers enabled explicitly while other external workers remain disabled");
+      await startSpotifyMetricsWorker();
+      await startYouTubeMetricsWorker();
+    }
   } else {
     await startEpisodeTranscriptionWorker();
     await startLaunchNotificationWorker();
