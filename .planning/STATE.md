@@ -4,17 +4,17 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 15
 current_phase_name: final-trailer-video-artifact
-current_plan: 2
 status: executing
-stopped_at: Completed 15-01-PLAN.md
-last_updated: "2026-08-03T20:13:55.808Z"
+stopped_at: Completed 15-02-PLAN.md
+last_updated: "2026-08-03T22:18:43.990Z"
 last_activity: 2026-08-03
-last_activity_desc: Milestone v1.4 started
+last_activity_desc: Completed 15-02-PLAN.md
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
+current_plan: 3
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-28)
 ## Current Position
 
 Phase: 15 of 16 (Final Trailer Video Artifact)
-Plan: 2 of 4
-Status: In progress
-Last activity: 2026-08-03 — Completed 15-01-PLAN.md
+Plan: 3 of 4
+Status: Ready to execute
+Last activity: 2026-08-03 — Completed 15-02-PLAN.md
 
 ## Accumulated Context
 
@@ -68,6 +68,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Invoke the exported worker startup path offline and always call its returned stop callback in finally.
 - [Phase ?]: Preserve the current artifact jobs routes; default-all is an omitted JSON body or artifacts property, not a CSV route.
 - [Phase ?]: Keep final trailer-video metadata distinct from the existing audio trailer and reserve manual-sync-required for replacements.
+- [Phase ?]: Keep initial final trailer-video uploads unpublished; mark later or previously published replacements manual-sync-required.
+- [Phase ?]: Promote trailer video through a final-directory temporary file and rollback copy so metadata persistence failures preserve the previous canonical artifact.
 
 ### Pending Todos
 
@@ -98,8 +100,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-03T20:13:55.803Z
-Stopped at: Completed 15-01-PLAN.md
+Last session: 2026-08-03T22:18:43.984Z
+Stopped at: Completed 15-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -118,6 +120,7 @@ Resume file: None
 | Phase 13-return-zip-progress-to-user P06 | 5min | 2 tasks | 1 files |
 | Phase 14 P01 | 25min | 2 tasks | 9 files |
 | Phase 15-final-trailer-video-artifact P01 | 10min | 2 tasks | 6 files |
+| Phase 15-final-trailer-video-artifact P02 | 18min | 2 tasks | 5 files |
 
 ## Operator Next Steps
 
