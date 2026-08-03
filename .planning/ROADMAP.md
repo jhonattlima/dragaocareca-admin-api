@@ -30,13 +30,13 @@ This roadmap tracks active and future milestone planning only. Completed milesto
   2. Protected episode responses identify the current final trailer-video artifact after upload or replacement.
   3. An authenticated artifact ZIP request can include the final trailer video through a fixed selector, while staging, retained prior versions, and arbitrary files remain unavailable.
 
-**Plans**: 2/4 plans executed
+**Plans**: 3/4 plans executed
 
 Plans:
 
 - [x] 15-01-PLAN.md — Establish durable final trailer-video metadata and canonical MP4 media layout.
 - [x] 15-02-PLAN.md — Implement protected MP4 upload/replacement with configurable maximum and manual-sync state.
-- [ ] 15-03-PLAN.md — Add the fixed final-video selector to the controlled ZIP artifact workflow.
+- [x] 15-03-PLAN.md — Add the fixed final-video selector to the controlled ZIP artifact workflow.
 - [ ] 15-04-PLAN.md — Verify the protected workflow offline and document its API/configuration contract.
 
 ### Phase 16: YouTube Trailer Publication
@@ -58,7 +58,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 15. Final Trailer Video Artifact | 2/4 | In Progress|  |
+| 15. Final Trailer Video Artifact | 3/4 | In Progress|  |
 | 16. YouTube Trailer Publication | 0/TBD | Not started | - |
 
 ## Archive Index
