@@ -95,11 +95,7 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
   for (const ep of episodes) {
     if (ep.xmlSnapshot) {
       try {
-        const sanitizedXml = ep.xmlSnapshot.replace(
-          /<title>DC\s+\d+\s*-\s*/i,
-          "<title>"
-        );
-        const legacyItem = create(sanitizedXml).root();
+        const legacyItem = create(ep.xmlSnapshot).root();
         root.import(legacyItem);
         continue;
       } catch {
