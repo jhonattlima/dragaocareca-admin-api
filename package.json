@@ -14,6 +14,7 @@
     "verify:episode-artifact-downloads": "NODE_ENV=development node dist/scripts/verify-episode-artifact-downloads.js",
     "verify:trailer-video-upload-config": "NODE_ENV=development node dist/scripts/verify-trailer-video-upload-config.js",
     "verify:trailer-video-persistence": "NODE_ENV=development SQLITE_PATH=/tmp/dragaocareca-trailer-video-persistence.sqlite node dist/scripts/verify-trailer-video-persistence.js",
+    "verify:trailer-video-artifact": "NODE_ENV=development node dist/scripts/verify-trailer-video-artifact.js",
     "verify:summary-runtime-contract": "NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js",
     "verify:summary-quality-contract": "NODE_ENV=development node dist/scripts/verify-summary-quality-contract.js",
     "import:episodes": "tsx src/scripts/import-legacy-episodes.ts",
