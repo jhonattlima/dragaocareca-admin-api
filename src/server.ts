@@ -22,11 +22,13 @@ const bootstrap = async (): Promise<void> => {
     console.warn("Cover mosaic background generation skipped", error instanceof Error ? error.message : String(error));
   });
 
+  // Artifact jobs only prepare local episode files. Keep this worker available even when
+  // integrations that depend on external credentials are intentionally disabled.
+  await startEpisodeArtifactPreparationWorker();
+
   if (backgroundWorkersDisabled) {
-    console.info("Background workers disabled by DISABLE_BACKGROUND_WORKERS=true");
+    console.info("External background workers disabled by DISABLE_BACKGROUND_WORKERS=true");
   } else {
-    // Artifact jobs are persisted and restart-safe; the worker owns recovery and TTL cleanup.
-    await startEpisodeArtifactPreparationWorker();
     await startEpisodeTranscriptionWorker();
     await startLaunchNotificationWorker();
     await startSpotifyMetricsWorker();
