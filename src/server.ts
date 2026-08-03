@@ -16,6 +16,8 @@ const metricsWorkersEnabled =
   (process.env.ENABLE_METRICS_WORKERS ?? "false").toLowerCase() === "true";
 const telegramWorkersEnabled =
   (process.env.ENABLE_TELEGRAM_WORKERS ?? "false").toLowerCase() === "true";
+const transcriptionWorkerEnabled =
+  (process.env.ENABLE_TRANSCRIPTION_WORKER ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
   await connectDb();
@@ -43,6 +45,11 @@ const bootstrap = async (): Promise<void> => {
       console.info("Telegram workers enabled explicitly while other external workers remain disabled");
       await startLaunchNotificationWorker();
       await startTelegramBotWorker();
+    }
+
+    if (transcriptionWorkerEnabled) {
+      console.info("Transcription worker enabled explicitly while other external workers remain disabled");
+      await startEpisodeTranscriptionWorker();
     }
   } else {
     await startEpisodeTranscriptionWorker();

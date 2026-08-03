@@ -1,2 +1,3 @@
 # Python dependencies needed by backend worker scripts on the VPS.
 spotifyconnector
+yt-dlp
