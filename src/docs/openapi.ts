@@ -60,6 +60,8 @@ export const swaggerSpec = swaggerJsdoc({
             coverFileName: { type: "string" },
             coverLowFileName: { type: "string" },
             trailerFileName: { type: "string" },
+            trailerVideoFileName: { type: "string", description: "Server-derived final trailer-video reference, always episodes/{episodeId}/trailer.mp4 when present." },
+            trailerVideoSyncStatus: { type: "string", enum: ["unpublished", "manual-sync-required", "synced"], description: "Publication state for the final trailer video. manual-sync-required means a local replacement needs an administrator-triggered YouTube re-sync." },
             youtube: { type: "string" },
             spotifyId: { type: "string" },
             musicCredits: { type: "array", items: { type: "string" } },
@@ -73,9 +75,9 @@ export const swaggerSpec = swaggerJsdoc({
           properties: {
             jobId: { type: "string", description: "Opaque job identifier." },
             episodeId: { type: "integer", minimum: 1 },
-            requested: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Normalized requested selectors in catalog order." },
-            available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready." },
-            missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time." },
+            requested: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Normalized requested selectors in catalog order. trailer-video selects only canonical final trailer.mp4." },
+            available: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts included in the archive when ready; trailer-video is canonical final trailer.mp4 only." },
+            missing: { type: "array", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, description: "Requested final artifacts unavailable at preparation time. trailer-video never accepts a client path or filename." },
             state: { type: "string", enum: ["pending", "processing", "completed", "failed"] },
             progress: { type: "integer", minimum: 0, maximum: 100, description: "Server-side ZIP assembly percentage derived from Archiver source bytes; never browser transfer progress. Processing is capped below 100 until atomic archive publication completes." },
             stateText: { type: "string", description: "Human-readable job state text." },
@@ -737,7 +739,7 @@ export const swaggerSpec = swaggerJsdoc({
                   type: "object",
                   additionalProperties: false,
                   properties: {
-                    artifacts: { type: "array", minItems: 1, description: "Optional. Omit this property (or the entire JSON body) to select all catalog artifacts.", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, example: ["episode", "trailer-video"] },
+                    artifacts: { type: "array", minItems: 1, description: "Optional. Omit this property (or the entire JSON body) to select all catalog artifacts. trailer-video includes only server-derived final trailer.mp4; clients never supply paths or filenames.", items: { type: "string", enum: ["episode", "trailer", "trailer-video", "transcript", "image", "image-low"] }, example: ["episode", "trailer-video"] },
                   },
                 },
               },
@@ -857,6 +859,35 @@ export const swaggerSpec = swaggerJsdoc({
             },
           },
           responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
+      "/v1/episodes/{episodeId}/trailer-video": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Upload or replace the final trailer video",
+          description: "Authenticated administrators upload one MP4 through multipart field file. The server enforces EPISODE_TRAILER_VIDEO_MAX_BYTES (524288000 bytes / 500 MiB by default), stores only the canonical final trailer.mp4, and never accepts client paths. A replacement is allowed, retains any existing publication reference, and reports manual-sync-required until an administrator re-syncs it to YouTube.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary", description: "MP4 final trailer-video file only." },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Protected episode response with canonical trailerVideoFileName and trailerVideoSyncStatus.", content: { "application/json": { schema: { $ref: "#/components/schemas/Episode" } } } },
+            "400": { description: "Invalid episodeId, missing file, non-MP4 upload, or upload above the configured server limit." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "404": { description: "Episode not found." },
+          },
         },
       },
       "/v1/episodes/{episodeId}/cover": {

@@ -77,6 +77,12 @@ Authenticated:
 - `GET /v1/assets/cover-mosaic.json`
 - `GET /v1/assets/cover-mosaic.svg`
 
+## Final Trailer Video
+
+Use authenticated `POST /v1/episodes/:episodeId/trailer-video` with one `multipart/form-data` field named `file` to upload or replace an episode's final MP4 trailer video. The server accepts MP4 only, enforces `EPISODE_TRAILER_VIDEO_MAX_BYTES` (default `524288000`, or 500 MiB), and derives the only final filename itself: `episodes/{episodeId}/trailer.mp4`. Clients must never send a filesystem path or choose a destination filename.
+
+This video is distinct from the existing audio `trailer` artifact. Use the protected artifact-job selector `trailer-video` to archive only the canonical final `trailer.mp4`. Replacements are allowed; after a replacement, `trailerVideoSyncStatus` can be `manual-sync-required`, which means an administrator must explicitly re-sync the final video publication. Uploading never calls YouTube.
+
 ## Legacy Import
 
 Import old `all_episodes.json` into SQLite:

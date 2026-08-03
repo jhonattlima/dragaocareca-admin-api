@@ -6,6 +6,7 @@ import { connectDb } from "../database/connect";
 import { getDb } from "../database/sqlite";
 import { episodeRepository } from "../database/repositories/episode.repository";
 import { config } from "../config/env";
+import { swaggerSpec } from "../docs/openapi";
 import { getEpisodeMediaFinalPath } from "../services/episode-media-layout.service";
 import { prepareEpisodeArtifactArchive, processNextEpisodeArtifactPreparation } from "../services/episode-artifact-preparation.service";
 
@@ -187,6 +188,23 @@ const verifyTrailerVideoZip = async (): Promise<void> => {
   }
 };
 
+const verifyOpenApiContract = (): void => {
+  const spec = swaggerSpec as { paths?: Record<string, any>; components?: { schemas?: Record<string, any> } };
+  const upload = spec.paths?.["/v1/episodes/{episodeId}/trailer-video"]?.post;
+  const jobs = spec.paths?.["/v1/episodes/{episodeId}/artifacts/jobs"]?.post;
+  const episode = spec.components?.schemas?.Episode;
+  assert.ok(upload && jobs && episode);
+  assert.deepEqual(upload.security, [{ bearerAuth: [] }]);
+  assert.equal(upload.requestBody.required, true);
+  assert.equal(upload.requestBody.content["multipart/form-data"].schema.properties.file.format, "binary");
+  assert.match(upload.description, /MP4/i);
+  assert.match(upload.description, /524288000/);
+  assert.match(upload.description, /never accepts client paths/i);
+  assert.ok(upload.responses["400"] && upload.responses["401"] && upload.responses["404"]);
+  assert.deepEqual(episode.properties.trailerVideoSyncStatus.enum, ["unpublished", "manual-sync-required", "synced"]);
+  assert.match(jobs.requestBody.content["application/json"].schema.properties.artifacts.description, /trailer\.mp4/i);
+};
+
 const main = async (): Promise<void> => {
   if (path.basename(__filename) !== "verify-trailer-video-artifact.js") throw new Error("expected compiled verifier execution");
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development for trailer-video verification");
@@ -195,6 +213,7 @@ const main = async (): Promise<void> => {
     await resetFixtures();
     await verifyUploadBoundary();
     await verifyTrailerVideoZip();
+    verifyOpenApiContract();
   } finally {
     episodeRepository.delete(fixtureEpisodeId);
     await fs.promises.rm(path.dirname(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo")), { recursive: true, force: true });
