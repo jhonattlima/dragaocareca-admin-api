@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const trailerVideoSyncStatusSchema = z.enum(["unpublished", "manual-sync-required", "synced"]);
+export type TrailerVideoSyncStatus = z.infer<typeof trailerVideoSyncStatusSchema>;
+
 export const episodeSchema = z.object({
   episodeId: z.coerce.number().int().positive(),
   title: z.string().min(1),
@@ -18,6 +21,8 @@ export const episodeSchema = z.object({
   coverFileName: z.string().optional(),
   coverLowFileName: z.string().optional(),
   trailerFileName: z.string().optional(),
+  trailerVideoFileName: z.string().optional(),
+  trailerVideoSyncStatus: trailerVideoSyncStatusSchema.optional(),
   youtube: z.string().optional(),
   spotifyId: z.string().optional(),
   xmlSnapshot: z.string().optional(),

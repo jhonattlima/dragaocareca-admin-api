@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getDb, nowIso } from "../sqlite";
-import type { EpisodeInput } from "../../schemas/episode";
+import type { EpisodeInput, TrailerVideoSyncStatus } from "../../schemas/episode";
 
 export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   id?: number;
@@ -43,6 +43,8 @@ type SqliteEpisodeRow = {
   cover_file_name: string | null;
   cover_low_file_name: string | null;
   trailer_file_name: string | null;
+  trailer_video_file_name: string | null;
+  trailer_video_sync_status: TrailerVideoSyncStatus;
   youtube: string | null;
   spotify_id: string | null;
   xml_snapshot: string | null;
@@ -398,6 +400,8 @@ const mapRow = (row: SqliteEpisodeRow): EpisodeRow => ({
   coverFileName: row.cover_file_name ?? undefined,
   coverLowFileName: row.cover_low_file_name ?? undefined,
   trailerFileName: row.trailer_file_name ?? undefined,
+  trailerVideoFileName: row.trailer_video_file_name ?? undefined,
+  trailerVideoSyncStatus: row.trailer_video_sync_status,
   youtube: row.youtube ?? undefined,
   spotifyId: row.spotify_id ?? undefined,
   xmlSnapshot: row.xml_snapshot ?? undefined,
@@ -426,14 +430,14 @@ const baseInsert = `
 INSERT INTO episodes (
   episode_id, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
   authors_json, guests_json, tags_json, citations_json, file_name, cover_file_name, cover_low_file_name,
-  trailer_file_name, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json,
+  trailer_file_name, trailer_video_file_name, trailer_video_sync_status, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json,
   transcript_file_name, transcript_status, transcript_updated_at, transcript_error,
   launch_notification_state, launch_notification_queued_at, launch_notification_sent_at, launch_notification_error,
   created_at, updated_at
 ) VALUES (
   @episodeId, @title, @summary, @episodeNumber, @episodeType, @pubDate, @duration, @bytes, @explicit,
   @authorsJson, @guestsJson, @tagsJson, @citationsJson, @fileName, @coverFileName, @coverLowFileName,
-  @trailerFileName, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson,
+  @trailerFileName, @trailerVideoFileName, @trailerVideoSyncStatus, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson,
   @transcriptFileName, @transcriptStatus, @transcriptUpdatedAt, @transcriptError,
   @launchNotificationState, @launchNotificationQueuedAt, @launchNotificationSentAt, @launchNotificationError,
   @createdAt, @updatedAt
@@ -637,6 +641,8 @@ export const episodeRepository = {
       coverFileName: input.coverFileName ?? null,
       coverLowFileName: input.coverLowFileName ?? null,
       trailerFileName: input.trailerFileName ?? null,
+      trailerVideoFileName: null,
+      trailerVideoSyncStatus: "unpublished",
       youtube: input.youtube ?? null,
       spotifyId: input.spotifyId ?? null,
       xmlSnapshot: input.xmlSnapshot ?? null,
@@ -678,6 +684,8 @@ export const episodeRepository = {
         cover_file_name = @coverFileName,
         cover_low_file_name = @coverLowFileName,
         trailer_file_name = @trailerFileName,
+        trailer_video_file_name = @trailerVideoFileName,
+        trailer_video_sync_status = @trailerVideoSyncStatus,
         youtube = @youtube,
         spotify_id = @spotifyId,
         xml_snapshot = @xmlSnapshot,
@@ -707,6 +715,8 @@ export const episodeRepository = {
       coverFileName: input.coverFileName ?? null,
       coverLowFileName: input.coverLowFileName ?? null,
       trailerFileName: input.trailerFileName ?? null,
+      trailerVideoFileName: existing.trailerVideoFileName ?? null,
+      trailerVideoSyncStatus: existing.trailerVideoSyncStatus ?? "unpublished",
       youtube: input.youtube ?? null,
       spotifyId: input.spotifyId ?? null,
       xmlSnapshot: input.xmlSnapshot ?? null,
@@ -726,9 +736,9 @@ export const episodeRepository = {
   },
   updateMedia(
     episodeId: number,
-    patch: Partial<
-      Record<"fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName", string | null>
-    >
+    patch: Partial<Record<"fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" | "trailerVideoFileName", string | null>> & {
+      trailerVideoSyncStatus?: TrailerVideoSyncStatus;
+    }
   ): EpisodeRow | null {
     const existing = this.findByEpisodeId(episodeId);
     if (!existing) return null;
@@ -745,9 +755,13 @@ export const episodeRepository = {
           ? "file_name"
           : key === "trailerFileName"
             ? "trailer_file_name"
-            : key === "coverFileName"
-              ? "cover_file_name"
-              : "cover_low_file_name";
+            : key === "trailerVideoFileName"
+              ? "trailer_video_file_name"
+              : key === "trailerVideoSyncStatus"
+                ? "trailer_video_sync_status"
+                : key === "coverFileName"
+                  ? "cover_file_name"
+                  : "cover_low_file_name";
       assignments.push(`${column} = @${key}`);
       params[key] = value;
     }

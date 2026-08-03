@@ -22,6 +22,8 @@ export type EpisodeRecord = {
   coverFileName?: string | null;
   coverLowFileName?: string | null;
   trailerFileName?: string | null;
+  trailerVideoFileName?: string | null;
+  trailerVideoSyncStatus?: "unpublished" | "manual-sync-required" | "synced";
   youtube?: string | null;
   spotifyId?: string | null;
   xmlSnapshot?: string | null;
@@ -109,6 +111,8 @@ CREATE TABLE IF NOT EXISTS episodes (
   cover_file_name TEXT,
   cover_low_file_name TEXT,
   trailer_file_name TEXT,
+  trailer_video_file_name TEXT,
+  trailer_video_sync_status TEXT NOT NULL DEFAULT 'unpublished' CHECK (trailer_video_sync_status IN ('unpublished', 'manual-sync-required', 'synced')),
   youtube TEXT,
   spotify_id TEXT,
   xml_snapshot TEXT,
@@ -288,6 +292,7 @@ export const getDb = (): DatabaseSync => {
     db.exec(schema);
     ensureYoutubeMetricSampleColumns(db);
     ensureEpisodeTranscriptColumns(db);
+    ensureEpisodeTrailerVideoColumns(db);
     ensureArtifactJobColumns(db);
   }
   return db;
@@ -317,6 +322,17 @@ const ensureEpisodeTranscriptColumns = (database: DatabaseSync): void => {
   }
   if (!columnNames.has("transcript_error")) {
     database.exec("ALTER TABLE episodes ADD COLUMN transcript_error TEXT;");
+  }
+};
+
+const ensureEpisodeTrailerVideoColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(episodes)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (!columnNames.has("trailer_video_file_name")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN trailer_video_file_name TEXT;");
+  }
+  if (!columnNames.has("trailer_video_sync_status")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN trailer_video_sync_status TEXT NOT NULL DEFAULT 'unpublished';");
   }
 };
 
