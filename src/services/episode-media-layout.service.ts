@@ -3,7 +3,9 @@ import path from "node:path";
 import { config } from "../config/env";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
 
-export type EpisodeMediaKind = "audio" | "trailer" | "cover" | "coverLow" | "transcript";
+export type EpisodeMediaKind = "audio" | "trailer" | "trailerVideo" | "cover" | "coverLow" | "transcript";
+type PersistedEpisodeMediaKind = Exclude<EpisodeMediaKind, "transcript">;
+type LegacyEpisodeMediaKind = Exclude<PersistedEpisodeMediaKind, "trailerVideo">;
 
 const kindFileName = (episodeId: number, kind: EpisodeMediaKind): string => {
   switch (kind) {
@@ -11,6 +13,8 @@ const kindFileName = (episodeId: number, kind: EpisodeMediaKind): string => {
       return "audio.mp3";
     case "trailer":
       return "trailer.mp3";
+    case "trailerVideo":
+      return "trailer.mp4";
     case "cover":
       return "cover.jpeg";
     case "coverLow":
@@ -20,14 +24,14 @@ const kindFileName = (episodeId: number, kind: EpisodeMediaKind): string => {
   }
 };
 
-const legacyMediaDirectories: Record<Exclude<EpisodeMediaKind, "transcript">, string> = {
+const legacyMediaDirectories: Record<LegacyEpisodeMediaKind, string> = {
   audio: path.resolve(config.media.storageRoot, "episodes"),
   trailer: path.resolve(config.media.storageRoot, "trailers"),
   cover: path.resolve(config.media.storageRoot, "images"),
   coverLow: path.resolve(config.media.storageRoot, "images", "low"),
 };
 
-const legacyFileName = (episodeId: number, kind: Exclude<EpisodeMediaKind, "transcript">): string => {
+const legacyFileName = (episodeId: number, kind: LegacyEpisodeMediaKind): string => {
   switch (kind) {
     case "audio":
       return `episode_${episodeId}.mp3`;
@@ -76,10 +80,10 @@ export const getEpisodeMediaSummaryRelativePath = (episodeId: number): string =>
 export const getEpisodeMediaFinalPath = (episodeId: number, kind: EpisodeMediaKind): string =>
   path.resolve(getEpisodeMediaDirectory(episodeId), kindFileName(episodeId, kind));
 
-export const getEpisodeMediaStagingPath = (episodeId: number, kind: Exclude<EpisodeMediaKind, "transcript">): string =>
+export const getEpisodeMediaStagingPath = (episodeId: number, kind: PersistedEpisodeMediaKind): string =>
   path.join(getEpisodeMediaStagingDirectory(episodeId), kindFileName(episodeId, kind));
 
-export const getEpisodeMediaBackupPath = (episodeId: number, kind: Exclude<EpisodeMediaKind, "transcript">): string =>
+export const getEpisodeMediaBackupPath = (episodeId: number, kind: PersistedEpisodeMediaKind): string =>
   path.join(getEpisodeMediaBackupDirectory(episodeId), kindFileName(episodeId, kind));
 
 const ensureParentDir = async (filePath: string): Promise<void> => {
@@ -119,7 +123,9 @@ export const findExistingEpisodeMediaPath = async (
     if (kind === "audio") {
       candidates.push(getEpisodeMediaStagingPath(episodeId, kind));
     }
-    candidates.push(path.join(legacyMediaDirectories[kind], legacyFileName(episodeId, kind)));
+    if (kind !== "trailerVideo") {
+      candidates.push(path.join(legacyMediaDirectories[kind], legacyFileName(episodeId, kind)));
+    }
   } else {
     candidates.push(getEpisodeMediaDraftTranscriptPath(episodeId));
     candidates.push(getEpisodeMediaFinalPath(episodeId, kind));
@@ -140,12 +146,14 @@ export const findExistingEpisodeMediaPath = async (
   return null;
 };
 
-export const episodeMediaFieldForKind = (kind: Exclude<EpisodeMediaKind, "transcript">): "fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" => {
+export const episodeMediaFieldForKind = (kind: PersistedEpisodeMediaKind): "fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName" => {
   switch (kind) {
     case "audio":
       return "fileName";
     case "trailer":
       return "trailerFileName";
+    case "trailerVideo":
+      return "trailerVideoFileName";
     case "cover":
       return "coverFileName";
     case "coverLow":
@@ -158,11 +166,12 @@ export const migrateEpisodeMediaLayout = async (): Promise<{ episodesProcessed: 
   let filesMoved = 0;
 
   for (const episode of episodes) {
-    const updates: Partial<Record<"fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" | "transcriptFileName", string | null>> = {};
+    const updates: Partial<Record<"fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName" | "transcriptFileName", string | null>> = {};
 
-    const mediaKinds: Array<{ kind: Exclude<EpisodeMediaKind, "transcript">; field: "fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" }> = [
+    const mediaKinds: Array<{ kind: PersistedEpisodeMediaKind; field: "fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName" }> = [
       { kind: "audio", field: "fileName" },
       { kind: "trailer", field: "trailerFileName" },
+      { kind: "trailerVideo", field: "trailerVideoFileName" },
       { kind: "cover", field: "coverFileName" },
       { kind: "coverLow", field: "coverLowFileName" },
     ];
@@ -205,6 +214,7 @@ export const migrateEpisodeMediaLayout = async (): Promise<{ episodesProcessed: 
       episodeRepository.updateMedia(episode.episodeId, {
         fileName: updates.fileName ?? undefined,
         trailerFileName: updates.trailerFileName ?? undefined,
+        trailerVideoFileName: updates.trailerVideoFileName ?? undefined,
         coverFileName: updates.coverFileName ?? undefined,
         coverLowFileName: updates.coverLowFileName ?? undefined,
       });
