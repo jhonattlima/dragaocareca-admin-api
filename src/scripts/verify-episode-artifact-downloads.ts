@@ -155,7 +155,7 @@ const assertRouteSnapshot = (response: MemoryResponse, state: ArtifactStatus["st
 };
 
 const verifySelectorAndValidation = async (): Promise<void> => {
-  assert.deepEqual(parseEpisodeArtifactSelectors("image-low,episode,episode,image").map((entry) => entry.selector), ["episode", "image", "image-low"]);
+  assert.deepEqual(parseEpisodeArtifactSelectors("trailer-video,image-low,episode,episode,image").map((entry) => entry.selector), ["episode", "trailer-video", "image", "image-low"]);
   for (const invalid of ["", "episode,", ",episode", "episode,,trailer", "unknown", ["episode"], "../audio.mp3", "/tmp/audio.mp3", "audio.mp3", 12, null]) {
     assert.throws(() => parseEpisodeArtifactSelectors(invalid), EpisodeArtifactSelectorValidationError);
   }
