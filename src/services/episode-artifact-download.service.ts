@@ -6,6 +6,7 @@ import { getEpisodeMediaFinalPath, type EpisodeMediaKind } from "./episode-media
 const artifactCatalog = [
   { selector: "episode", kind: "audio", fileName: "audio.mp3" },
   { selector: "trailer", kind: "trailer", fileName: "trailer.mp3" },
+  { selector: "trailer-video", kind: "trailerVideo", fileName: "trailer.mp4" },
   { selector: "transcript", kind: "transcript", fileName: "transcript.txt" },
   { selector: "image", kind: "cover", fileName: "cover.jpeg" },
   { selector: "image-low", kind: "coverLow", fileName: "cover.webp" },
