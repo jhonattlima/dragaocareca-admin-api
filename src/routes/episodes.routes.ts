@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
-import { Router, type RequestHandler } from "express";
+import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { config } from "../config/env";
 import { episodeSchema } from "../schemas/episode";
@@ -37,6 +37,8 @@ import {
   getEpisodeMediaStagingPath,
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
+import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft } from "../services/episode-draft-reservation.service";
+import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
 
@@ -135,6 +137,11 @@ const trailerVideoUploadSpec: UploadSpec = {
   allowedExtensions: [".mp4"],
   allowedMimeTypes: ["video/mp4", "application/mp4"],
   maxBytes: config.media.trailerVideoMaxBytes,
+};
+
+const trailerVideoDraftId = (req: Request): string | undefined => {
+  const value = req.headers["x-episode-draft-id"];
+  return Array.isArray(value) ? value[0] : value;
 };
 
 const moveFile = async (sourcePath: string, targetPath: string): Promise<void> => {
@@ -403,14 +410,54 @@ makeUploadRoute("cover-webp", uploadSpecs.coverLow);
 
 const trailerVideoUpload = buildUploader(trailerVideoUploadSpec);
 
+episodesRouter.post("/drafts", requireAuth, async (req, res, next) => {
+  try {
+    await cleanupExpiredTrailerVideoDrafts();
+    const body = z.object({ episodeId: z.coerce.number().int().positive() }).strict().safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "episodeId must be a positive integer" });
+      return;
+    }
+    try {
+      res.status(201).json(await reserveTrailerVideoDraft(body.data.episodeId, req.user?.email ?? ""));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Episode draft could not be reserved";
+      res.status(message === "Episode already exists" ? 409 : 409).json({ message });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
 episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) => {
+  const episodeId = Number(req.params.episodeId);
+  if (!Number.isInteger(episodeId) || episodeId <= 0) {
+    res.status(400).json({ message: "Invalid episodeId" });
+    return;
+  }
+  const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
+  const draftId = trailerVideoDraftId(req);
+  if (!currentEpisode) {
+    const checked = checkTrailerVideoDraft(draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
+    if (!checked.ok) {
+      res.status(checked.status).json({ message: checked.message });
+      return;
+    }
+  } else if (draftId) {
+    const checked = checkTrailerVideoDraft(draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
+    if (!checked.ok) {
+      res.status(checked.status).json({ message: checked.message });
+      return;
+    }
+  }
+
   trailerVideoUpload(req, res, async (error) => {
     if (error) {
+      await fs.promises.rm(getEpisodeMediaStagingPath(episodeId, "trailerVideo"), { force: true }).catch(() => undefined);
       next(error);
       return;
     }
 
-    const episodeId = Number(req.params.episodeId);
     const file = req.file;
 
     try {
@@ -425,13 +472,40 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
         return;
       }
 
+      if (!currentEpisode) {
+        const checked = checkTrailerVideoDraft(draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
+        if (!checked.ok) {
+          await fs.promises.unlink(file.path).catch(() => undefined);
+          res.status(checked.status).json({ message: checked.message });
+          return;
+        }
+        const response: EpisodeTrailerVideoUploadResponse = {
+          episodeId,
+          draftId: checked.reservation.draftId,
+          state: "staged",
+          trailerVideoFileName: null,
+          message: "Trailer video staged; save the episode to finalize it.",
+        };
+        episodeRepository.updateTrailerVideoDraftState(checked.reservation.draftId, "staged");
+        res.json(response);
+        return;
+      }
+
       const updated = await replaceEpisodeTrailerVideo(episodeId, file.path);
       if (!updated) {
         res.status(404).json({ message: "Episode not found" });
         return;
       }
 
-      res.json(updated);
+      res.json({
+        ...updated,
+        episodeId,
+        draftId: null,
+        state: "finalized",
+        trailerVideoFileName: updated.trailerVideoFileName ?? getEpisodeMediaRelativePath(episodeId, "trailerVideo"),
+        trailerVideoSyncStatus: updated.trailerVideoSyncStatus,
+        message: "Trailer video finalized.",
+      } satisfies EpisodeTrailerVideoUploadResponse);
     } catch (caught) {
       if (file) await fs.promises.unlink(file.path).catch(() => undefined);
       next(caught);
@@ -636,9 +710,38 @@ episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
 });
 
 episodesRouter.post("/", requireAuth, async (req, res, next) => {
+  let createdEpisodeId: number | null = null;
   try {
+    const draftId = typeof req.body?.draftId === "string" ? req.body.draftId : undefined;
+    const requestedEpisodeId = Number(req.body?.episodeId);
+    const draftCheck = checkTrailerVideoDraft(draftId, requestedEpisodeId, req.user?.email ?? "", { allowStaged: true });
+    if (!draftCheck.ok) {
+      res.status(draftCheck.status).json({ message: draftCheck.message });
+      return;
+    }
     const payload = episodeSchema.parse(req.body);
+    if (payload.episodeId !== draftCheck.reservation.episodeId) {
+      res.status(403).json({ message: "Episode draft reservation does not match episodeId" });
+      return;
+    }
     const created = episodeRepository.create(payload);
+    createdEpisodeId = created.episodeId;
+    let trailerVideoFinalized: EpisodeTrailerVideoUploadResponse | null = null;
+    const trailerVideoStagingPath = getEpisodeMediaStagingPath(created.episodeId, "trailerVideo");
+    const trailerVideoStaged = await fs.promises.access(trailerVideoStagingPath).then(() => true).catch(() => false);
+    if (trailerVideoStaged) {
+      const promoted = await replaceEpisodeTrailerVideo(created.episodeId, trailerVideoStagingPath);
+      if (promoted) {
+        trailerVideoFinalized = {
+          episodeId: created.episodeId,
+          draftId: draftCheck.reservation.draftId,
+          state: "finalized",
+          trailerVideoFileName: promoted.trailerVideoFileName ?? getEpisodeMediaRelativePath(created.episodeId, "trailerVideo"),
+          trailerVideoSyncStatus: promoted.trailerVideoSyncStatus,
+          message: "Trailer video finalized.",
+        };
+      }
+    }
     const mediaUpdates = await promoteStagedMedia(created.episodeId);
     const transcriptState = await syncDraftEpisodeTranscription(created.episodeId);
 
@@ -652,12 +755,19 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
 
     await queueLaunchNotification(created.episodeId);
 
+    consumeTrailerVideoDraft(draftCheck.reservation.draftId, created.episodeId, req.user?.email ?? "");
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(created.episodeId)
       : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
     queueCoverMosaicRefresh();
-    res.status(201).json(finalDoc ?? created);
+    res.status(201).json({ ...(finalDoc ?? created), ...(trailerVideoFinalized ?? {}) });
   } catch (error) {
+    if (createdEpisodeId !== null) {
+      // A failed create must not leave a partially persisted row. The reservation
+      // remains owner-bound so a retained staged file can be retried safely.
+      episodeRepository.delete(createdEpisodeId);
+      await fs.promises.rm(getEpisodeMediaFinalPath(createdEpisodeId, "trailerVideo"), { force: true }).catch(() => undefined);
+    }
     next(error);
   }
 });

@@ -700,6 +700,24 @@ export const swaggerSpec = swaggerJsdoc({
           },
         },
       },
+      "/v1/episodes/drafts": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Reserve a trailer-video draft episode identifier",
+          description: "Issues an opaque authenticated reservation for a positive episodeId that is not persisted or already reserved. The reservation is owner-bound and expires after 24 hours.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { type: "object", additionalProperties: false, required: ["episodeId"], properties: { episodeId: { type: "integer", minimum: 1 } } } } },
+          },
+          responses: {
+            "201": { description: "Opaque owner-bound draft reservation." },
+            "400": { description: "episodeId must be a positive integer." },
+            "401": { description: "Unauthorized." },
+            "409": { description: "Episode is persisted or already reserved." },
+          },
+        },
+      },
       "/v1/episodes": {
         get: {
           tags: ["Episodes"],
@@ -709,13 +727,13 @@ export const swaggerSpec = swaggerJsdoc({
         },
         post: {
           tags: ["Episodes"],
-          summary: "Create episode",
+          summary: "Create episode and consume its authenticated trailer-video draft reservation",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/Episode" },
+                schema: { allOf: [{ $ref: "#/components/schemas/Episode" }, { type: "object", required: ["draftId"], properties: { draftId: { type: "string", format: "uuid" } } }] },
               },
             },
           },
@@ -867,7 +885,10 @@ export const swaggerSpec = swaggerJsdoc({
           summary: "Upload or replace the final trailer video",
           description: "Authenticated administrators upload one MP4 through multipart field file. The server enforces EPISODE_TRAILER_VIDEO_MAX_BYTES (524288000 bytes / 500 MiB by default), stores only the canonical final trailer.mp4, and never accepts client paths. A replacement is allowed, retains any existing publication reference, and reports manual-sync-required until an administrator re-syncs it to YouTube.",
           security: [{ bearerAuth: [] }],
-          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." }],
+          parameters: [
+            { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
+            { name: "X-Episode-Draft-Id", in: "header", required: false, schema: { type: "string", format: "uuid" }, description: "Required for a not-yet-persisted episode; issued by POST /v1/episodes/drafts." },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -883,10 +904,12 @@ export const swaggerSpec = swaggerJsdoc({
             },
           },
           responses: {
-            "200": { description: "Protected episode response with canonical trailerVideoFileName and trailerVideoSyncStatus.", content: { "application/json": { schema: { $ref: "#/components/schemas/Episode" } } } },
+            "200": { description: "Response with explicit staged or finalized lifecycle state and canonical trailerVideoFileName only when finalized." },
             "400": { description: "Invalid episodeId, missing file, non-MP4 upload, or upload above the configured server limit." },
             "401": { description: "Missing, invalid, or expired bearer token." },
+            "403": { description: "Draft reservation belongs to another user or episode." },
             "404": { description: "Episode not found." },
+            "409": { description: "Missing, expired, reused, or unreserved draft reservation." },
           },
         },
       },
