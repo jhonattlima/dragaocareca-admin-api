@@ -16,6 +16,7 @@
     "verify:trailer-video-persistence": "NODE_ENV=development SQLITE_PATH=/tmp/dragaocareca-trailer-video-persistence.sqlite node dist/scripts/verify-trailer-video-persistence.js",
     "verify:trailer-video-artifact": "NODE_ENV=development node dist/scripts/verify-trailer-video-artifact.js",
     "verify:trailer-video-upload-lifecycle": "NODE_ENV=development EPISODE_TRAILER_VIDEO_MAX_BYTES=1024 SQLITE_PATH=/tmp/dragaocareca-trailer-video-upload-lifecycle.sqlite MEDIA_STORAGE_ROOT=/tmp/dragaocareca-trailer-video-upload-media node dist/scripts/verify-trailer-video-upload-lifecycle.js",
+    "verify:youtube-trailer-job-lifecycle": "npm run build && NODE_ENV=development node dist/scripts/verify-youtube-trailer-job-lifecycle.js",
     "verify:summary-runtime-contract": "NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js",
     "verify:summary-quality-contract": "NODE_ENV=development node dist/scripts/verify-summary-quality-contract.js",
     "import:episodes": "tsx src/scripts/import-legacy-episodes.ts",
