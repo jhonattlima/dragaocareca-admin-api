@@ -12,6 +12,7 @@ import { getEpisodeMediaFinalPath, getEpisodeMediaStagingDirectory, getEpisodeMe
 
 const fixtureEpisodeId = 987654391;
 const replacementEpisodeId = fixtureEpisodeId + 1;
+const consumeFailureEpisodeId = fixtureEpisodeId + 4;
 const owner = "dev-bypass@local";
 
 class MultipartRequest extends Readable {
@@ -91,6 +92,21 @@ const seedEpisode = (episodeId: number): void => {
 
 const exists = async (filePath: string): Promise<boolean> => fs.promises.access(filePath).then(() => true).catch(() => false);
 
+const episodeCreateBody = (episodeId: number, draftId?: string): Record<string, unknown> => ({
+  episodeId,
+  ...(draftId ? { draftId } : {}),
+  title: "Created trailer fixture",
+  summary: "",
+  pubDate: "2026-01-01T00:00:00.000Z",
+  explicit: "no",
+  authors: [],
+  guests: [],
+  tags: [],
+  citations: [],
+  musicCredits: [],
+  coverCredits: [],
+});
+
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development");
   await connectDb();
@@ -138,19 +154,34 @@ const main = async (): Promise<void> => {
     assert.equal(await fs.promises.readFile(getEpisodeMediaStagingPath(fixtureEpisodeId, "trailerVideo"), "utf8"), "draft-bytes");
 
     const noVideoEpisodeId = fixtureEpisodeId + 2;
-    const noVideo = await invoke(router, "/", { body: { episodeId: noVideoEpisodeId, title: "Created without trailer video", summary: "", pubDate: "2026-01-01T00:00:00.000Z", explicit: "no", authors: [], guests: [], tags: [], citations: [], musicCredits: [], coverCredits: [] }, headers: {}, params: {} });
+    const noVideo = await invoke(router, "/", { body: { ...episodeCreateBody(noVideoEpisodeId), title: "Created without trailer video" }, headers: {}, params: {} });
     assert.equal(noVideo.response.statusCode, 201);
     assert.equal((noVideo.response.jsonBody as any).episodeId, noVideoEpisodeId);
     assert.equal((noVideo.response.jsonBody as any).trailerVideoFileName, undefined);
     episodeRepository.delete(noVideoEpisodeId);
 
-    const created = await invoke(router, "/", { body: { episodeId: fixtureEpisodeId, draftId: reservation.draftId, title: "Created trailer fixture", summary: "", pubDate: "2026-01-01T00:00:00.000Z", explicit: "no", authors: [], guests: [], tags: [], citations: [], musicCredits: [], coverCredits: [] }, headers: {}, params: {} });
+    const created = await invoke(router, "/", { body: episodeCreateBody(fixtureEpisodeId, reservation.draftId), headers: {}, params: {} });
     assert.equal(created.response.statusCode, 201);
     assert.equal((created.response.jsonBody as any).state, "finalized");
     assert.equal((created.response.jsonBody as any).trailerVideoFileName, `episodes/${fixtureEpisodeId}/trailer.mp4`);
     assert.equal(await fs.promises.readFile(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo"), "utf8"), "draft-bytes");
     assert.equal(episodeRepository.findTrailerVideoDraft(reservation.draftId)?.state, "consumed");
     assert.equal(await exists(getEpisodeMediaStagingPath(fixtureEpisodeId, "trailerVideo")), false);
+
+    // D-03: consumption is part of the create unit. A failed consume must not publish
+    // the newly-created episode or its staged media as canonical final state.
+    const consumeFailureReservation = await reserveTrailerVideoDraft(consumeFailureEpisodeId, owner);
+    const consumeFailureStaged = await invoke(router, "/:episodeId/trailer-video", new MultipartRequest(consumeFailureEpisodeId, Buffer.from("consume-failure"), "x.mp4", "video/mp4", consumeFailureReservation.draftId));
+    assert.equal(consumeFailureStaged.response.statusCode, 200);
+    const originalDraftStateUpdate = episodeRepository.updateTrailerVideoDraftState;
+    (episodeRepository as any).updateTrailerVideoDraftState = (draftId: string, state: string): boolean =>
+      state === "consumed" ? false : originalDraftStateUpdate(draftId, state as any);
+    const consumeFailure = await invoke(router, "/", { body: episodeCreateBody(consumeFailureEpisodeId, consumeFailureReservation.draftId), headers: {}, params: {} });
+    (episodeRepository as any).updateTrailerVideoDraftState = originalDraftStateUpdate;
+    assert.ok(consumeFailure.error, "D-03 consume failure must surface through the route error boundary");
+    assert.equal(episodeRepository.findByEpisodeId(consumeFailureEpisodeId), null);
+    assert.equal(await exists(getEpisodeMediaFinalPath(consumeFailureEpisodeId, "trailerVideo")), false);
+    assert.equal(episodeRepository.findTrailerVideoDraft(consumeFailureReservation.draftId)?.state, "staged");
 
     seedEpisode(replacementEpisodeId);
     const finalPath = getEpisodeMediaFinalPath(replacementEpisodeId, "trailerVideo");
@@ -187,7 +218,8 @@ const main = async (): Promise<void> => {
     config.media.trailerVideoMaxBytes = 500 * 1024 * 1024;
     episodeRepository.delete(fixtureEpisodeId);
     episodeRepository.delete(replacementEpisodeId);
-    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id IN (?, ?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2, fixtureEpisodeId + 3);
+    episodeRepository.delete(consumeFailureEpisodeId);
+    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id IN (?, ?, ?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2, fixtureEpisodeId + 3, consumeFailureEpisodeId);
     await fs.promises.rm(path.dirname(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo")), { recursive: true, force: true });
   }
 };
