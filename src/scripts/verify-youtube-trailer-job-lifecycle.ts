@@ -179,10 +179,12 @@ const verifyWorkerFocus = async (): Promise<void> => {
 };
 
 const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
-  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, requestYoutubeTrailerJobCancellation }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+  const [{ getDb }, { youtubeTrailerJobRepository }, { createYoutubeTrailerJob, getYoutubeTrailerJob, requestYoutubeTrailerJobCancellation }, { runYoutubeTrailerJobWorkerOnce }, { replaceEpisodeTrailerVideo }] = await Promise.all([
     import("../database/sqlite.js"),
+    import("../database/repositories/youtube-trailer-job.repository.js"),
     import("../services/youtube-trailer-job.service.js"),
     import("../workers/youtube-trailer-job.worker.js"),
+    import("../services/episode-trailer-video.service.js"),
   ]);
   getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(16, "Worker fixture", "2026-08-04T00:00:00.000Z");
   const trailerPath = path.join(fixture.mediaRoot, "episodes", "16", "trailer.mp4");
@@ -196,12 +198,13 @@ const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
   const interrupted = getYoutubeTrailerJob(16, job.jobId);
   assert.equal(interrupted?.status, "queued", "interrupted transfer must become retryable after session persistence");
   assert.ok(interrupted?.sessionUri, "session URI must persist before a chunk can be attempted");
-  assert.deepEqual(provider.events.slice(0, 4), ["readiness", "begin-session", "resume:0", "chunk:0-8"]);
+  assert.deepEqual(provider.events.slice(0, 4), ["readiness", "begin-session", "resume:0", "chunk:0-4"]);
 
+  getDb().prepare("UPDATE youtube_trailer_jobs SET next_attempt_at = ? WHERE job_id = ?").run(new Date(Date.now() - 1_000).toISOString(), job.jobId);
   await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
   const processing = getYoutubeTrailerJob(16, job.jobId);
   assert.equal(processing?.status, "processing", "same persisted session must resume to private processing");
-  assert.ok(provider.events.includes("resume:8"), "recovery must query the provider Range before resuming");
+  assert.ok(provider.events.includes("resume:4"), "recovery must query the provider Range before resuming");
   assert.equal(processing?.providerVideoId, "fake-private-video-1");
 
   await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
@@ -216,6 +219,49 @@ const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(requestYoutubeTrailerJobCancellation(17, cancellationJob.jobId)?.status, "cancel_requested");
   await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
   assert.equal(getYoutubeTrailerJob(17, cancellationJob.jobId)?.cancellationBoundary, "local-cancelled");
+
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(19, "Accepted cancellation fixture", "2026-08-04T00:00:00.000Z");
+  const acceptedCancellationPath = path.join(fixture.mediaRoot, "episodes", "19", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(acceptedCancellationPath), { recursive: true });
+  await fs.promises.writeFile(acceptedCancellationPath, Buffer.from("accepted"));
+  const acceptedCancellationJob = await createYoutubeTrailerJob(19);
+  const acceptedProvider = new FakeYoutubeTrailerUploadProvider();
+  await runYoutubeTrailerJobWorkerOnce({ provider: acceptedProvider, recoverInterrupted: false });
+  assert.equal(getYoutubeTrailerJob(19, acceptedCancellationJob.jobId)?.status, "processing");
+  assert.equal(requestYoutubeTrailerJobCancellation(19, acceptedCancellationJob.jobId)?.status, "cancel_requested");
+  await runYoutubeTrailerJobWorkerOnce({ provider: acceptedProvider, recoverInterrupted: false });
+  assert.equal(
+    getYoutubeTrailerJob(19, acceptedCancellationJob.jobId)?.cancellationBoundary,
+    "provider-video-retained",
+    "cancellation after provider acceptance must not claim remote rollback"
+  );
+
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(18, "Replacement fixture", "2026-08-04T00:00:00.000Z");
+  const replacementFinalPath = path.join(fixture.mediaRoot, "episodes", "18", "trailer.mp4");
+  const replacementStagingPath = path.join(fixture.mediaRoot, "staging", "18", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(replacementFinalPath), { recursive: true });
+  await fs.promises.mkdir(path.dirname(replacementStagingPath), { recursive: true });
+  await fs.promises.writeFile(replacementFinalPath, Buffer.from("oldvideo"));
+  const staleJob = await createYoutubeTrailerJob(18);
+  const staleLease = youtubeTrailerJobRepository.claim(
+    { episodeId: staleJob.episodeId, sourceFileName: staleJob.sourceFileName, sourceSha256: staleJob.sourceSha256, sourceBytes: staleJob.sourceBytes },
+    staleJob.jobId,
+    staleJob.revision,
+    "stale-lease"
+  );
+  assert.ok(staleLease, "replacement fixture job must be claimable before source replacement");
+  await fs.promises.writeFile(replacementStagingPath, Buffer.from("newvideo"));
+  await replaceEpisodeTrailerVideo(18, replacementStagingPath);
+  assert.equal(getYoutubeTrailerJob(18, staleJob.jobId)?.status, "obsolete", "replacement must obsolete the prior source job");
+  assert.equal(
+    youtubeTrailerJobRepository.updateProvider(
+      { episodeId: staleJob.episodeId, sourceFileName: staleJob.sourceFileName, sourceSha256: staleJob.sourceSha256, sourceBytes: staleJob.sourceBytes, jobId: staleJob.jobId, revision: staleLease!.revision, leaseId: "stale-lease" },
+      { confirmedBytes: staleJob.sourceBytes },
+      "transferring"
+    ),
+    null,
+    "obsolete source jobs must reject late worker updates"
+  );
 };
 
 const parseFocus = (argumentsList: string[]): YoutubeTrailerJobFocus | null => {
@@ -234,6 +280,7 @@ const main = async (): Promise<void> => {
     await verifyScaffoldIsolation(fixture);
     process.env.SQLITE_PATH = fixture.sqlitePath;
     process.env.MEDIA_STORAGE_ROOT = fixture.mediaRoot;
+    process.env.MEDIA_EPISODES_STAGING_DIR = path.join(fixture.mediaRoot, "staging");
     process.env.YOUTUBE_TRAILER_JOB_CHUNK_BYTES = "4";
     const focus = parseFocus(process.argv.slice(2));
     if (focus === "repository") {

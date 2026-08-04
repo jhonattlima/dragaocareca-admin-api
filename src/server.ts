@@ -8,6 +8,7 @@ import { startEpisodeArtifactPreparationWorker } from "./workers/episode-artifac
 import { startLaunchNotificationWorker } from "./workers/launch-notification.worker";
 import { startSpotifyMetricsWorker } from "./workers/spotify-metrics.worker";
 import { startYouTubeMetricsWorker } from "./workers/youtube-metrics.worker";
+import { startYoutubeTrailerJobWorker } from "./workers/youtube-trailer-job.worker";
 import { startTelegramBotWorker } from "./services/telegram-bot.worker";
 
 const backgroundWorkersDisabled =
@@ -31,6 +32,12 @@ const bootstrap = async (): Promise<void> => {
   // Artifact jobs only prepare local episode files. Keep this worker available even when
   // integrations that depend on external credentials are intentionally disabled.
   await startEpisodeArtifactPreparationWorker();
+
+  if (config.youtube.trailerJob.enabled && !backgroundWorkersDisabled) {
+    await startYoutubeTrailerJobWorker();
+  } else if (config.youtube.trailerJob.enabled) {
+    console.info("YouTube trailer job worker disabled by DISABLE_BACKGROUND_WORKERS=true");
+  }
 
   if (backgroundWorkersDisabled) {
     console.info("External background workers disabled by DISABLE_BACKGROUND_WORKERS=true");

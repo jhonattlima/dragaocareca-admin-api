@@ -167,7 +167,7 @@ const selectOne = (where: string, ...parameters: Array<string | number | null>):
   mapRow(getDb().prepare(`SELECT * FROM youtube_trailer_jobs WHERE ${where} LIMIT 1`).get(...parameters) as SqliteYoutubeTrailerJobRow | undefined);
 
 const selectAfterCas = (lease: YoutubeTrailerJobLease): YoutubeTrailerJobRow | null =>
-  selectOne("job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ? AND revision = ? AND worker_lease_id = ?", lease.jobId, lease.episodeId, lease.sourceFileName, lease.sourceSha256, lease.sourceBytes, lease.revision + 1, lease.leaseId);
+  selectOne("job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ? AND revision = ?", lease.jobId, lease.episodeId, lease.sourceFileName, lease.sourceSha256, lease.sourceBytes, lease.revision + 1);
 
 const updateWithLease = (lease: YoutubeTrailerJobLease, setClause: string, values: Array<string | number | null>, expectedStatuses = leaseOwnedStatuses): YoutubeTrailerJobRow | null => {
   const now = nowIso();
@@ -213,6 +213,31 @@ export const youtubeTrailerJobRepository = {
     return selectOne("job_id = ? AND revision = ? AND worker_lease_id = ?", jobId, expectedRevision + 1, leaseId);
   },
 
+  claimRecovery(source: YoutubeTrailerSource, jobId: string, expectedRevision: number, leaseId: string): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const result = getDb().prepare(`
+      UPDATE youtube_trailer_jobs
+      SET worker_lease_id = ?, lease_claimed_at = ?, lease_heartbeat_at = ?, revision = revision + 1, updated_at = ?
+      WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
+        AND revision = ? AND status IN ('claimed', 'transferring', 'processing', 'cancel_requested')
+    `).run(leaseId, now, now, now, jobId, source.episodeId, source.sourceFileName, source.sourceSha256, source.sourceBytes, expectedRevision);
+    if (result.changes !== 1) return null;
+    return selectOne("job_id = ? AND revision = ? AND worker_lease_id = ?", jobId, expectedRevision + 1, leaseId);
+  },
+
+  recoverInterrupted(source: YoutubeTrailerSource, jobId: string, expectedRevision: number): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const result = getDb().prepare(`
+      UPDATE youtube_trailer_jobs
+      SET status = CASE WHEN status = 'cancel_requested' THEN 'cancel_requested' ELSE 'queued' END,
+        worker_lease_id = NULL, lease_claimed_at = NULL, lease_heartbeat_at = NULL, revision = revision + 1, updated_at = ?
+      WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
+        AND revision = ? AND status IN ('claimed', 'transferring', 'processing', 'cancel_requested')
+    `).run(now, jobId, source.episodeId, source.sourceFileName, source.sourceSha256, source.sourceBytes, expectedRevision);
+    if (result.changes !== 1) return null;
+    return selectOne("job_id = ? AND revision = ?", jobId, expectedRevision + 1);
+  },
+
   heartbeat(lease: YoutubeTrailerJobLease): YoutubeTrailerJobRow | null {
     return updateWithLease(lease, "lease_heartbeat_at = ?", [nowIso()]);
   },
@@ -252,6 +277,10 @@ export const youtubeTrailerJobRepository = {
   markCancelled(lease: YoutubeTrailerJobLease, boundary: string): YoutubeTrailerJobRow | null {
     const now = nowIso();
     return updateWithLease(lease, "status = 'cancelled', cancelled_at = ?, cancellation_boundary = ?, worker_lease_id = NULL", [now, boundary], "'cancel_requested'");
+  },
+
+  markReady(lease: YoutubeTrailerJobLease): YoutubeTrailerJobRow | null {
+    return updateWithLease(lease, "status = 'ready', completed_at = ?", [nowIso()], "'processing'");
   },
 
   retry(source: YoutubeTrailerSource, jobId: string, expectedRevision: number, nextAttemptAt: string | null): YoutubeTrailerJobRow | null {
