@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+type YoutubeTrailerJobRepository = typeof import("../database/repositories/youtube-trailer-job.repository.js").youtubeTrailerJobRepository;
+
 export type YoutubeTrailerJobFocus = "repository" | "worker";
 
 export type FakeProviderFailure = {
@@ -121,18 +123,37 @@ const createFixture = async (): Promise<Fixture> => {
   const mediaRoot = path.join(root, "media");
   const sqlitePath = path.join(root, "youtube-trailer-jobs.sqlite");
   await fs.promises.mkdir(mediaRoot);
-  await fs.promises.writeFile(sqlitePath, "offline verifier fixture");
   return { root, mediaRoot, sqlitePath };
 };
 
 const verifyScaffoldIsolation = async (fixture: Fixture): Promise<void> => {
   assert.match(fixture.root, /^\/tmp\/dragaocareca-youtube-trailer-job-/);
   assert.equal(await fs.promises.stat(fixture.mediaRoot).then((entry) => entry.isDirectory()), true);
-  assert.equal(await fs.promises.stat(fixture.sqlitePath).then((entry) => entry.isFile()), true);
+  assert.equal(fs.existsSync(fixture.sqlitePath), false);
   assert.equal(reservedLifecycleScenarios.length, 5);
 };
 
-const verifyRepositoryFocus = async (): Promise<void> => {
+const verifyRepositoryFocus = async (youtubeTrailerJobRepository: YoutubeTrailerJobRepository): Promise<void> => {
+  const source = { episodeId: 16, sourceFileName: "episodes/16/trailer.mp4", sourceSha256: "a".repeat(64), sourceBytes: 8 };
+  const duplicate = youtubeTrailerJobRepository.createOrReuse({ jobId: "job-original", ...source });
+  const reused = youtubeTrailerJobRepository.createOrReuse({ jobId: "job-duplicate", ...source });
+  assert.equal(duplicate.jobId, "job-original");
+  assert.equal(reused.jobId, duplicate.jobId, "duplicate source starts must coalesce");
+
+  const claim = youtubeTrailerJobRepository.claim(source, duplicate.jobId, duplicate.revision, "lease-a");
+  assert.ok(claim, "queued source job must be claimable");
+  const staleProgress = youtubeTrailerJobRepository.updateProvider({ ...source, jobId: claim.jobId, revision: claim.revision - 1, leaseId: "lease-a" }, { confirmedBytes: 4 }, "transferring");
+  assert.equal(staleProgress, null, "stale revision writes must be rejected");
+  const progressed = youtubeTrailerJobRepository.updateProvider({ ...source, jobId: claim.jobId, revision: claim.revision, leaseId: "lease-a" }, { confirmedBytes: 4 }, "transferring");
+  assert.equal(progressed?.confirmedBytes, 4);
+
+  const changedSource = { ...source, sourceSha256: "b".repeat(64) };
+  const obsoleted = youtubeTrailerJobRepository.obsoletePriorSource(source.episodeId, changedSource);
+  assert.equal(obsoleted.length, 1);
+  assert.equal(obsoleted[0]?.status, "obsolete");
+  const staleAfterReplacement = youtubeTrailerJobRepository.updateProvider({ ...source, jobId: progressed!.jobId, revision: progressed!.revision, leaseId: "lease-a" }, { confirmedBytes: 8 }, "transferring");
+  assert.equal(staleAfterReplacement, null, "obsolete sources must reject late lease writers");
+
   const provider = new FakeYoutubeTrailerUploadProvider();
   const session = await provider.beginPrivateSession(8);
   assert.deepEqual(session, { sessionUri: "fake-provider://private-session-1", privacyStatus: "private" });
@@ -175,8 +196,17 @@ const main = async (): Promise<void> => {
   const fixture = await createFixture();
   try {
     await verifyScaffoldIsolation(fixture);
+    process.env.SQLITE_PATH = fixture.sqlitePath;
     const focus = parseFocus(process.argv.slice(2));
-    if (focus === "repository") await verifyRepositoryFocus();
+    if (focus === "repository") {
+      const [{ youtubeTrailerJobRepository }, { getDb }] = await Promise.all([
+        import("../database/repositories/youtube-trailer-job.repository.js"),
+        import("../database/sqlite.js"),
+      ]);
+      getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(16, "Repository fixture", "2026-08-04T00:00:00.000Z");
+      await verifyRepositoryFocus(youtubeTrailerJobRepository);
+      getDb().close();
+    }
     if (focus === "worker") await verifyWorkerFocus();
     if (!focus) {
       console.log(`offline fake-provider scaffold verified; Plan 16-04 reserves: ${reservedLifecycleScenarios.join("; ")}`);
