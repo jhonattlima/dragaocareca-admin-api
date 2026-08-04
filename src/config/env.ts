@@ -32,6 +32,16 @@ export const parseTrailerVideoMaxBytes = (value: string | undefined): number => 
   return parsed;
 };
 
+const boundedPositiveInteger = (value: string | undefined, defaultValue: number, name: string, maximum: number): number => {
+  if (value === undefined || value === "") return defaultValue;
+  if (!/^\d+$/.test(value)) throw new Error(`${name} must be a positive integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > maximum) {
+    throw new Error(`${name} must be a positive integer no greater than ${maximum}`);
+  }
+  return parsed;
+};
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
@@ -75,6 +85,16 @@ export const config = {
     timeZone: process.env.YOUTUBE_METRICS_TIME_ZONE ?? "America/Sao_Paulo",
     timeoutMs: Number(process.env.YOUTUBE_METRICS_TIMEOUT_MS ?? 15000),
     sampleIntervalMs: Number(process.env.YOUTUBE_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
+    trailerJob: {
+      enabled: (process.env.YOUTUBE_TRAILER_JOB_ENABLED ?? "false").toLowerCase() === "true",
+      providerTimeoutMs: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_PROVIDER_TIMEOUT_MS, 30_000, "YOUTUBE_TRAILER_JOB_PROVIDER_TIMEOUT_MS", 300_000),
+      processingPollIntervalMs: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_PROCESSING_POLL_INTERVAL_MS, 60_000, "YOUTUBE_TRAILER_JOB_PROCESSING_POLL_INTERVAL_MS", 3_600_000),
+      retryInitialDelayMs: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_RETRY_INITIAL_DELAY_MS, 60_000, "YOUTUBE_TRAILER_JOB_RETRY_INITIAL_DELAY_MS", 900_000),
+      retryMaxDelayMs: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_RETRY_MAX_DELAY_MS, 900_000, "YOUTUBE_TRAILER_JOB_RETRY_MAX_DELAY_MS", 3_600_000),
+      retryAttempts: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_RETRY_ATTEMPTS, 5, "YOUTUBE_TRAILER_JOB_RETRY_ATTEMPTS", 20),
+      workerCount: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_WORKER_COUNT, 1, "YOUTUBE_TRAILER_JOB_WORKER_COUNT", 1),
+      chunkBytes: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_CHUNK_BYTES, 8 * 1024 * 1024, "YOUTUBE_TRAILER_JOB_CHUNK_BYTES", 32 * 1024 * 1024),
+    },
   },
   transcription: {
     enabled: (process.env.EPISODE_TRANSCRIPTION_ENABLED ?? "false").toLowerCase() === "true",

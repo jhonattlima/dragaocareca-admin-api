@@ -3,6 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type {
+  YoutubeTrailerCancellationResult,
+  YoutubeTrailerPrivateSession,
+  YoutubeTrailerProcessingState,
   YoutubeTrailerUploadProvider,
   YoutubeTrailerUploadProviderError,
 } from "../services/youtube-trailer-upload.provider.js";
@@ -24,22 +27,25 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
 
   async checkReadiness(): Promise<void> {}
 
-  async beginPrivateSession(sourceBytes: number) {
+  async beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession> {
     assert.ok(sourceBytes > 0, "fake provider requires a non-empty source");
     this.sourceBytes = sourceBytes;
     return { sessionUri: this.sessionUri, privacyStatus: "private" };
   }
 
-  async resumeRange(sessionUri: string) {
+  async resumeRange(sessionUri: string, sourceBytes: number) {
     this.assertSession(sessionUri);
+    assert.equal(sourceBytes, this.sourceBytes, "fake provider source bytes must match");
     return {
       confirmedBytes: this.confirmedBytes,
+      providerVideoId: null,
       range: this.confirmedBytes === 0 ? null : `bytes=0-${this.confirmedBytes - 1}`,
     };
   }
 
-  async uploadChunk(sessionUri: string, offset: number, chunk: Buffer) {
+  async uploadChunk(sessionUri: string, sourceBytes: number, offset: number, chunk: Buffer) {
     this.assertSession(sessionUri);
+    assert.equal(sourceBytes, this.sourceBytes, "fake provider source bytes must match");
     assert.equal(offset, this.confirmedBytes, "fake provider only accepts resumed offsets");
     assert.ok(chunk.length > 0, "fake provider requires a non-empty chunk");
     this.confirmedBytes = Math.min(this.sourceBytes, this.confirmedBytes + chunk.length);
@@ -49,13 +55,20 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     };
   }
 
-  async pollProcessing(providerVideoId: string) {
+  async pollProcessing(providerVideoId: string): Promise<YoutubeTrailerProcessingState> {
     assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
     this.processingPolls += 1;
-    return this.processingPolls === 1 ? "processing" : "succeeded";
+    return {
+      privacyStatus: "private",
+      uploadStatus: "processed",
+      processingStatus: this.processingPolls === 1 ? "processing" : "succeeded",
+      partsProcessed: this.processingPolls,
+      partsTotal: 2,
+      timeLeftMs: this.processingPolls === 1 ? 1_000 : 0,
+    };
   }
 
-  async cancel(sessionUri: string, providerVideoId: string | null) {
+  async cancel(sessionUri: string, providerVideoId: string | null): Promise<YoutubeTrailerCancellationResult> {
     this.assertSession(sessionUri);
     if (providerVideoId) {
       assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
@@ -66,7 +79,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
 
   normalizeFailure(error: unknown): YoutubeTrailerUploadProviderError {
     const detail = error instanceof Error ? error.message : "unknown fake-provider failure";
-    return { code: "fake-provider-failure", message: `Fake provider: ${detail}` };
+    return { code: "retryable", message: `Fake provider: ${detail}` };
   }
 
   private assertSession(sessionUri: string): void {
@@ -127,9 +140,9 @@ const verifyRepositoryFocus = async (youtubeTrailerJobRepository: YoutubeTrailer
   const provider = new FakeYoutubeTrailerUploadProvider();
   const session = await provider.beginPrivateSession(8);
   assert.deepEqual(session, { sessionUri: "fake-provider://private-session-1", privacyStatus: "private" });
-  assert.deepEqual(await provider.resumeRange(session.sessionUri), { confirmedBytes: 0, range: null });
+  assert.deepEqual(await provider.resumeRange(session.sessionUri, 8), { confirmedBytes: 0, providerVideoId: null, range: null });
   assert.deepEqual(provider.normalizeFailure(new Error("repository fixture failure")), {
-    code: "fake-provider-failure",
+    code: "retryable",
     message: "Fake provider: repository fixture failure",
   });
 };
@@ -137,15 +150,15 @@ const verifyRepositoryFocus = async (youtubeTrailerJobRepository: YoutubeTrailer
 const verifyWorkerFocus = async (): Promise<void> => {
   const provider = new FakeYoutubeTrailerUploadProvider();
   const session = await provider.beginPrivateSession(8);
-  const partial = await provider.uploadChunk(session.sessionUri, 0, Buffer.from("fake"));
+  const partial = await provider.uploadChunk(session.sessionUri, 8, 0, Buffer.from("fake"));
   assert.deepEqual(partial, { confirmedBytes: 4, providerVideoId: null });
-  assert.deepEqual(await provider.resumeRange(session.sessionUri), { confirmedBytes: 4, range: "bytes=0-3" });
+  assert.deepEqual(await provider.resumeRange(session.sessionUri, 8), { confirmedBytes: 4, providerVideoId: null, range: "bytes=0-3" });
   assert.deepEqual(await provider.cancel(session.sessionUri, null), { accepted: true, boundary: "local-cancelled" });
 
-  const complete = await provider.uploadChunk(session.sessionUri, 4, Buffer.from("data"));
+  const complete = await provider.uploadChunk(session.sessionUri, 8, 4, Buffer.from("data"));
   assert.deepEqual(complete, { confirmedBytes: 8, providerVideoId: "fake-private-video-1" });
-  assert.equal(await provider.pollProcessing(complete.providerVideoId!), "processing");
-  assert.equal(await provider.pollProcessing(complete.providerVideoId!), "succeeded");
+  assert.equal((await provider.pollProcessing(complete.providerVideoId!)).processingStatus, "processing");
+  assert.equal((await provider.pollProcessing(complete.providerVideoId!)).processingStatus, "succeeded");
   assert.deepEqual(await provider.cancel(session.sessionUri, complete.providerVideoId), {
     accepted: false,
     boundary: "provider-video-retained",
