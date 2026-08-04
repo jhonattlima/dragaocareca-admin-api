@@ -2,46 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type {
+  YoutubeTrailerUploadProvider,
+  YoutubeTrailerUploadProviderError,
+} from "../services/youtube-trailer-upload.provider.js";
 
 type YoutubeTrailerJobRepository = typeof import("../database/repositories/youtube-trailer-job.repository.js").youtubeTrailerJobRepository;
 
 export type YoutubeTrailerJobFocus = "repository" | "worker";
-
-export type FakeProviderFailure = {
-  code: "fake-provider-failure";
-  message: string;
-};
-
-export type FakeProcessingState = "processing" | "succeeded";
-
-export type FakePrivateSession = {
-  sessionUri: string;
-  privacyStatus: "private";
-};
-
-export type FakeRangeResume = {
-  confirmedBytes: number;
-  range: string | null;
-};
-
-export type FakeChunkResult = {
-  confirmedBytes: number;
-  providerVideoId: string | null;
-};
-
-export type FakeCancellationResult = {
-  accepted: boolean;
-  boundary: "local-cancelled" | "provider-video-retained";
-};
-
-export interface YoutubeTrailerUploadProvider {
-  beginPrivateSession(sourceBytes: number): Promise<FakePrivateSession>;
-  resumeRange(sessionUri: string): Promise<FakeRangeResume>;
-  uploadChunk(sessionUri: string, offset: number, chunk: Buffer): Promise<FakeChunkResult>;
-  pollProcessing(providerVideoId: string): Promise<FakeProcessingState>;
-  cancel(sessionUri: string, providerVideoId: string | null): Promise<FakeCancellationResult>;
-  normalizeFailure(error: unknown): FakeProviderFailure;
-}
 
 /**
  * Deterministic verifier-only provider. It deliberately has no OAuth, HTTP, or
@@ -54,13 +22,15 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   private confirmedBytes = 0;
   private processingPolls = 0;
 
-  async beginPrivateSession(sourceBytes: number): Promise<FakePrivateSession> {
+  async checkReadiness(): Promise<void> {}
+
+  async beginPrivateSession(sourceBytes: number) {
     assert.ok(sourceBytes > 0, "fake provider requires a non-empty source");
     this.sourceBytes = sourceBytes;
     return { sessionUri: this.sessionUri, privacyStatus: "private" };
   }
 
-  async resumeRange(sessionUri: string): Promise<FakeRangeResume> {
+  async resumeRange(sessionUri: string) {
     this.assertSession(sessionUri);
     return {
       confirmedBytes: this.confirmedBytes,
@@ -68,7 +38,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     };
   }
 
-  async uploadChunk(sessionUri: string, offset: number, chunk: Buffer): Promise<FakeChunkResult> {
+  async uploadChunk(sessionUri: string, offset: number, chunk: Buffer) {
     this.assertSession(sessionUri);
     assert.equal(offset, this.confirmedBytes, "fake provider only accepts resumed offsets");
     assert.ok(chunk.length > 0, "fake provider requires a non-empty chunk");
@@ -79,13 +49,13 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     };
   }
 
-  async pollProcessing(providerVideoId: string): Promise<FakeProcessingState> {
+  async pollProcessing(providerVideoId: string) {
     assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
     this.processingPolls += 1;
     return this.processingPolls === 1 ? "processing" : "succeeded";
   }
 
-  async cancel(sessionUri: string, providerVideoId: string | null): Promise<FakeCancellationResult> {
+  async cancel(sessionUri: string, providerVideoId: string | null) {
     this.assertSession(sessionUri);
     if (providerVideoId) {
       assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
@@ -94,7 +64,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     return { accepted: true, boundary: "local-cancelled" };
   }
 
-  normalizeFailure(error: unknown): FakeProviderFailure {
+  normalizeFailure(error: unknown): YoutubeTrailerUploadProviderError {
     const detail = error instanceof Error ? error.message : "unknown fake-provider failure";
     return { code: "fake-provider-failure", message: `Fake provider: ${detail}` };
   }
