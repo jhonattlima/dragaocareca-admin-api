@@ -310,17 +310,15 @@ const response = await fetch(
 | A1 | A 256 KiB-or-larger consistent resumable chunk size will be chosen for the 4 GB VPS worker. | Architecture Patterns | A different size may be operationally better; validate with production bandwidth and timeout limits before locking it. [ASSUMED] |
 | A2 | Existing `YOUTUBE_REFRESH_TOKEN` can be renewed with, or replaced by, a grant containing `youtube.upload`. | Common Pitfalls | Operator credential rotation/setup may be required before uploads can run. [ASSUMED] |
 
-## Open Questions
+## Operational Enablement Resolution
 
-1. **Does the deployed refresh token include a documented `videos.insert` scope?**
-   - What we know: The repository already stores YouTube client ID, secret, and refresh token for metrics. [VERIFIED: codebase grep]
-   - What's unclear: The granted OAuth scope is not represented in committed configuration. [VERIFIED: codebase grep]
-   - Recommendation: Add a human credential-readiness checkpoint before enabling Phase 16 uploads; request the narrow `youtube.upload` scope unless Phase 17's explicit publication/update needs a documented broader scope. [CITED: https://developers.google.com/youtube/v3/docs/videos/insert]
+The live worker is disabled by default and remains disabled until the dedicated pre-enable checkpoint is approved. This resolves the two deployment-dependent questions without putting any live provider call in automated verification.
 
-2. **What operational poll/retry limits fit the VPS and channel quota?**
-   - What we know: `videos.insert` has an upload quota bucket and Google requires exponential backoff for documented resumable 5xx responses. [CITED: https://developers.google.com/youtube/v3/docs/videos/insert] [CITED: https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol]
-   - What's unclear: Production bandwidth, upload duration, and acceptable recovery latency. [ASSUMED]
-   - Recommendation: Make intervals/backoff configurable with conservative defaults and one active transfer; do not add scheduled publication. [VERIFIED: codebase grep]
+1. **Production OAuth grant, token, and channel:** An operator must validate that the configured refresh token belongs to the intended production channel and that its grant authorizes server-side `youtube.upload` readiness before setting the worker enable flag. The human check may inspect the OAuth grant/channel through operator-controlled credentials, but it must not upload a test video. [CITED: https://developers.google.com/youtube/v3/docs/videos/insert]
+
+2. **Conservative VPS poll/retry limits:** Phase 16 documents and ships opt-in settings with these defaults: one worker, 60-second processing poll interval, 30-second provider request timeout, 60-second initial retry delay, exponential backoff capped at 15 minutes, and five retry attempts. The operator records the production values at the checkpoint and may only enable the worker after accepting those limits for the VPS bandwidth and channel quota. [CITED: https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol]
+
+The fake-provider verifier remains the only automated provider exercise. It uses temporary fixtures and never accesses OAuth credentials, a channel, or the YouTube network.
 
 ## Environment Availability
 
@@ -329,7 +327,7 @@ const response = await fetch(
 | Node.js | Streaming worker and compiled verifier | ✓ | v24.17.0 | — |
 | npm | Build/typecheck/verifier execution | ✓ | 12.0.1 | — |
 | SQLite through Node built-in | Durable reservation/job state | ✓ | Project uses `node:sqlite` | — [VERIFIED: codebase grep] |
-| Google OAuth credentials with upload scope | Real provider transfer | ✗ unverified | — | Keep worker disabled and run fake-provider verifier until operator config is ready. [ASSUMED] |
+| Google OAuth credentials with upload scope | Real provider transfer | Operator checkpoint required | — | Keep the worker disabled until the operator approves the documented OAuth/token/channel and operational-limit gate. |
 | Outbound Google API access | Real provider transfer/polling | ✗ unverified | — | Offline provider adapter verifier covers all local state transitions. [ASSUMED] |
 
 **Missing dependencies with no fallback:** A Google account OAuth grant with an upload-capable scope is required before live uploads can execute. [CITED: https://developers.google.com/youtube/v3/docs/videos/insert]
@@ -351,9 +349,9 @@ const response = await fetch(
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| TRAILER-02 | Persisted job begins private resumable transfer and exposes sanitized progress/state. | compiled service/worker integration | `npm run build && npm run verify:youtube-trailer-job-lifecycle` | ❌ Wave 0 |
-| TRAILER-03 | Duplicate/restart/cancel/retry/replacement reconciliation cannot create stale or duplicate active work. | compiled service/worker integration | `npm run build && npm run verify:youtube-trailer-job-lifecycle` | ❌ Wave 0 |
-| TRAILER-09 | Reservation owner/expiry/stage/promote/rollback boundary. | compiled route/service integration | `npm run build && npm run verify:trailer-video-upload-lifecycle` | ✅ but must expand Wave 0 |
+| TRAILER-02 | Persisted job begins private resumable transfer and exposes sanitized progress/state. | compiled service/worker integration | `npm run build && npm run verify:youtube-trailer-job-lifecycle` | ✅ Wave 1 foundation |
+| TRAILER-03 | Duplicate/restart/cancel/retry/replacement reconciliation cannot create stale or duplicate active work. | compiled service/worker integration | `npm run build && npm run verify:youtube-trailer-job-lifecycle` | ✅ Wave 1 foundation |
+| TRAILER-09 | Reservation owner/expiry/stage/promote/rollback boundary. | compiled route/service integration | `npm run build && npm run verify:trailer-video-upload-lifecycle` | ✅ Wave 1 expansion |
 
 ### Sampling Rate
 
@@ -361,11 +359,11 @@ const response = await fetch(
 - **Per wave merge:** `npm run build && npm run verify:trailer-video-upload-lifecycle && npm run verify:youtube-trailer-job-lifecycle`
 - **Phase gate:** Full suite green before `$gsd-verify-work`.
 
-### Wave 0 Gaps
+### Wave 1 Verification Foundation
 
-- [ ] `src/scripts/verify-youtube-trailer-job-lifecycle.ts` — fake provider proving session persistence/resume, 308 offset handling, 201 provider ID, processing poll, failure normalization, cancellation boundary, startup reconciliation, duplicate start, obsolete source, and no leaked path/session/token.
-- [ ] Expand `src/scripts/verify-trailer-video-upload-lifecycle.ts` — force every post-create/promotion/consume failure and assert row/final/staging/reservation compensation.
-- [ ] `package.json` command `verify:youtube-trailer-job-lifecycle` — isolated `/tmp` SQLite and media roots, `NODE_ENV=development`, no live network.
+- [ ] Plan 16-05 creates `src/scripts/verify-youtube-trailer-job-lifecycle.ts` and its compiled npm command before repository or worker implementation.
+- [ ] Plan 16-01 expands `src/scripts/verify-trailer-video-upload-lifecycle.ts` for post-create/promotion/consume compensation in the same wave.
+- [ ] Plans 16-02 and 16-03 extend and run focused fake-provider checks; the full suite runs after every wave without live network access.
 
 ## Security Domain
 

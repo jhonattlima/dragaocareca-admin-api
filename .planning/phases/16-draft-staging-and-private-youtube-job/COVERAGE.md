@@ -27,11 +27,11 @@
 
 | Source | ID | Required outcome | Plans | Status |
 |---|---|---|---|---|
-| GOAL | — | Safe New Episode staging plus one durable private-first job per current finalized source. | 16-01 through 16-04 | COVERED |
-| REQ | TRAILER-02 | Protected, private-first durable start and processing lifecycle. | 16-02, 16-03, 16-04 | COVERED |
-| REQ | TRAILER-03 | Fingerprint, progress, cancellation, retry, recovery, replacement, and stale-write safety. | 16-02, 16-03, 16-04 | COVERED |
+| GOAL | — | Safe New Episode staging plus one durable private-first job per current finalized source. | 16-01 through 16-06 | COVERED |
+| REQ | TRAILER-02 | Protected, private-first durable start and processing lifecycle. | 16-02 through 16-06 | COVERED |
+| REQ | TRAILER-03 | Fingerprint, progress, cancellation, retry, recovery, replacement, and stale-write safety. | 16-02 through 16-06 | COVERED |
 | REQ | TRAILER-09 | Owner-bound reservation, staging, atomic creation promotion, and compensation. | 16-01, 16-04 | COVERED |
-| RESEARCH | — | Persist before provider effects; session reconciliation, Range resume, polling, bounded single worker, OAuth readiness, and no package additions. | 16-02, 16-03, 16-04 | COVERED |
+| RESEARCH | — | Persist before provider effects; session reconciliation, Range resume, polling, bounded single worker, OAuth readiness, conservative documented limits, and no package additions. | 16-02 through 16-06 | COVERED |
 | CONTEXT | D-01 | Owner-bound, 24-hour, pre-upload reservation with abandonment cleanup. | 16-01 | COVERED |
 | CONTEXT | D-02 | Matching authenticated Save atomically promotes to canonical final MP4. | 16-01 | COVERED |
 | CONTEXT | D-03 | Failed/cancelled/disconnected/expired work preserves final media and never claims staging final. | 16-01 | COVERED |
