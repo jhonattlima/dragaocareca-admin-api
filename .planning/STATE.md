@@ -2,36 +2,36 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Trailer Video Publishing
-current_phase: 15
-current_phase_name: final-trailer-video-artifact
-status: verifying
-stopped_at: Completed 15-04-PLAN.md
-last_updated: "2026-08-03T23:03:42.828Z"
-last_activity: 2026-08-03
-last_activity_desc: Completed 15-04-PLAN.md
+current_phase: 16
+current_phase_name: draft-staging-and-private-youtube-job
+status: planning
+stopped_at: Phase 16 context gathered
+last_updated: "2026-08-04T18:52:17.060Z"
+last_activity: 2026-08-04
+last_activity_desc: reconciled requirements with the sibling admin-web private-first workflow
 progress:
-  total_phases: 1
+  total_phases: 2
   completed_phases: 1
   total_plans: 4
   completed_plans: 4
-current_plan: 4
+current_plan: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-28)
+See: .planning/PROJECT.md (updated 2026-08-04)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 14 — reconcile artifact job contract and harden ZIP lifecycle
+**Current focus:** Phase 16 — draft staging and private YouTube job lifecycle
 
 ## Current Position
 
-Phase: 15 of 16 (Final Trailer Video Artifact)
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-08-03 — Completed 15-04-PLAN.md
+Phase: 16 of 17 (Draft Staging and Private YouTube Job)
+Plan: —
+Status: Ready to discuss and plan
+Last activity: 2026-08-04 — reconciled requirements with the sibling admin-web private-first workflow
 
 ## Accumulated Context
 
@@ -74,6 +74,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Use existing canonical-final lstat and source-evidence revalidation for trailer-video artifacts.
 - [Phase ?]: Use in-memory multipart streams against the direct protected route stack for offline trailer-video verification.
 - [Phase ?]: Keep final-video OpenAPI and closed selector documentation under compiled verifier assertions.
+- [Milestone v1.4]: New Episode uploads require an owner-bound, expiring draft reservation and stage before the matching Save promotes them to final media.
+- [Milestone v1.4]: YouTube upload is a durable, API-owned private-first job; explicit public publication, title/hashtag metadata, and retention are separate concerns.
 
 ### Pending Todos
 
@@ -104,9 +106,9 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-03T23:03:42.822Z
-Stopped at: Completed 15-04-PLAN.md
-Resume file: None
+Last session: 2026-08-04T18:52:17.036Z
+Stopped at: Phase 16 context gathered
+Resume file: .planning/phases/16-draft-staging-and-private-youtube-job/16-CONTEXT.md
 
 ## Performance Metrics
 
@@ -130,4 +132,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Discuss and plan Phase 16 with `$gsd-discuss-phase 16` or `$gsd-plan-phase 16`.
