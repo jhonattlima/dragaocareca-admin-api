@@ -4,16 +4,16 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 16
 current_phase_name: draft-staging-and-private-youtube-job
-status: planning
-stopped_at: Phase 16 context gathered
-last_updated: "2026-08-04T18:52:17.060Z"
+status: executing
+stopped_at: Completed 16-01-PLAN.md
+last_updated: "2026-08-04T21:59:51.991Z"
 last_activity: 2026-08-04
-last_activity_desc: reconciled requirements with the sibling admin-web private-first workflow
+last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 10
+  completed_plans: 5
 current_plan: 0
 ---
 
@@ -24,14 +24,14 @@ current_plan: 0
 See: .planning/PROJECT.md (updated 2026-08-04)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 16 — draft staging and private YouTube job lifecycle
+**Current focus:** Phase 16 — draft-staging-and-private-youtube-job
 
 ## Current Position
 
-Phase: 16 of 17 (Draft Staging and Private YouTube Job)
-Plan: —
-Status: Ready to discuss and plan
-Last activity: 2026-08-04 — reconciled requirements with the sibling admin-web private-first workflow
+Phase: 16 (draft-staging-and-private-youtube-job) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-08-04 — Phase 16 execution started
 
 ## Accumulated Context
 
@@ -76,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Keep final-video OpenAPI and closed selector documentation under compiled verifier assertions.
 - [Milestone v1.4]: New Episode uploads require an owner-bound, expiring draft reservation and stage before the matching Save promotes them to final media.
 - [Milestone v1.4]: YouTube upload is a durable, API-owned private-first job; explicit public publication, title/hashtag metadata, and retention are separate concerns.
+- [Phase ?]: Consume a draft only after all durable create, media, metadata, and post-create steps succeed.
+- [Phase ?]: Use a conditional repository transition to bind consumption to the exact owner, episode, active state, and expiry.
 
 ### Pending Todos
 
@@ -106,9 +108,9 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-04T18:52:17.036Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-draft-staging-and-private-youtube-job/16-CONTEXT.md
+Last session: 2026-08-04T21:59:51.984Z
+Stopped at: Completed 16-01-PLAN.md
+Resume file: None
 
 ## Performance Metrics
 
@@ -129,6 +131,7 @@ Resume file: .planning/phases/16-draft-staging-and-private-youtube-job/16-CONTEX
 | Phase 15-final-trailer-video-artifact P02 | 18min | 2 tasks | 5 files |
 | Phase 15-final-trailer-video-artifact P03 | 12min | 2 tasks | 4 files |
 | Phase 15 P04 | 34min | 2 tasks | 5 files |
+| Phase 16-draft-staging-and-private-youtube-job P01 | 4min | 2 tasks | 5 files |
 
 ## Operator Next Steps
 

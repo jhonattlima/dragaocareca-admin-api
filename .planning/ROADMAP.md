@@ -53,11 +53,11 @@ Plans:
   4. Source identity and provider reconciliation prevent duplicate active jobs/provider videos and stale completion after replacement, reload, or API restart.
   5. Protected API contracts and executable verification cover reservation ownership, staging/promotion/rollback, job persistence/recovery, provider error normalization, and no-path/no-credential boundaries.
 
-**Plans**: 6 plans
+**Plans**: 1/6 plans executed
 
 Plans:
 
-- [ ] 16-01-PLAN.md — Harden owner-bound draft staging, atomic promotion, and compensating cleanup.
+- [x] 16-01-PLAN.md — Harden owner-bound draft staging, atomic promotion, and compensating cleanup.
 - [ ] 16-02-PLAN.md — Establish durable source-fingerprinted SQLite YouTube job coordination.
 - [ ] 16-03-PLAN.md — Implement private resumable transfer, reconciliation, OAuth readiness, and one worker.
 - [ ] 16-04-PLAN.md — Expose protected job DTOs and verify the lifecycle with an offline fake provider.
@@ -84,7 +84,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 15. Final Trailer Video Artifact | 4/4 | Executed; frontend UAT deferred | 2026-08-03 |
-| 16. Draft Staging and Private YouTube Job | 0/4 | Planned | - |
+| 16. Draft Staging and Private YouTube Job | 1/6 | In Progress|  |
 | 17. Trailer Metadata, Publication and Retention | 0/TBD | Not started | - |
 
 ## Archive Index
