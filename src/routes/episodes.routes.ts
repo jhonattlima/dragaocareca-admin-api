@@ -714,13 +714,15 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
   try {
     const draftId = typeof req.body?.draftId === "string" ? req.body.draftId : undefined;
     const requestedEpisodeId = Number(req.body?.episodeId);
-    const draftCheck = checkTrailerVideoDraft(draftId, requestedEpisodeId, req.user?.email ?? "", { allowStaged: true });
-    if (!draftCheck.ok) {
+    const draftCheck = draftId !== undefined
+      ? checkTrailerVideoDraft(draftId, requestedEpisodeId, req.user?.email ?? "", { allowStaged: true })
+      : null;
+    if (draftCheck && !draftCheck.ok) {
       res.status(draftCheck.status).json({ message: draftCheck.message });
       return;
     }
     const payload = episodeSchema.parse(req.body);
-    if (payload.episodeId !== draftCheck.reservation.episodeId) {
+    if (draftCheck && payload.episodeId !== draftCheck.reservation.episodeId) {
       res.status(403).json({ message: "Episode draft reservation does not match episodeId" });
       return;
     }
@@ -729,7 +731,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     let trailerVideoFinalized: EpisodeTrailerVideoUploadResponse | null = null;
     const trailerVideoStagingPath = getEpisodeMediaStagingPath(created.episodeId, "trailerVideo");
     const trailerVideoStaged = await fs.promises.access(trailerVideoStagingPath).then(() => true).catch(() => false);
-    if (trailerVideoStaged) {
+    if (draftCheck && trailerVideoStaged) {
       const promoted = await replaceEpisodeTrailerVideo(created.episodeId, trailerVideoStagingPath);
       if (promoted) {
         trailerVideoFinalized = {
@@ -755,7 +757,9 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
 
     await queueLaunchNotification(created.episodeId);
 
-    consumeTrailerVideoDraft(draftCheck.reservation.draftId, created.episodeId, req.user?.email ?? "");
+    if (draftCheck) {
+      consumeTrailerVideoDraft(draftCheck.reservation.draftId, created.episodeId, req.user?.email ?? "");
+    }
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(created.episodeId)
       : episodeRepository.updateMedia(created.episodeId, mediaUpdates);

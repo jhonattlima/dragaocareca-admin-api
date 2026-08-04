@@ -137,6 +137,13 @@ const main = async (): Promise<void> => {
     });
     assert.equal(await fs.promises.readFile(getEpisodeMediaStagingPath(fixtureEpisodeId, "trailerVideo"), "utf8"), "draft-bytes");
 
+    const noVideoEpisodeId = fixtureEpisodeId + 2;
+    const noVideo = await invoke(router, "/", { body: { episodeId: noVideoEpisodeId, title: "Created without trailer video", summary: "", pubDate: "2026-01-01T00:00:00.000Z", explicit: "no", authors: [], guests: [], tags: [], citations: [], musicCredits: [], coverCredits: [] }, headers: {}, params: {} });
+    assert.equal(noVideo.response.statusCode, 201);
+    assert.equal((noVideo.response.jsonBody as any).episodeId, noVideoEpisodeId);
+    assert.equal((noVideo.response.jsonBody as any).trailerVideoFileName, undefined);
+    episodeRepository.delete(noVideoEpisodeId);
+
     const created = await invoke(router, "/", { body: { episodeId: fixtureEpisodeId, draftId: reservation.draftId, title: "Created trailer fixture", summary: "", pubDate: "2026-01-01T00:00:00.000Z", explicit: "no", authors: [], guests: [], tags: [], citations: [], musicCredits: [], coverCredits: [] }, headers: {}, params: {} });
     assert.equal(created.response.statusCode, 201);
     assert.equal((created.response.jsonBody as any).state, "finalized");
@@ -165,12 +172,13 @@ const main = async (): Promise<void> => {
     assert.equal(await fs.promises.readFile(finalPath, "utf8"), "replacement");
     assert.equal(await exists(rollbackStage), false);
 
-    const expired = await reserveTrailerVideoDraft(fixtureEpisodeId + 2, owner, new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
-    await fs.promises.mkdir(getEpisodeMediaStagingDirectory(fixtureEpisodeId + 2), { recursive: true });
-    await fs.promises.writeFile(getEpisodeMediaStagingPath(fixtureEpisodeId + 2, "trailerVideo"), "expired");
+    const expiredEpisodeId = fixtureEpisodeId + 3;
+    const expired = await reserveTrailerVideoDraft(expiredEpisodeId, owner, new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
+    await fs.promises.mkdir(getEpisodeMediaStagingDirectory(expiredEpisodeId), { recursive: true });
+    await fs.promises.writeFile(getEpisodeMediaStagingPath(expiredEpisodeId, "trailerVideo"), "expired");
     await cleanupExpiredTrailerVideoDrafts();
     assert.equal(episodeRepository.findTrailerVideoDraft(expired.draftId)?.state, "expired");
-    assert.equal(await exists(getEpisodeMediaStagingDirectory(fixtureEpisodeId + 2)), false);
+    assert.equal(await exists(getEpisodeMediaStagingDirectory(expiredEpisodeId)), false);
 
     assert.equal(/youtube/i.test((await fs.promises.readFile(path.resolve(process.cwd(), "src/routes/episodes.routes.ts"), "utf8"))), false);
     console.log("verified trailer-video reservation, auth, staging, create promotion, validation, rollback, expiry cleanup, and no-YouTube route boundary");
@@ -179,7 +187,7 @@ const main = async (): Promise<void> => {
     config.media.trailerVideoMaxBytes = 500 * 1024 * 1024;
     episodeRepository.delete(fixtureEpisodeId);
     episodeRepository.delete(replacementEpisodeId);
-    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id IN (?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2);
+    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id IN (?, ?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2, fixtureEpisodeId + 3);
     await fs.promises.rm(path.dirname(getEpisodeMediaFinalPath(fixtureEpisodeId, "trailerVideo")), { recursive: true, force: true });
   }
 };
