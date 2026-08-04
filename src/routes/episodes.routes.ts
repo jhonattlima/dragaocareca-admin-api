@@ -37,7 +37,7 @@ import {
   getEpisodeMediaStagingPath,
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
-import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft } from "../services/episode-draft-reservation.service";
+import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -711,6 +711,7 @@ episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {
 
 episodesRouter.post("/", requireAuth, async (req, res, next) => {
   let createdEpisodeId: number | null = null;
+  let draftForRetry: { draftId: string; episodeId: number; ownerEmail: string } | null = null;
   try {
     const draftId = typeof req.body?.draftId === "string" ? req.body.draftId : undefined;
     const requestedEpisodeId = Number(req.body?.episodeId);
@@ -725,6 +726,13 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     if (draftCheck && payload.episodeId !== draftCheck.reservation.episodeId) {
       res.status(403).json({ message: "Episode draft reservation does not match episodeId" });
       return;
+    }
+    if (draftCheck) {
+      draftForRetry = {
+        draftId: draftCheck.reservation.draftId,
+        episodeId: draftCheck.reservation.episodeId,
+        ownerEmail: req.user?.email ?? "",
+      };
     }
     const created = episodeRepository.create(payload);
     createdEpisodeId = created.episodeId;
@@ -756,21 +764,30 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     }
 
     await queueLaunchNotification(created.episodeId);
-
-    if (draftCheck) {
-      consumeTrailerVideoDraft(draftCheck.reservation.draftId, created.episodeId, req.user?.email ?? "");
-    }
     const finalDoc = Object.keys(mediaUpdates).length === 0
       ? episodeRepository.findByEpisodeId(created.episodeId)
       : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
+    if (!finalDoc) {
+      throw new Error("Episode could not be finalized");
+    }
+    if (draftCheck) {
+      const consumed = consumeTrailerVideoDraft(draftCheck.reservation.draftId, created.episodeId, req.user?.email ?? "");
+      if (!consumed.ok) {
+        throw new Error(consumed.message);
+      }
+      draftForRetry = null;
+    }
     queueCoverMosaicRefresh();
-    res.status(201).json({ ...(finalDoc ?? created), ...(trailerVideoFinalized ?? {}) });
+    res.status(201).json({ ...finalDoc, ...(trailerVideoFinalized ?? {}) });
   } catch (error) {
     if (createdEpisodeId !== null) {
       // A failed create must not leave a partially persisted row. The reservation
       // remains owner-bound so a retained staged file can be retried safely.
       episodeRepository.delete(createdEpisodeId);
       await fs.promises.rm(getEpisodeMediaFinalPath(createdEpisodeId, "trailerVideo"), { force: true }).catch(() => undefined);
+    }
+    if (draftForRetry) {
+      restoreTrailerVideoDraftForRetry(draftForRetry.draftId, draftForRetry.episodeId, draftForRetry.ownerEmail);
     }
     next(error);
   }

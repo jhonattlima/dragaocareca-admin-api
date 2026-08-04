@@ -25,6 +25,7 @@ export const replaceEpisodeTrailerVideo = async (
   const finalPath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
   const preparedPath = temporaryReplacementPath(finalPath, "upload");
   const previousPath = temporaryReplacementPath(finalPath, "previous");
+  const restorePath = temporaryReplacementPath(finalPath, "restore");
   let previousCopied = false;
   let promoted = false;
 
@@ -64,10 +65,13 @@ export const replaceEpisodeTrailerVideo = async (
     return updated;
   } catch (error) {
     if (promoted) {
-      await fs.promises.rm(finalPath, { force: true }).catch(() => undefined);
       if (previousCopied) {
-        await fs.promises.rename(previousPath, finalPath).catch(() => undefined);
-        previousCopied = false;
+        // Rename a prepared copy over the promoted file so a failed metadata write
+        // never leaves a window where the known-good canonical file is absent.
+        await fs.promises.copyFile(previousPath, restorePath);
+        await fs.promises.rename(restorePath, finalPath);
+      } else {
+        await fs.promises.rm(finalPath, { force: true });
       }
     }
     throw error;
@@ -76,6 +80,7 @@ export const replaceEpisodeTrailerVideo = async (
       await fs.promises.rm(stagedFilePath, { force: true }).catch(() => undefined);
     }
     await fs.promises.rm(preparedPath, { force: true }).catch(() => undefined);
+    await fs.promises.rm(restorePath, { force: true }).catch(() => undefined);
     if (previousCopied) {
       await fs.promises.rm(previousPath, { force: true }).catch(() => undefined);
     }

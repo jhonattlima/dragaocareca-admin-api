@@ -7,6 +7,14 @@ const RESERVATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 const normalizeOwner = (email: string): string => email.trim().toLowerCase();
 
+const normalizedOwnerOrThrow = (email: string): string => {
+  const owner = normalizeOwner(email);
+  if (!owner) {
+    throw new Error("Episode draft reservation requires an authenticated owner");
+  }
+  return owner;
+};
+
 export const cleanupExpiredTrailerVideoDrafts = async (now = new Date()): Promise<void> => {
   for (const draft of episodeRepository.expireTrailerVideoDrafts(now)) {
     await cleanupEpisodeMediaStaging(draft.episodeId).catch(() => undefined);
@@ -15,6 +23,7 @@ export const cleanupExpiredTrailerVideoDrafts = async (now = new Date()): Promis
 
 export const reserveTrailerVideoDraft = async (episodeId: number, ownerEmail: string, now = new Date()): Promise<EpisodeTrailerVideoDraftDto> => {
   await cleanupExpiredTrailerVideoDrafts(now);
+  const owner = normalizedOwnerOrThrow(ownerEmail);
   if (episodeRepository.findByEpisodeId(episodeId)) {
     throw new Error("Episode already exists");
   }
@@ -24,7 +33,7 @@ export const reserveTrailerVideoDraft = async (episodeId: number, ownerEmail: st
   const reservation: EpisodeTrailerVideoDraftReservation = {
     draftId: randomUUID(),
     episodeId,
-    ownerEmail: normalizeOwner(ownerEmail),
+    ownerEmail: owner,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS).toISOString(),
     state: "reserved",
@@ -50,6 +59,15 @@ export const checkTrailerVideoDraft = (draftId: unknown, episodeId: number, owne
 export const consumeTrailerVideoDraft = (draftId: string, episodeId: number, ownerEmail: string): TrailerDraftCheck => {
   const checked = checkTrailerVideoDraft(draftId, episodeId, ownerEmail, { allowStaged: true });
   if (!checked.ok) return checked;
-  if (!episodeRepository.updateTrailerVideoDraftState(draftId, "consumed")) return { ok: false, status: 409, message: "Episode draft reservation could not be consumed" };
+  if (!episodeRepository.consumeTrailerVideoDraft(draftId, episodeId, normalizeOwner(ownerEmail))) {
+    return { ok: false, status: 409, message: "Episode draft reservation could not be consumed" };
+  }
   return checked;
+};
+
+export const restoreTrailerVideoDraftForRetry = (draftId: string, episodeId: number, ownerEmail: string): void => {
+  const owner = normalizeOwner(ownerEmail);
+  if (owner) {
+    episodeRepository.restoreTrailerVideoDraftForRetry(draftId, episodeId, owner);
+  }
 };

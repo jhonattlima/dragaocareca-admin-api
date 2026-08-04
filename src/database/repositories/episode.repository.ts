@@ -553,6 +553,27 @@ export const episodeRepository = {
   updateTrailerVideoDraftState(draftId: string, state: EpisodeTrailerVideoDraftLifecycle): boolean {
     return getDb().prepare("UPDATE episode_trailer_video_drafts SET state = ? WHERE draft_id = ?").run(state, draftId).changes > 0;
   },
+  consumeTrailerVideoDraft(draftId: string, episodeId: number, ownerEmail: string, now = new Date()): boolean {
+    return getDb().prepare(`
+      UPDATE episode_trailer_video_drafts
+      SET state = 'consumed'
+      WHERE draft_id = ?
+        AND episode_id = ?
+        AND owner_email = ?
+        AND state IN ('reserved', 'staged')
+        AND datetime(expires_at) > datetime(?)
+    `).run(draftId, episodeId, ownerEmail, now.toISOString()).changes > 0;
+  },
+  restoreTrailerVideoDraftForRetry(draftId: string, episodeId: number, ownerEmail: string): boolean {
+    return getDb().prepare(`
+      UPDATE episode_trailer_video_drafts
+      SET state = 'reserved'
+      WHERE draft_id = ?
+        AND episode_id = ?
+        AND owner_email = ?
+        AND state IN ('reserved', 'staged')
+    `).run(draftId, episodeId, ownerEmail).changes > 0;
+  },
   expireTrailerVideoDrafts(now = new Date()): EpisodeTrailerVideoDraftReservation[] {
     const rows = getDb().prepare(`
       SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
