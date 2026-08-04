@@ -165,8 +165,57 @@ CREATE TABLE IF NOT EXISTS episode_trailer_video_drafts (
   state TEXT NOT NULL CHECK (state IN ('reserved', 'staged', 'consumed', 'expired'))
 );
 
+-- D-08: durable, server-only coordination state for the private-first
+-- trailer-video upload lifecycle. Source evidence is canonical relative media
+-- metadata, never a browser-supplied or absolute filesystem path.
+CREATE TABLE IF NOT EXISTS youtube_trailer_jobs (
+  job_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  source_file_name TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  source_bytes INTEGER NOT NULL CHECK (source_bytes > 0),
+  source_captured_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'claimed', 'transferring', 'processing', 'ready', 'failed', 'cancel_requested', 'cancelled', 'obsolete')),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  worker_lease_id TEXT,
+  lease_claimed_at TEXT,
+  lease_heartbeat_at TEXT,
+  session_uri TEXT,
+  confirmed_bytes INTEGER NOT NULL DEFAULT 0 CHECK (confirmed_bytes >= 0),
+  provider_video_id TEXT,
+  provider_privacy_status TEXT,
+  provider_upload_status TEXT,
+  provider_processing_status TEXT,
+  provider_processing_parts_processed INTEGER,
+  provider_processing_parts_total INTEGER,
+  provider_processing_time_left_ms INTEGER,
+  provider_checked_at TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+  next_attempt_at TEXT,
+  error_category TEXT,
+  error_message TEXT,
+  error_reason TEXT,
+  error_http_status INTEGER,
+  error_at TEXT,
+  cancel_requested_at TEXT,
+  cancelled_at TEXT,
+  cancellation_boundary TEXT,
+  obsolete_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_episode_trailer_video_drafts_expiry
   ON episode_trailer_video_drafts(state, expires_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_active_source
+  ON youtube_trailer_jobs(episode_id, source_file_name, source_sha256, source_bytes)
+  WHERE status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested');
+CREATE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_recovery
+  ON youtube_trailer_jobs(status, next_attempt_at, lease_heartbeat_at, created_at, job_id);
+CREATE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_episode_source
+  ON youtube_trailer_jobs(episode_id, source_file_name, source_sha256, source_bytes, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_artifact_jobs_active_selector
   ON artifact_jobs(episode_id, selector_key, status);
@@ -307,6 +356,7 @@ export const getDb = (): DatabaseSync => {
     ensureEpisodeTrailerVideoColumns(db);
     ensureArtifactJobColumns(db);
     ensureEpisodeTrailerVideoDraftTable(db);
+    ensureYoutubeTrailerJobColumns(db);
   }
   return db;
 };
@@ -370,4 +420,100 @@ const ensureArtifactJobColumns = (database: DatabaseSync): void => {
   if (!columnNames.has("source_evidence_json")) {
     database.exec("ALTER TABLE artifact_jobs ADD COLUMN source_evidence_json TEXT NOT NULL DEFAULT '[]';");
   }
+};
+
+const ensureYoutubeTrailerJobColumns = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS youtube_trailer_jobs (
+      job_id TEXT PRIMARY KEY,
+      episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+      source_file_name TEXT NOT NULL,
+      source_sha256 TEXT NOT NULL,
+      source_bytes INTEGER NOT NULL DEFAULT 1,
+      source_captured_at TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'queued',
+      revision INTEGER NOT NULL DEFAULT 0,
+      worker_lease_id TEXT,
+      lease_claimed_at TEXT,
+      lease_heartbeat_at TEXT,
+      session_uri TEXT,
+      confirmed_bytes INTEGER NOT NULL DEFAULT 0,
+      provider_video_id TEXT,
+      provider_privacy_status TEXT,
+      provider_upload_status TEXT,
+      provider_processing_status TEXT,
+      provider_processing_parts_processed INTEGER,
+      provider_processing_parts_total INTEGER,
+      provider_processing_time_left_ms INTEGER,
+      provider_checked_at TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT,
+      error_category TEXT,
+      error_message TEXT,
+      error_reason TEXT,
+      error_http_status INTEGER,
+      error_at TEXT,
+      cancel_requested_at TEXT,
+      cancelled_at TEXT,
+      cancellation_boundary TEXT,
+      obsolete_at TEXT,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      completed_at TEXT
+    );
+  `);
+
+  const columns = database.prepare("PRAGMA table_info(youtube_trailer_jobs)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  const additions = [
+    ["source_file_name", "TEXT NOT NULL DEFAULT ''"],
+    ["source_sha256", "TEXT NOT NULL DEFAULT ''"],
+    ["source_bytes", "INTEGER NOT NULL DEFAULT 1"],
+    ["source_captured_at", "TEXT NOT NULL DEFAULT ''"],
+    ["status", "TEXT NOT NULL DEFAULT 'queued'"],
+    ["revision", "INTEGER NOT NULL DEFAULT 0"],
+    ["worker_lease_id", "TEXT"],
+    ["lease_claimed_at", "TEXT"],
+    ["lease_heartbeat_at", "TEXT"],
+    ["session_uri", "TEXT"],
+    ["confirmed_bytes", "INTEGER NOT NULL DEFAULT 0"],
+    ["provider_video_id", "TEXT"],
+    ["provider_privacy_status", "TEXT"],
+    ["provider_upload_status", "TEXT"],
+    ["provider_processing_status", "TEXT"],
+    ["provider_processing_parts_processed", "INTEGER"],
+    ["provider_processing_parts_total", "INTEGER"],
+    ["provider_processing_time_left_ms", "INTEGER"],
+    ["provider_checked_at", "TEXT"],
+    ["retry_count", "INTEGER NOT NULL DEFAULT 0"],
+    ["next_attempt_at", "TEXT"],
+    ["error_category", "TEXT"],
+    ["error_message", "TEXT"],
+    ["error_reason", "TEXT"],
+    ["error_http_status", "INTEGER"],
+    ["error_at", "TEXT"],
+    ["cancel_requested_at", "TEXT"],
+    ["cancelled_at", "TEXT"],
+    ["cancellation_boundary", "TEXT"],
+    ["obsolete_at", "TEXT"],
+    ["created_at", "TEXT NOT NULL DEFAULT ''"],
+    ["updated_at", "TEXT NOT NULL DEFAULT ''"],
+    ["completed_at", "TEXT"],
+  ] as const;
+
+  for (const [name, definition] of additions) {
+    if (!columnNames.has(name)) {
+      database.exec(`ALTER TABLE youtube_trailer_jobs ADD COLUMN ${name} ${definition};`);
+    }
+  }
+
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_active_source
+      ON youtube_trailer_jobs(episode_id, source_file_name, source_sha256, source_bytes)
+      WHERE status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested');
+    CREATE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_recovery
+      ON youtube_trailer_jobs(status, next_attempt_at, lease_heartbeat_at, created_at, job_id);
+    CREATE INDEX IF NOT EXISTS idx_youtube_trailer_jobs_episode_source
+      ON youtube_trailer_jobs(episode_id, source_file_name, source_sha256, source_bytes, created_at);
+  `);
 };
