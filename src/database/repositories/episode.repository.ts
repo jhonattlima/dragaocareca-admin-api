@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb, nowIso } from "../sqlite";
 import type { EpisodeInput, TrailerVideoSyncStatus } from "../../schemas/episode";
+import type { EpisodeTrailerVideoDraftLifecycle, EpisodeTrailerVideoDraftReservation } from "../../schemas/episode-draft-state";
 
 export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   id?: number;
@@ -527,6 +528,45 @@ const touchMediaRelations = (episodeId: number, values: EpisodeInput): void => {
 };
 
 export const episodeRepository = {
+  createTrailerVideoDraft(reservation: EpisodeTrailerVideoDraftReservation): void {
+    getDb().prepare(`
+      INSERT INTO episode_trailer_video_drafts (draft_id, episode_id, owner_email, created_at, expires_at, state)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(reservation.draftId, reservation.episodeId, reservation.ownerEmail, reservation.createdAt, reservation.expiresAt, reservation.state);
+  },
+  findTrailerVideoDraft(draftId: string): EpisodeTrailerVideoDraftReservation | null {
+    const row = getDb().prepare(`
+      SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
+        created_at AS createdAt, expires_at AS expiresAt, state
+      FROM episode_trailer_video_drafts WHERE draft_id = ?
+    `).get(draftId) as EpisodeTrailerVideoDraftReservation | undefined;
+    return row ? { ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle } : null;
+  },
+  findActiveTrailerVideoDraftByEpisodeId(episodeId: number): EpisodeTrailerVideoDraftReservation | null {
+    const row = getDb().prepare(`
+      SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
+        created_at AS createdAt, expires_at AS expiresAt, state
+      FROM episode_trailer_video_drafts WHERE episode_id = ? AND state IN ('reserved', 'staged')
+    `).get(episodeId) as EpisodeTrailerVideoDraftReservation | undefined;
+    return row ? { ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle } : null;
+  },
+  updateTrailerVideoDraftState(draftId: string, state: EpisodeTrailerVideoDraftLifecycle): boolean {
+    return getDb().prepare("UPDATE episode_trailer_video_drafts SET state = ? WHERE draft_id = ?").run(state, draftId).changes > 0;
+  },
+  expireTrailerVideoDrafts(now = new Date()): EpisodeTrailerVideoDraftReservation[] {
+    const rows = getDb().prepare(`
+      SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
+        created_at AS createdAt, expires_at AS expiresAt, state
+      FROM episode_trailer_video_drafts WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)
+    `).all(now.toISOString()) as EpisodeTrailerVideoDraftReservation[];
+    if (rows.length > 0) {
+      getDb().prepare("UPDATE episode_trailer_video_drafts SET state = 'expired' WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)").run(now.toISOString());
+    }
+    return rows.map((row) => ({ ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle }));
+  },
+  deleteTrailerVideoDraft(draftId: string): void {
+    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE draft_id = ?").run(draftId);
+  },
   listAll(): EpisodeRow[] {
     const rows = getDb().prepare("SELECT * FROM episodes ORDER BY datetime(pub_date) DESC, episode_id DESC").all() as SqliteEpisodeRow[];
     return rows.map(mapRow);

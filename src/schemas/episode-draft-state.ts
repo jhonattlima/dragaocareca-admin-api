@@ -1,5 +1,31 @@
 export type EpisodeDraftStepStatus = "idle" | "pending" | "processing" | "done" | "error";
 
+// Trailer-video draft reservations are intentionally separate from the AI/transcription
+// draft state below: the opaque token is an authenticated capability, not browser state.
+export type EpisodeTrailerVideoDraftLifecycle = "reserved" | "staged" | "consumed" | "expired";
+
+export type EpisodeTrailerVideoDraftReservation = {
+  draftId: string;
+  episodeId: number;
+  ownerEmail: string;
+  createdAt: string;
+  expiresAt: string;
+  state: EpisodeTrailerVideoDraftLifecycle;
+};
+
+export type EpisodeTrailerVideoDraftDto = Omit<EpisodeTrailerVideoDraftReservation, "ownerEmail" | "createdAt"> & {
+  state: "reserved";
+};
+
+export type EpisodeTrailerVideoUploadResponse = {
+  episodeId: number;
+  draftId: string | null;
+  state: "staged" | "finalized";
+  trailerVideoFileName: string | null;
+  trailerVideoSyncStatus?: "unpublished" | "manual-sync-required" | "synced";
+  message: string;
+};
+
 export type EpisodeDraftStepState = {
   status: EpisodeDraftStepStatus;
   version: number;

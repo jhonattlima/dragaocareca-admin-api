@@ -83,6 +83,10 @@ export const getEpisodeMediaFinalPath = (episodeId: number, kind: EpisodeMediaKi
 export const getEpisodeMediaStagingPath = (episodeId: number, kind: PersistedEpisodeMediaKind): string =>
   path.join(getEpisodeMediaStagingDirectory(episodeId), kindFileName(episodeId, kind));
 
+export const cleanupEpisodeMediaStaging = async (episodeId: number): Promise<void> => {
+  await fs.promises.rm(getEpisodeMediaStagingDirectory(episodeId), { recursive: true, force: true });
+};
+
 export const getEpisodeMediaBackupPath = (episodeId: number, kind: PersistedEpisodeMediaKind): string =>
   path.join(getEpisodeMediaBackupDirectory(episodeId), kindFileName(episodeId, kind));
 

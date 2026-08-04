@@ -156,6 +156,18 @@ CREATE TABLE IF NOT EXISTS artifact_jobs (
   expires_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS episode_trailer_video_drafts (
+  draft_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL UNIQUE,
+  owner_email TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('reserved', 'staged', 'consumed', 'expired'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_episode_trailer_video_drafts_expiry
+  ON episode_trailer_video_drafts(state, expires_at);
+
 CREATE INDEX IF NOT EXISTS idx_artifact_jobs_active_selector
   ON artifact_jobs(episode_id, selector_key, status);
 CREATE INDEX IF NOT EXISTS idx_artifact_jobs_pending_fifo
@@ -294,8 +306,24 @@ export const getDb = (): DatabaseSync => {
     ensureEpisodeTranscriptColumns(db);
     ensureEpisodeTrailerVideoColumns(db);
     ensureArtifactJobColumns(db);
+    ensureEpisodeTrailerVideoDraftTable(db);
   }
   return db;
+};
+
+const ensureEpisodeTrailerVideoDraftTable = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS episode_trailer_video_drafts (
+      draft_id TEXT PRIMARY KEY,
+      episode_id INTEGER NOT NULL UNIQUE,
+      owner_email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('reserved', 'staged', 'consumed', 'expired'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_episode_trailer_video_drafts_expiry
+      ON episode_trailer_video_drafts(state, expires_at);
+  `);
 };
 
 export const nowIso = (): string => new Date().toISOString();
