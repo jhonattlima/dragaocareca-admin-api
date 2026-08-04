@@ -24,11 +24,16 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   private sourceBytes = 0;
   private confirmedBytes = 0;
   private processingPolls = 0;
+  readonly events: string[] = [];
+  failAfterNextChunk = false;
 
-  async checkReadiness(): Promise<void> {}
+  async checkReadiness(): Promise<void> {
+    this.events.push("readiness");
+  }
 
   async beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession> {
     assert.ok(sourceBytes > 0, "fake provider requires a non-empty source");
+    this.events.push("begin-session");
     this.sourceBytes = sourceBytes;
     return { sessionUri: this.sessionUri, privacyStatus: "private" };
   }
@@ -36,6 +41,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   async resumeRange(sessionUri: string, sourceBytes: number) {
     this.assertSession(sessionUri);
     assert.equal(sourceBytes, this.sourceBytes, "fake provider source bytes must match");
+    this.events.push(`resume:${this.confirmedBytes}`);
     return {
       confirmedBytes: this.confirmedBytes,
       providerVideoId: null,
@@ -49,6 +55,11 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     assert.equal(offset, this.confirmedBytes, "fake provider only accepts resumed offsets");
     assert.ok(chunk.length > 0, "fake provider requires a non-empty chunk");
     this.confirmedBytes = Math.min(this.sourceBytes, this.confirmedBytes + chunk.length);
+    this.events.push(`chunk:${offset}-${this.confirmedBytes}`);
+    if (this.failAfterNextChunk) {
+      this.failAfterNextChunk = false;
+      throw new Error("simulated interrupted chunk response");
+    }
     return {
       confirmedBytes: this.confirmedBytes,
       providerVideoId: this.confirmedBytes === this.sourceBytes ? this.providerVideoId : null,
@@ -57,6 +68,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
 
   async pollProcessing(providerVideoId: string): Promise<YoutubeTrailerProcessingState> {
     assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
+    this.events.push("poll-processing");
     this.processingPolls += 1;
     return {
       privacyStatus: "private",
@@ -70,6 +82,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
 
   async cancel(sessionUri: string, providerVideoId: string | null): Promise<YoutubeTrailerCancellationResult> {
     this.assertSession(sessionUri);
+    this.events.push("cancel");
     if (providerVideoId) {
       assert.equal(providerVideoId, this.providerVideoId, "fake provider video ID must match");
       return { accepted: false, boundary: "provider-video-retained" };
@@ -165,6 +178,46 @@ const verifyWorkerFocus = async (): Promise<void> => {
   });
 };
 
+const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
+  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, requestYoutubeTrailerJobCancellation }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+    import("../database/sqlite.js"),
+    import("../services/youtube-trailer-job.service.js"),
+    import("../workers/youtube-trailer-job.worker.js"),
+  ]);
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(16, "Worker fixture", "2026-08-04T00:00:00.000Z");
+  const trailerPath = path.join(fixture.mediaRoot, "episodes", "16", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+  await fs.promises.writeFile(trailerPath, Buffer.from("fakedata"));
+
+  const job = await createYoutubeTrailerJob(16);
+  const provider = new FakeYoutubeTrailerUploadProvider();
+  provider.failAfterNextChunk = true;
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: true });
+  const interrupted = getYoutubeTrailerJob(16, job.jobId);
+  assert.equal(interrupted?.status, "queued", "interrupted transfer must become retryable after session persistence");
+  assert.ok(interrupted?.sessionUri, "session URI must persist before a chunk can be attempted");
+  assert.deepEqual(provider.events.slice(0, 4), ["readiness", "begin-session", "resume:0", "chunk:0-8"]);
+
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  const processing = getYoutubeTrailerJob(16, job.jobId);
+  assert.equal(processing?.status, "processing", "same persisted session must resume to private processing");
+  assert.ok(provider.events.includes("resume:8"), "recovery must query the provider Range before resuming");
+  assert.equal(processing?.providerVideoId, "fake-private-video-1");
+
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  const ready = getYoutubeTrailerJob(16, job.jobId);
+  assert.equal(ready?.status, "ready", "private processing completion must be polled separately from upload");
+
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(17, "Cancellation fixture", "2026-08-04T00:00:00.000Z");
+  const cancellationPath = path.join(fixture.mediaRoot, "episodes", "17", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(cancellationPath), { recursive: true });
+  await fs.promises.writeFile(cancellationPath, Buffer.from("cancelme"));
+  const cancellationJob = await createYoutubeTrailerJob(17);
+  assert.equal(requestYoutubeTrailerJobCancellation(17, cancellationJob.jobId)?.status, "cancel_requested");
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  assert.equal(getYoutubeTrailerJob(17, cancellationJob.jobId)?.cancellationBoundary, "local-cancelled");
+};
+
 const parseFocus = (argumentsList: string[]): YoutubeTrailerJobFocus | null => {
   const focusArgument = argumentsList.find((argument) => argument.startsWith("--focus="));
   if (!focusArgument) return null;
@@ -180,6 +233,8 @@ const main = async (): Promise<void> => {
   try {
     await verifyScaffoldIsolation(fixture);
     process.env.SQLITE_PATH = fixture.sqlitePath;
+    process.env.MEDIA_STORAGE_ROOT = fixture.mediaRoot;
+    process.env.YOUTUBE_TRAILER_JOB_CHUNK_BYTES = "4";
     const focus = parseFocus(process.argv.slice(2));
     if (focus === "repository") {
       const [{ youtubeTrailerJobRepository }, { getDb }] = await Promise.all([
@@ -190,7 +245,10 @@ const main = async (): Promise<void> => {
       await verifyRepositoryFocus(youtubeTrailerJobRepository);
       getDb().close();
     }
-    if (focus === "worker") await verifyWorkerFocus();
+    if (focus === "worker") {
+      await verifyWorkerFocus();
+      await verifyRealWorkerFocus(fixture);
+    }
     if (!focus) {
       console.log(`offline fake-provider scaffold verified; Plan 16-04 reserves: ${reservedLifecycleScenarios.join("; ")}`);
     } else {
