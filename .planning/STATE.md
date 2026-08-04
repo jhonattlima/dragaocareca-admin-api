@@ -5,15 +5,15 @@ milestone_name: Trailer Video Publishing
 current_phase: 16
 current_phase_name: draft-staging-and-private-youtube-job
 status: executing
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-08-04T21:59:51.991Z"
+stopped_at: Completed 16-05-PLAN.md
+last_updated: "2026-08-04T22:04:58.240Z"
 last_activity: 2026-08-04
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 6
 current_plan: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-04)
 ## Current Position
 
 Phase: 16 (draft-staging-and-private-youtube-job) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-04 — Phase 16 execution started
 
@@ -78,6 +78,8 @@ Recent decisions affecting current work:
 - [Milestone v1.4]: YouTube upload is a durable, API-owned private-first job; explicit public publication, title/hashtag metadata, and retention are separate concerns.
 - [Phase ?]: Consume a draft only after all durable create, media, metadata, and post-create steps succeed.
 - [Phase ?]: Use a conditional repository transition to bind consumption to the exact owner, episode, active state, and expiry.
+- [Phase ?]: Keep the lifecycle foundation entirely local: it reads only NODE_ENV and uses no OAuth configuration or network client.
+- [Phase ?]: Expose deterministic repository and worker focus branches now so later plans extend real contracts instead of deferring coverage.
 
 ### Pending Todos
 
@@ -108,8 +110,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-04T21:59:51.984Z
-Stopped at: Completed 16-01-PLAN.md
+Last session: 2026-08-04T22:04:58.233Z
+Stopped at: Completed 16-05-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -132,6 +134,7 @@ Resume file: None
 | Phase 15-final-trailer-video-artifact P03 | 12min | 2 tasks | 4 files |
 | Phase 15 P04 | 34min | 2 tasks | 5 files |
 | Phase 16-draft-staging-and-private-youtube-job P01 | 4min | 2 tasks | 5 files |
+| Phase 16 P05 | 3min | 2 tasks | 2 files |
 
 ## Operator Next Steps
 
