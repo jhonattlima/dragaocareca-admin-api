@@ -82,7 +82,7 @@ status: complete
 
 ## Task Commits
 
-1. **Task 1: Add protected private-job start, status, and cancel contracts** - `b11d71c` (feat)
+1. **Task 1: Add protected private-job start, status, and cancel contracts** - `b11d71c` (feat), `899fd7e` (fix)
 2. **Task 2: Build the fake-provider lifecycle verifier and close draft lifecycle coverage** - `17f5172` (test)
 
 ## Files Created/Modified
@@ -120,9 +120,17 @@ status: complete
 - **Verification:** `npm run verify:trailer-video-upload-lifecycle`
 - **Committed in:** `17f5172`
 
+**3. [Rule 1 - Bug] Aligned missing trailer-source behavior with the documented 404 contract**
+- **Found during:** Final Task 2 contract verification
+- **Issue:** The start route allowed the service's missing-source error to reach generic middleware as a 400, while OpenAPI correctly documented a 404.
+- **Fix:** Returned the safe 404 response directly and added an offline direct-router assertion.
+- **Files modified:** `src/routes/episodes.routes.ts`, `src/scripts/verify-youtube-trailer-job-lifecycle.ts`
+- **Verification:** `npm run verify:youtube-trailer-job-lifecycle`
+- **Committed in:** `899fd7e`
+
 ---
 
-**Total deviations:** 2 auto-fixed (1 missing critical functionality, 1 bug)
+**Total deviations:** 3 auto-fixed (1 missing critical functionality, 2 bugs)
 **Impact on plan:** Both changes enforce the planned protected-contract and regression-verification requirements without expanding into public publishing or live provider scope.
 
 ## Known Stubs
@@ -153,7 +161,7 @@ None. Keep `YOUTUBE_TRAILER_JOB_ENABLED` disabled until the separate Plan 16-06 
 ## Self-Check: PASSED
 
 - Verified all six modified implementation/verifier files and this summary exist.
-- Verified task commits `b11d71c` and `17f5172` exist in Git history.
+- Verified task commits `b11d71c`, `17f5172`, and `899fd7e` exist in Git history.
 
 ---
 *Phase: 16-draft-staging-and-private-youtube-job*
