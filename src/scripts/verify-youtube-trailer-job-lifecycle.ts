@@ -353,6 +353,8 @@ const verifyProtectedRouteAndOpenApiFocus = async (fixture: Fixture): Promise<vo
 
   const invalidStart = await invokeProtectedRoute(router, "post", startPath, request({ sourcePath: "/tmp/forbidden" }));
   assert.equal(invalidStart.response.statusCode, 400, "start must reject client source/path input");
+  const missingSource = await invokeProtectedRoute(router, "post", startPath, { ...request(undefined), params: { episodeId: "23" } });
+  assert.equal(missingSource.response.statusCode, 404, "missing canonical trailer source must not use a generic validation error");
   const started = await invokeProtectedRoute(router, "post", startPath, request(undefined));
   assert.equal(started.response.statusCode, 202);
   assert.equal(started.response.headers.get("cache-control"), "no-store");

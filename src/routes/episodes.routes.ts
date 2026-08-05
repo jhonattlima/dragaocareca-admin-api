@@ -728,6 +728,10 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs", noStoreYoutubeTrailerJob
     res.setHeader("Location", `/v1/episodes/${episodeId}/youtube-trailer-jobs/${job.jobId}`);
     res.status(job.status === "queued" ? 202 : 200).json(toYoutubeTrailerJobStatusDto(job));
   } catch (error) {
+    if (error instanceof Error && error.message === "Final trailer-video source is missing") {
+      res.status(404).json({ message: "Final trailer-video source is missing" });
+      return;
+    }
     next(error);
   }
 });
