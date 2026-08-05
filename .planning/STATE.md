@@ -5,15 +5,15 @@ milestone_name: Trailer Video Publishing
 current_phase: 16
 current_phase_name: draft-staging-and-private-youtube-job
 status: executing
-stopped_at: Completed 16-03-PLAN.md
-last_updated: "2026-08-04T22:37:15.289Z"
+stopped_at: Completed 16-04-PLAN.md
+last_updated: "2026-08-05T21:55:09.364Z"
 last_activity: 2026-08-04
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
 current_plan: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-04)
 ## Current Position
 
 Phase: 16 (draft-staging-and-private-youtube-job) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-08-04 — Phase 16 execution started
 
@@ -86,6 +86,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Keep private resumable sessions, provider IDs, OAuth tokens, and raw responses inside internal provider/service types.
 - [Phase ?]: A local cancellation after any accepted bytes or provider video reports provider-video-retained, never a claimed remote rollback.
 - [Phase ?]: Only enable the live worker with YOUTUBE_TRAILER_JOB_ENABLED=true after the Plan 16-06 human OAuth/channel checkpoint.
+- [Phase ?]: Expose private trailer jobs through a safe DTO allowlist; provider/session/source internals remain service-only.
 
 ### Pending Todos
 
@@ -116,8 +117,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-04T22:37:15.283Z
-Stopped at: Completed 16-03-PLAN.md
+Last session: 2026-08-05T21:55:09.356Z
+Stopped at: Completed 16-04-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -143,6 +144,7 @@ Resume file: None
 | Phase 16 P05 | 3min | 2 tasks | 2 files |
 | Phase 16 P02 | 8min | 2 tasks | 3 files |
 | Phase 16 P03 | 11min | 2 tasks | 9 files |
+| Phase 16 P04 | 5min | 2 tasks | 6 files |
 
 ## Operator Next Steps
 
