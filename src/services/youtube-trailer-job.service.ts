@@ -18,6 +18,67 @@ type ProcessOptions = {
   provider?: YoutubeTrailerUploadProvider;
 };
 
+export type YoutubeTrailerJobStatusDto = {
+  jobId: string;
+  episodeId: number;
+  status: YoutubeTrailerJobRow["status"];
+  progress: {
+    confirmedBytes: number;
+    totalBytes: number;
+    processingPartsProcessed: number | null;
+    processingPartsTotal: number | null;
+    processingTimeLeftMs: number | null;
+  };
+  cancellation: {
+    requestedAt: string | null;
+    cancelledAt: string | null;
+    boundary: string | null;
+  };
+  error: {
+    category: string | null;
+    occurredAt: string | null;
+  };
+  retry: {
+    count: number;
+    nextAttemptAt: string | null;
+  };
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+// Deliberately map only operator-safe lifecycle state. Provider identifiers,
+// resumable session locations, source evidence, raw provider details, and
+// worker lease data stay internal to the service/repository boundary.
+export const toYoutubeTrailerJobStatusDto = (job: YoutubeTrailerJobRow): YoutubeTrailerJobStatusDto => ({
+  jobId: job.jobId,
+  episodeId: job.episodeId,
+  status: job.status,
+  progress: {
+    confirmedBytes: job.confirmedBytes,
+    totalBytes: job.sourceBytes,
+    processingPartsProcessed: job.providerProcessingPartsProcessed,
+    processingPartsTotal: job.providerProcessingPartsTotal,
+    processingTimeLeftMs: job.providerProcessingTimeLeftMs,
+  },
+  cancellation: {
+    requestedAt: job.cancelRequestedAt,
+    cancelledAt: job.cancelledAt,
+    boundary: job.cancellationBoundary,
+  },
+  error: {
+    category: job.errorCategory,
+    occurredAt: job.errorAt,
+  },
+  retry: {
+    count: job.retryCount,
+    nextAttemptAt: job.nextAttemptAt,
+  },
+  createdAt: job.createdAt,
+  updatedAt: job.updatedAt,
+  completedAt: job.completedAt,
+});
+
 const sourceForJob = (job: YoutubeTrailerJobRow): YoutubeTrailerSource => ({
   episodeId: job.episodeId,
   sourceFileName: job.sourceFileName,

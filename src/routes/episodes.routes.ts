@@ -38,6 +38,12 @@ import {
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
+import {
+  createYoutubeTrailerJob,
+  getYoutubeTrailerJob,
+  requestYoutubeTrailerJobCancellation,
+  toYoutubeTrailerJobStatusDto,
+} from "../services/youtube-trailer-job.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -61,9 +67,17 @@ const noStoreArtifactPreparation: RequestHandler = (_req, res, next) => {
   next();
 };
 
+const noStoreYoutubeTrailerJobs: RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
 const artifactJobRequestSchema = z.object({
   artifacts: z.array(z.enum(["episode", "trailer", "trailer-video", "transcript", "image", "image-low"])).min(1).optional(),
 }).strict().optional();
+
+const youtubeTrailerJobStartSchema = z.object({}).strict().optional();
+const youtubeTrailerJobIdSchema = z.uuid();
 
 // D-01/D-02/D-03/D-08/D-09/D-10/D-11: the route boundary owns auth, canonical
 // selector validation, preflight availability, opaque job lookup, and safe delivery.
@@ -690,6 +704,81 @@ episodesRouter.get("/:episodeId/artifacts/jobs/:jobId/download", noStoreArtifact
     });
     logArtifactPreparation({ event: "downloaded", episodeId, selectors: download.status.requested });
     download.stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Private YouTube transfer is a durable, API-owned lifecycle. These endpoints
+// intentionally expose no public-publish, metadata, provider, or filesystem
+// controls; operators can only start, poll, and request cancellation.
+episodesRouter.post("/:episodeId/youtube-trailer-jobs", noStoreYoutubeTrailerJobs, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (!youtubeTrailerJobStartSchema.safeParse(req.body).success) {
+      res.status(400).json({ message: "Request body must be empty when supplied" });
+      return;
+    }
+
+    const job = await createYoutubeTrailerJob(episodeId);
+    res.setHeader("Location", `/v1/episodes/${episodeId}/youtube-trailer-jobs/${job.jobId}`);
+    res.status(job.status === "queued" ? 202 : 200).json(toYoutubeTrailerJobStatusDto(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/youtube-trailer-jobs/:jobId", noStoreYoutubeTrailerJobs, requireAuth, (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const parsedJobId = youtubeTrailerJobIdSchema.safeParse(req.params.jobId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (!parsedJobId.success) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+
+    const job = getYoutubeTrailerJob(episodeId, parsedJobId.data);
+    if (!job) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    res.json(toYoutubeTrailerJobStatusDto(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/cancel", noStoreYoutubeTrailerJobs, requireAuth, (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const parsedJobId = youtubeTrailerJobIdSchema.safeParse(req.params.jobId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (!parsedJobId.success) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    if (!youtubeTrailerJobStartSchema.safeParse(req.body).success) {
+      res.status(400).json({ message: "Request body must be empty when supplied" });
+      return;
+    }
+
+    const job = requestYoutubeTrailerJobCancellation(episodeId, parsedJobId.data);
+    if (!job) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    res.status(202).json(toYoutubeTrailerJobStatusDto(job));
   } catch (error) {
     next(error);
   }

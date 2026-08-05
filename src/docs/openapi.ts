@@ -89,6 +89,41 @@ export const swaggerSpec = swaggerJsdoc({
             updatedAt: { type: "string", format: "date-time" },
           },
         },
+        YoutubeTrailerJobSnapshot: {
+          type: "object",
+          description: "Safe protected snapshot for an API-owned private YouTube trailer transfer. Provider credentials, resumable session locations, provider identifiers, raw provider responses/errors, source fingerprints, and filesystem paths are never returned.",
+          required: ["jobId", "episodeId", "status", "progress", "cancellation", "error", "retry", "createdAt", "updatedAt", "completedAt"],
+          properties: {
+            jobId: { type: "string", format: "uuid", description: "Opaque durable job identifier." },
+            episodeId: { type: "integer", minimum: 1 },
+            status: { type: "string", enum: ["queued", "claimed", "transferring", "processing", "ready", "failed", "cancel_requested", "cancelled", "obsolete"] },
+            progress: {
+              type: "object",
+              required: ["confirmedBytes", "totalBytes", "processingPartsProcessed", "processingPartsTotal", "processingTimeLeftMs"],
+              properties: {
+                confirmedBytes: { type: "integer", minimum: 0, description: "Durably confirmed server-to-provider bytes, not browser upload progress." },
+                totalBytes: { type: "integer", minimum: 0 },
+                processingPartsProcessed: { type: "integer", minimum: 0, nullable: true },
+                processingPartsTotal: { type: "integer", minimum: 0, nullable: true },
+                processingTimeLeftMs: { type: "integer", minimum: 0, nullable: true },
+              },
+            },
+            cancellation: {
+              type: "object",
+              required: ["requestedAt", "cancelledAt", "boundary"],
+              properties: {
+                requestedAt: { type: "string", format: "date-time", nullable: true },
+                cancelledAt: { type: "string", format: "date-time", nullable: true },
+                boundary: { type: "string", enum: ["local-cancelled", "provider-video-retained"], nullable: true, description: "provider-video-retained means provider acceptance may have occurred; local cancellation does not claim remote deletion." },
+              },
+            },
+            error: { type: "object", required: ["category", "occurredAt"], properties: { category: { type: "string", nullable: true, description: "Normalized error category only; raw provider messages and responses are withheld." }, occurredAt: { type: "string", format: "date-time", nullable: true } } },
+            retry: { type: "object", required: ["count", "nextAttemptAt"], properties: { count: { type: "integer", minimum: 0 }, nextAttemptAt: { type: "string", format: "date-time", nullable: true } } },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+            completedAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
         PublicEpisodeCatalogGuest: {
           type: "object",
           required: ["name"],
@@ -807,6 +842,44 @@ export const swaggerSpec = swaggerJsdoc({
             "404": { description: "`{ message: \"Artifact job not found\" }` for an unknown, expired, or mismatched job." },
             "409": { description: "`{ message: \"Artifact archive is not ready\" }` while pending, processing, or failed." },
           },
+        },
+      },
+      "/v1/episodes/{episodeId}/youtube-trailer-jobs": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Start or reuse a private trailer-video transfer job",
+          description: "Creates one durable API-owned private-first YouTube job for the current canonical final trailer source, or reuses its active job. This operation never publishes a video, changes metadata, stores a public URL, or manages retention. Cache-Control is no-store.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." }],
+          requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, maxProperties: 0 } } } },
+          responses: {
+            "200": { description: "An active job for the current finalized source was reused.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } }, Location: { schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } },
+            "202": { description: "A private-first job was queued.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } }, Location: { schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } },
+            "400": { description: "Invalid episodeId or non-empty/unknown request body." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "404": { description: "Final trailer-video source is unavailable." },
+          },
+        },
+      },
+      "/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}": {
+        get: {
+          tags: ["Episodes"],
+          summary: "Poll a private trailer-video transfer job",
+          description: "Returns only sanitized durable lifecycle/progress/cancellation state. It never exposes OAuth/session data, provider identifiers or raw failures, source fingerprints, or filesystem paths. Cache-Control is no-store.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }, { name: "jobId", in: "path", required: true, schema: { type: "string", format: "uuid" }, description: "Opaque job identifier." }],
+          responses: { "200": { description: "Safe private-job snapshot.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } }, "400": { description: "Invalid episodeId." }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "`{ message: \"YouTube trailer job not found\" }` for unknown, invalid, or episode-mismatched jobs." } },
+        },
+      },
+      "/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/cancel": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Request cancellation of a private trailer-video transfer job",
+          description: "Requests durable local cancellation. Before provider acceptance it may stop locally; after accepted bytes or a provider video it reports provider-video-retained and never claims remote rollback or deletion. Cache-Control is no-store.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }, { name: "jobId", in: "path", required: true, schema: { type: "string", format: "uuid" }, description: "Opaque job identifier." }],
+          requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, maxProperties: 0 } } } },
+          responses: { "202": { description: "Cancellation was recorded; poll the safe status snapshot for its final boundary.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } }, "400": { description: "Invalid episodeId or non-empty/unknown request body." }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "`{ message: \"YouTube trailer job not found\" }` for unknown, invalid, or episode-mismatched jobs." } },
         },
       },
       "/v1/episodes/{episodeId}": {
