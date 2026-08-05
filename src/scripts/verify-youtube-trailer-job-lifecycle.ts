@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import type {
   YoutubeTrailerCancellationResult,
   YoutubeTrailerPrivateSession,
@@ -26,9 +27,14 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   private processingPolls = 0;
   readonly events: string[] = [];
   failAfterNextChunk = false;
+  failReadiness = false;
 
   async checkReadiness(): Promise<void> {
     this.events.push("readiness");
+    if (this.failReadiness) {
+      this.failReadiness = false;
+      throw new Error("simulated missing youtube.upload scope");
+    }
   }
 
   async beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession> {
@@ -112,6 +118,38 @@ type Fixture = {
   root: string;
   mediaRoot: string;
   sqlitePath: string;
+};
+
+class MemoryResponse extends Writable {
+  statusCode = 200;
+  jsonBody: unknown;
+  readonly headers = new Map<string, string>();
+
+  _write(_chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void { callback(); }
+  status(code: number): this { this.statusCode = code; return this; }
+  json(body: unknown): this { this.jsonBody = body; this.end(); return this; }
+  setHeader(name: string, value: string): this { this.headers.set(name.toLowerCase(), value); return this; }
+}
+
+type RouteHandler = (req: any, res: MemoryResponse, next: (error?: unknown) => void) => void | Promise<void>;
+type RouteLayer = { route?: { path?: string; methods?: Record<string, boolean>; stack?: Array<{ handle: RouteHandler }> } };
+
+const invokeProtectedRoute = async (router: { stack?: RouteLayer[] }, method: "get" | "post", routePath: string, request: any): Promise<{ response: MemoryResponse; error?: unknown }> => {
+  const route = router.stack?.find((layer) => layer.route?.path === routePath && layer.route.methods?.[method])?.route;
+  if (!route?.stack) throw new Error(`route not found: ${method.toUpperCase()} ${routePath}`);
+  const response = new MemoryResponse();
+  return new Promise((resolve, reject) => {
+    let index = 0;
+    const next = (error?: unknown): void => {
+      if (error) { resolve({ response, error }); return; }
+      const handler = route.stack?.[index++]?.handle;
+      if (!handler) { resolve({ response }); return; }
+      Promise.resolve(handler(request, response, next)).catch(reject);
+    };
+    response.once("finish", () => resolve({ response }));
+    response.once("error", reject);
+    next();
+  });
 };
 
 const createFixture = async (): Promise<Fixture> => {
@@ -262,6 +300,90 @@ const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
     null,
     "obsolete source jobs must reject late worker updates"
   );
+
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(20, "OAuth readiness fixture", "2026-08-04T00:00:00.000Z");
+  const oauthPath = path.join(fixture.mediaRoot, "episodes", "20", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(oauthPath), { recursive: true });
+  await fs.promises.writeFile(oauthPath, Buffer.from("oauth"));
+  const oauthJob = await createYoutubeTrailerJob(20);
+  const oauthRejectingProvider = new FakeYoutubeTrailerUploadProvider();
+  oauthRejectingProvider.failReadiness = true;
+  await runYoutubeTrailerJobWorkerOnce({ provider: oauthRejectingProvider, recoverInterrupted: false });
+  const oauthRejected = getYoutubeTrailerJob(20, oauthJob.jobId);
+  assert.equal(oauthRejected?.status, "queued", "OAuth readiness failure must remain retryable without sending bytes");
+  assert.equal(oauthRejected?.confirmedBytes, 0);
+  assert.equal(oauthRejected?.sessionUri, null);
+  assert.deepEqual(oauthRejectingProvider.events, ["readiness"]);
+
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(21, "Worker overlap fixture", "2026-08-04T00:00:00.000Z");
+  const overlapPath = path.join(fixture.mediaRoot, "episodes", "21", "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(overlapPath), { recursive: true });
+  await fs.promises.writeFile(overlapPath, Buffer.from("overlap"));
+  await createYoutubeTrailerJob(21);
+  const { startYoutubeTrailerJobWorker } = await import("../workers/youtube-trailer-job.worker.js");
+  const overlapProvider = new FakeYoutubeTrailerUploadProvider();
+  const stops = await Promise.all([startYoutubeTrailerJobWorker(overlapProvider), startYoutubeTrailerJobWorker(overlapProvider)]);
+  for (const stop of stops) stop();
+  assert.equal(overlapProvider.events.filter((event) => event === "begin-session").length, 1, "worker startup must not overlap one source transfer");
+};
+
+const verifyProtectedRouteAndOpenApiFocus = async (fixture: Fixture): Promise<void> => {
+  const [{ config }, { swaggerSpec }, { getDb }, routeModule] = await Promise.all([
+    import("../config/env.js"),
+    import("../docs/openapi.js"),
+    import("../database/sqlite.js"),
+    import("../routes/episodes.routes.js"),
+  ]);
+  const episodeId = 22;
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(episodeId, "Protected route fixture", "2026-08-04T00:00:00.000Z");
+  const trailerPath = path.join(fixture.mediaRoot, "episodes", String(episodeId), "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+  await fs.promises.writeFile(trailerPath, Buffer.from("protected"));
+  const router = routeModule.episodesRouter as { stack?: RouteLayer[] };
+  const startPath = "/:episodeId/youtube-trailer-jobs";
+  const statusPath = "/:episodeId/youtube-trailer-jobs/:jobId";
+  const cancelPath = "/:episodeId/youtube-trailer-jobs/:jobId/cancel";
+  const request = (body: unknown, jobId?: string) => ({ body, headers: {}, params: { episodeId: String(episodeId), ...(jobId ? { jobId } : {}) }, user: undefined });
+
+  config.auth.bypassInDev = false;
+  const unauthorized = await invokeProtectedRoute(router, "post", startPath, request(undefined));
+  assert.equal(unauthorized.response.statusCode, 401);
+  assert.equal(unauthorized.response.headers.get("cache-control"), "no-store", "no-store must precede authentication");
+  config.auth.bypassInDev = true;
+
+  const invalidStart = await invokeProtectedRoute(router, "post", startPath, request({ sourcePath: "/tmp/forbidden" }));
+  assert.equal(invalidStart.response.statusCode, 400, "start must reject client source/path input");
+  const started = await invokeProtectedRoute(router, "post", startPath, request(undefined));
+  assert.equal(started.response.statusCode, 202);
+  assert.equal(started.response.headers.get("cache-control"), "no-store");
+  const snapshot = started.response.jsonBody as { jobId: string; [key: string]: unknown };
+  assert.match(snapshot.jobId, /^[0-9a-f-]{36}$/);
+  for (const sensitiveField of ["sessionUri", "providerVideoId", "sourceFileName", "sourceSha256", "workerLeaseId", "errorMessage", "errorReason"]) {
+    assert.equal(sensitiveField in snapshot, false, `safe route DTO must omit ${sensitiveField}`);
+  }
+  assert.equal(JSON.stringify(snapshot).includes("fake-provider://"), false);
+
+  const duplicate = await invokeProtectedRoute(router, "post", startPath, request(undefined));
+  assert.equal((duplicate.response.jsonBody as { jobId: string }).jobId, snapshot.jobId, "duplicate starts must reuse the active current-source job");
+  const status = await invokeProtectedRoute(router, "get", statusPath, request(undefined, snapshot.jobId));
+  assert.equal(status.response.statusCode, 200);
+  const invalidStatus = await invokeProtectedRoute(router, "get", statusPath, request(undefined, "not-a-uuid"));
+  assert.equal(invalidStatus.response.statusCode, 404);
+  const cancelled = await invokeProtectedRoute(router, "post", cancelPath, request(undefined, snapshot.jobId));
+  assert.equal(cancelled.response.statusCode, 202);
+  assert.equal((cancelled.response.jsonBody as { status: string }).status, "cancel_requested");
+
+  const openApi = swaggerSpec as { paths: Record<string, unknown>; components?: { schemas?: Record<string, { properties: Record<string, unknown> }> } };
+  const paths = openApi.paths;
+  assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs"]);
+  assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}"]);
+  assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/cancel"]);
+  assert.equal("/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/publish" in paths, false);
+  const schema = openApi.components?.schemas?.YoutubeTrailerJobSnapshot;
+  assert.ok(schema);
+  for (const sensitiveField of ["sessionUri", "providerVideoId", "sourceFileName", "sourceSha256", "workerLeaseId", "errorMessage", "errorReason"]) {
+    assert.equal(sensitiveField in schema.properties, false, `OpenAPI safe DTO must omit ${sensitiveField}`);
+  }
 };
 
 const parseFocus = (argumentsList: string[]): YoutubeTrailerJobFocus | null => {
@@ -297,7 +419,10 @@ const main = async (): Promise<void> => {
       await verifyRealWorkerFocus(fixture);
     }
     if (!focus) {
-      console.log(`offline fake-provider scaffold verified; Plan 16-04 reserves: ${reservedLifecycleScenarios.join("; ")}`);
+      await verifyWorkerFocus();
+      await verifyRealWorkerFocus(fixture);
+      await verifyProtectedRouteAndOpenApiFocus(fixture);
+      console.log(`offline fake-provider lifecycle verified: ${reservedLifecycleScenarios.join("; ")}`);
     } else {
       console.log(`offline fake-provider ${focus} scaffold verified`);
     }

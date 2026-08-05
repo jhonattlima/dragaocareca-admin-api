@@ -248,8 +248,10 @@ const main = async (): Promise<void> => {
     assert.equal(episodeRepository.findTrailerVideoDraft(expired.draftId)?.state, "expired");
     assert.equal(await exists(getEpisodeMediaStagingDirectory(expiredEpisodeId)), false);
 
-    assert.equal(/youtube/i.test((await fs.promises.readFile(path.resolve(process.cwd(), "src/routes/episodes.routes.ts"), "utf8"))), false);
-    console.log("verified D-01/D-02/D-03 trailer-video reservation, auth, staging, fault-injected create/promotion/consume/post-create compensation, rollback, expiry cleanup, and no-YouTube route boundary");
+    const routesSource = await fs.promises.readFile(path.resolve(process.cwd(), "src/routes/episodes.routes.ts"), "utf8");
+    assert.match(routesSource, /youtube-trailer-jobs/);
+    assert.equal(/youtube-trailer-jobs[^\n]*publish/i.test(routesSource), false);
+    console.log("verified D-01/D-02/D-03 trailer-video reservation, auth, staging, fault-injected create/promotion/consume/post-create compensation, rollback, expiry cleanup, and private-job-only YouTube route integration");
   } finally {
     config.auth.bypassInDev = true;
     config.media.trailerVideoMaxBytes = 500 * 1024 * 1024;
