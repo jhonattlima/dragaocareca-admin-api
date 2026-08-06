@@ -98,11 +98,14 @@ Plans:
 **Goal:** Generate and expose advisory episode hashtags from the completed transcript and summary, with independent YouTube relevance lookup.
 **Requirements**: TRAILER-06
 **Depends on:** Phase 16
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 18 to break down)
+- [ ] 18-01-PLAN.md — Create the offline validation foundation plus persisted state and bounded configuration.
+- [ ] 18-02-PLAN.md — Implement the durable cache, serial public-search boundary, and structured 50-candidate authoring service.
+- [ ] 18-03-PLAN.md — Queue tags after summary completion and expose protected persisted/manual lookup contracts.
+- [ ] 18-04-PLAN.md — Complete fake-provider lifecycle, route-redaction, and OpenAPI parity verification.
 
 ---
 *Last updated: 2026-08-04 after reconciling v1.4 with the sibling admin-web workflow*
