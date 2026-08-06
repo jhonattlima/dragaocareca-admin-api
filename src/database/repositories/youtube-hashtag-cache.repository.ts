@@ -68,6 +68,7 @@ export const createYouTubeHashtagCacheRepository = () => ({
             AND region_code = :regionCode
             AND relevance_language = :relevanceLanguage
             AND search_shape_version = :searchShapeVersion
+            AND error_category IS NULL
             AND expires_at > :now`
       )
       .get({ ...keyParams(key), now: now.toISOString() }) as SqliteCacheRow | undefined;
