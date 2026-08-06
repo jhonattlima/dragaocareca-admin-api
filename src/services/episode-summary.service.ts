@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawnSync } from "node:child_process";
@@ -15,6 +16,7 @@ import {
 } from "./episode-media-layout.service";
 import {
   createAiSummaryDraftState,
+  createEpisodeDraftState,
   createSuggestedTagsDraftState,
   createTranscriptDraftState,
   normalizeEpisodeDraftState,
@@ -22,6 +24,7 @@ import {
   type EpisodeDraftStepStatus,
   type TranscriptDraftState,
 } from "../schemas/episode-draft-state";
+import { createEpisodeHashtagAuthoringService, type HashtagAuthoringOutcome } from "./episode-hashtag-authoring.service";
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +65,7 @@ type EpisodeSummaryServiceDeps = {
   summaryConfig?: SummaryRuntimeConfig;
   runtime?: SummaryRuntimeAdapter;
   now?: () => string;
+  hashtagAuthoring?: HashtagAuthoringService;
 };
 
 export type EpisodeDraftSummaryStatusSnapshot = {
@@ -73,10 +77,32 @@ export type EpisodeDraftSummaryStatusSnapshot = {
   error: string | null;
   version: number | null;
   promptVersion: string | null;
+  suggestedTags: SuggestedTagsSnapshot;
 };
 
 export type EpisodeDraftSummarySnapshot = EpisodeDraftSummaryStatusSnapshot & {
   summaryText: string | null;
+};
+
+export type SuggestedTagsSnapshot = {
+  status: EpisodeDraftState["suggestedTags"]["status"];
+  version: number;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  retryAt: string | null;
+  errorCategory: EpisodeDraftState["suggestedTags"]["errorCategory"];
+  promptVersion: string | null;
+  suggestions: EpisodeDraftState["suggestedTags"]["suggestions"];
+};
+
+type HashtagAuthoringService = ReturnType<typeof createEpisodeHashtagAuthoringService>;
+
+const tagAuthoringExecutionTail: { tail: Promise<void> } = { tail: Promise.resolve() };
+const tagAuthoringTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const tagRetryDelay = (attemptCount: number): number => {
+  const delays = config.youtube.hashtagAuthoring.retryDelaysMs;
+  return delays[Math.min(Math.max(attemptCount - 1, 0), delays.length - 1)];
 };
 
 const tempRoot = path.resolve(os.tmpdir(), "dragaocareca-episode-summary");
@@ -510,6 +536,23 @@ const readSummaryText = (episodeId: number): string | null => {
   return null;
 };
 
+const digestSummary = (summary: string): string => crypto.createHash("sha256").update(summary, "utf8").digest("hex");
+
+const toSuggestedTagsSnapshot = (state: EpisodeDraftState): SuggestedTagsSnapshot => ({
+  status: state.suggestedTags.status,
+  version: state.suggestedTags.version,
+  updatedAt: state.suggestedTags.updatedAt,
+  startedAt: state.suggestedTags.startedAt,
+  finishedAt: state.suggestedTags.finishedAt,
+  retryAt: state.suggestedTags.retryAt,
+  errorCategory: state.suggestedTags.errorCategory,
+  promptVersion: state.suggestedTags.promptVersion,
+  suggestions: state.suggestedTags.suggestions.slice(0, 3),
+});
+
+const stateMatchesTagGuard = (state: EpisodeDraftState | null, version: number, summaryDigest: string): boolean =>
+  Boolean(state && state.version === version && state.suggestedTags.version === version && state.suggestedTags.summaryDigest === summaryDigest);
+
 const ensureTranscriptReady = async (
   episodeId: number,
   currentState: EpisodeDraftState | null
@@ -707,6 +750,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
   const summaryConfig = deps.summaryConfig ?? config.summary;
   const runtime = deps.runtime ?? defaultSummaryRuntime;
   const now = deps.now ?? defaultNow;
+  const hashtagAuthoring = deps.hashtagAuthoring ?? createEpisodeHashtagAuthoringService();
   let summaryExecutionTail: Promise<void> = Promise.resolve();
 
   const runSummaryExclusively = async <T>(task: () => Promise<T>): Promise<T> => {
@@ -738,6 +782,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         error: null,
         version: null,
         promptVersion: null,
+        suggestedTags: toSuggestedTagsSnapshot(createEpisodeDraftState(episodeId)),
       };
     }
 
@@ -750,7 +795,110 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       error: state.aiSummary.error ?? null,
       version: state.version,
       promptVersion: state.aiSummary.promptVersion ?? summaryConfig.promptVersion,
+      suggestedTags: toSuggestedTagsSnapshot(state),
     };
+  };
+
+  const persistTagOutcome = async (episodeId: number, version: number, summaryDigest: string, outcome: HashtagAuthoringOutcome): Promise<void> => {
+    const current = readDraftState(episodeId);
+    if (!stateMatchesTagGuard(current, version, summaryDigest) || current?.suggestedTags.status !== "processing") return;
+    const attemptCount = Math.min(20, current.suggestedTags.attemptCount + 1);
+    const timestamp = now();
+    const next = { ...current, updatedAt: timestamp, suggestedTags: {
+      ...current.suggestedTags,
+      status: outcome.status,
+      version,
+      updatedAt: timestamp,
+      finishedAt: timestamp,
+      retryAt: outcome.status === "unavailable" ? outcome.retryAt ?? new Date(Date.parse(timestamp) + tagRetryDelay(attemptCount)).toISOString() : null,
+      errorCategory: outcome.status === "unavailable" ? outcome.errorCategory : null,
+      promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
+      attemptCount,
+      candidates: outcome.candidates,
+      retrievals: outcome.retrievals,
+      suggestions: outcome.suggestions,
+    }, } satisfies EpisodeDraftState;
+    await writeDraftState(episodeId, next);
+  };
+
+  const processSuggestedTagsAuthoring = async (episodeId: number): Promise<void> => {
+    const pending = readDraftState(episodeId);
+    if (!pending || pending.aiSummary.status !== "done" || (pending.suggestedTags.status !== "pending" && pending.suggestedTags.status !== "unavailable")) return;
+    const summary = readSummaryText(episodeId);
+    if (!summary) return;
+    const version = pending.version;
+    const summaryDigest = digestSummary(summary);
+    if (pending.suggestedTags.summaryDigest !== summaryDigest) return;
+    const startedAt = now();
+    const processing = readDraftState(episodeId);
+    if (!stateMatchesTagGuard(processing, version, summaryDigest) || !processing || (processing.suggestedTags.status !== "pending" && processing.suggestedTags.status !== "unavailable")) return;
+    await writeDraftState(episodeId, { ...processing, updatedAt: startedAt, suggestedTags: {
+      ...processing.suggestedTags,
+      status: "processing",
+      startedAt,
+      finishedAt: null,
+      retryAt: null,
+      errorCategory: null,
+      promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
+    } });
+    const transcript = await readTranscriptText(episodeId);
+    if (!transcript.transcriptText) {
+      await persistTagOutcome(episodeId, version, summaryDigest, { status: "unavailable", errorCategory: "provider_unavailable", retryAt: new Date(Date.parse(startedAt) + tagRetryDelay(1)).toISOString(), candidates: [], retrievals: [], suggestions: [] });
+      return;
+    }
+    const outcome = await hashtagAuthoring.author(transcript.transcriptText, summary);
+    await persistTagOutcome(episodeId, version, summaryDigest, outcome);
+  };
+
+  const enqueueSuggestedTagsAuthoring = (episodeId: number): Promise<void> => {
+    const previous = tagAuthoringExecutionTail.tail;
+    let release!: () => void;
+    tagAuthoringExecutionTail.tail = new Promise<void>((resolve) => { release = resolve; });
+    const run = previous.then(() => processSuggestedTagsAuthoring(episodeId)).finally(release);
+    return run.catch((error: unknown) => {
+      console.warn(`[hashtag] authoring failed episode=${episodeId}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
+
+  const scheduleSuggestedTagsRetry = (episodeId: number, retryAt: string | null): void => {
+    const existing = tagAuthoringTimers.get(episodeId);
+    if (existing) clearTimeout(existing);
+    if (!retryAt) return;
+    const delay = Math.max(0, Date.parse(retryAt) - Date.now());
+    const timer = setTimeout(() => {
+      tagAuthoringTimers.delete(episodeId);
+      void enqueueSuggestedTagsAuthoring(episodeId);
+    }, delay);
+    timer.unref?.();
+    tagAuthoringTimers.set(episodeId, timer);
+  };
+
+  const getSuggestedTagsWork = (episodeId: number): { status: EpisodeDraftState["suggestedTags"]["status"]; retryAt: string | null } | null => {
+    const state = readDraftState(episodeId);
+    return state ? { status: state.suggestedTags.status, retryAt: state.suggestedTags.retryAt } : null;
+  };
+
+  const recoverSuggestedTagsAuthoring = async (episodeId: number): Promise<void> => {
+    const state = readDraftState(episodeId);
+    if (!state || state.aiSummary.status !== "done") return;
+    let recovered = state;
+    if (state.suggestedTags.status === "processing") {
+      const timestamp = now();
+      recovered = { ...state, updatedAt: timestamp, suggestedTags: {
+        ...state.suggestedTags,
+        status: "unavailable",
+        updatedAt: timestamp,
+        finishedAt: timestamp,
+        errorCategory: "provider_unavailable",
+        retryAt: new Date(Date.parse(timestamp) + tagRetryDelay(state.suggestedTags.attemptCount + 1)).toISOString(),
+      } };
+      await writeDraftState(episodeId, recovered);
+    }
+    if (recovered.suggestedTags.status === "pending" || recovered.suggestedTags.status === "unavailable" && (!recovered.suggestedTags.retryAt || Date.parse(recovered.suggestedTags.retryAt) <= Date.parse(now()))) {
+      await enqueueSuggestedTagsAuthoring(episodeId);
+    } else if (recovered.suggestedTags.status === "unavailable") {
+      scheduleSuggestedTagsRetry(episodeId, recovered.suggestedTags.retryAt);
+    }
   };
 
   const getEpisodeDraftSummary = (episodeId: number): EpisodeDraftSummarySnapshot => {
@@ -782,6 +930,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         error: state.aiSummary.error ?? null,
         version: state.version,
         promptVersion: state.aiSummary.promptVersion ?? summaryConfig.promptVersion,
+        suggestedTags: toSuggestedTagsSnapshot(state),
       };
     }
 
@@ -944,7 +1093,17 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         finalState.aiSummary.startedAt = currentBeforeWrite.aiSummary.startedAt ?? now();
         finalState.aiSummary.finishedAt = now();
         finalState.aiSummary.progress = 100;
+        finalState.suggestedTags = createSuggestedTagsDraftState({ version, updatedAt: finalState.updatedAt });
         await writeDraftState(episodeId, finalState);
+        const pendingTags = { ...finalState, updatedAt: now(), suggestedTags: createSuggestedTagsDraftState({
+          status: "pending",
+          version,
+          updatedAt: now(),
+          promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
+          summaryDigest: digestSummary(normalizedSummary),
+        }) } satisfies EpisodeDraftState;
+        await writeDraftState(episodeId, pendingTags);
+        void enqueueSuggestedTagsAuthoring(episodeId);
         console.info(
           `[summary] finished episode=${episodeId} version=${version} durationMs=${Date.now() - startedAt} at=${new Date().toISOString()}`
         );
@@ -996,6 +1155,11 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
     abortDraftEpisodeSummary,
     getEpisodeDraftSummaryStatus,
     syncDraftEpisodeSummary,
+    enqueueSuggestedTagsAuthoring,
+    processSuggestedTagsAuthoring,
+    scheduleSuggestedTagsRetry,
+    getSuggestedTagsWork,
+    recoverSuggestedTagsAuthoring,
   };
 };
 
@@ -1009,5 +1173,10 @@ export const queueDraftEpisodeSummary = defaultSummaryService.queueDraftEpisodeS
 export const abortDraftEpisodeSummary = defaultSummaryService.abortDraftEpisodeSummary;
 export const getEpisodeDraftSummaryStatus = defaultSummaryService.getEpisodeDraftSummaryStatus;
 export const syncDraftEpisodeSummary = defaultSummaryService.syncDraftEpisodeSummary;
+export const enqueueSuggestedTagsAuthoring = defaultSummaryService.enqueueSuggestedTagsAuthoring;
+export const processSuggestedTagsAuthoring = defaultSummaryService.processSuggestedTagsAuthoring;
+export const scheduleSuggestedTagsRetry = defaultSummaryService.scheduleSuggestedTagsRetry;
+export const getSuggestedTagsWork = defaultSummaryService.getSuggestedTagsWork;
+export const recoverSuggestedTagsAuthoring = defaultSummaryService.recoverSuggestedTagsAuthoring;
 
 export { createEpisodeSummaryService };

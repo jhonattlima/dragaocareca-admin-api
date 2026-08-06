@@ -10,6 +10,7 @@ import { startSpotifyMetricsWorker } from "./workers/spotify-metrics.worker";
 import { startYouTubeMetricsWorker } from "./workers/youtube-metrics.worker";
 import { startYoutubeTrailerJobWorker } from "./workers/youtube-trailer-job.worker";
 import { startTelegramBotWorker } from "./services/telegram-bot.worker";
+import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-authoring.worker";
 
 const backgroundWorkersDisabled =
   (process.env.DISABLE_BACKGROUND_WORKERS ?? "false").toLowerCase() === "true";
@@ -32,6 +33,9 @@ const bootstrap = async (): Promise<void> => {
   // Artifact jobs only prepare local episode files. Keep this worker available even when
   // integrations that depend on external credentials are intentionally disabled.
   await startEpisodeArtifactPreparationWorker();
+  if (!backgroundWorkersDisabled) {
+    await startEpisodeHashtagAuthoringWorker();
+  }
 
   if (config.youtube.trailerJob.enabled && !backgroundWorkersDisabled) {
     await startYoutubeTrailerJobWorker();
