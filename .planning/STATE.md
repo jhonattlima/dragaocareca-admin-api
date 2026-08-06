@@ -4,16 +4,16 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 16
 current_phase_name: draft-staging-and-private-youtube-job
-status: executing
-stopped_at: Completed 16-04-PLAN.md
-last_updated: "2026-08-05T21:55:09.364Z"
+status: verifying
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-08-06T15:31:09.579Z"
 last_activity: 2026-08-04
 last_activity_desc: Phase 16 execution started
 progress:
-  total_phases: 2
-  completed_phases: 1
-  total_plans: 10
-  completed_plans: 9
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 14
+  completed_plans: 11
 current_plan: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-04)
 
 Phase: 16 (draft-staging-and-private-youtube-job) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-04 — Phase 16 execution started
 
 ## Accumulated Context
@@ -87,6 +87,8 @@ Recent decisions affecting current work:
 - [Phase ?]: A local cancellation after any accepted bytes or provider video reports provider-video-retained, never a claimed remote rollback.
 - [Phase ?]: Only enable the live worker with YOUTUBE_TRAILER_JOB_ENABLED=true after the Plan 16-06 human OAuth/channel checkpoint.
 - [Phase ?]: Expose private trailer jobs through a safe DTO allowlist; provider/session/source internals remain service-only.
+- [Phase ?]: Phase 18 Plan 01 uses fixed non-borrowable 90 automatic / 10 manual YouTube search reservations and one lookup lane.
+- [Phase ?]: Phase 18 Plan 01 persists normalized suggestedTags inside the shared episode state with the root version retained for stale-write protection.
 
 ### Pending Todos
 
@@ -117,8 +119,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-05T21:55:09.356Z
-Stopped at: Completed 16-04-PLAN.md
+Last session: 2026-08-06T15:31:09.572Z
+Stopped at: Completed 18-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -145,6 +147,7 @@ Resume file: None
 | Phase 16 P02 | 8min | 2 tasks | 3 files |
 | Phase 16 P03 | 11min | 2 tasks | 9 files |
 | Phase 16 P04 | 5min | 2 tasks | 6 files |
+| Phase 18 P01 | 12min | 2 tasks | 5 files |
 
 ## Operator Next Steps
 
