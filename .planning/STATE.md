@@ -5,15 +5,15 @@ milestone_name: Trailer Video Publishing
 current_phase: 16
 current_phase_name: draft-staging-and-private-youtube-job
 status: verifying
-stopped_at: Completed 18-01-PLAN.md
-last_updated: "2026-08-06T15:31:09.579Z"
+stopped_at: Completed 18-02-PLAN.md
+last_updated: "2026-08-06T15:39:49.259Z"
 last_activity: 2026-08-04
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
 current_plan: 0
 ---
 
@@ -89,6 +89,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Expose private trailer jobs through a safe DTO allowlist; provider/session/source internals remain service-only.
 - [Phase ?]: Phase 18 Plan 01 uses fixed non-borrowable 90 automatic / 10 manual YouTube search reservations and one lookup lane.
 - [Phase ?]: Phase 18 Plan 01 persists normalized suggestedTags inside the shared episode state with the root version retained for stale-write protection.
+- [Phase ?]: Phase 18 Plan 02 uses a normalized SQLite count cache and atomic non-borrowable Pacific-day 90 automatic / 10 manual YouTube search admission.
+- [Phase ?]: Phase 18 Plan 02 keeps provider errors retryable, serializes lookup misses, and validates exactly 50 structured Gemini candidates before relevance-gated ranking.
 
 ### Pending Todos
 
@@ -119,8 +121,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-06T15:31:09.572Z
-Stopped at: Completed 18-01-PLAN.md
+Last session: 2026-08-06T15:39:49.253Z
+Stopped at: Completed 18-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -148,6 +150,7 @@ Resume file: None
 | Phase 16 P03 | 11min | 2 tasks | 9 files |
 | Phase 16 P04 | 5min | 2 tasks | 6 files |
 | Phase 18 P01 | 12min | 2 tasks | 5 files |
+| Phase 18-episode-hashtag-authoring P02 | 12min | 3 tasks | 5 files |
 
 ## Operator Next Steps
 
