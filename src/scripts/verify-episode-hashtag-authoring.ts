@@ -105,9 +105,7 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   const service = createYouTubeHashtagSearchService({
     repository,
     now: () => new Date("2026-08-06T12:00:00.000Z"),
-    getAccessToken: async () => {
-      throw new Error("offline verifier must not request OAuth");
-    },
+    getAccessToken: async () => "offline-token",
     fetchSearch: async ({ normalizedTag }) => {
       providerCalls.push(normalizedTag);
       return { approximateCount: normalizedTag === "#rpg" ? 42 : 0 };
@@ -128,6 +126,23 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(identityB, null);
   assert.equal(repository.admit("automatic", "2026-08-06", 90), true);
   assert.equal(repository.admit("manual", "2026-08-06", 10), true);
+
+  const { createEpisodeHashtagAuthoringService } = await import("../services/episode-hashtag-authoring.service.js");
+  const candidates = Array.from({ length: 50 }, (_, index) => ({ tag: `tag${index}`, relevant: index < 3, relevanceScore: index === 1 ? 100 : 50 }));
+  const lookedUp: string[] = [];
+  const authoring = createEpisodeHashtagAuthoringService({
+    generateCandidates: async () => ({ candidates }),
+    lookupService: {
+      lookup: async (tag: unknown) => {
+        lookedUp.push(String(tag));
+        return { ok: true, displayTag: String(tag), normalizedTag: String(tag), approximateCount: String(tag).endsWith("0") ? 10 : 5, retrievedAt: "2026-08-06T12:00:00.000Z", cacheStatus: "miss", regionCode: "BR", relevanceLanguage: "pt", source: "youtube-search-list", errorCategory: null, retryAt: null };
+      },
+    },
+  });
+  const authored = await authoring.author("transcript", "summary");
+  assert.equal(authored.status, "done");
+  assert.equal(lookedUp.length, 50);
+  assert.deepEqual(authored.suggestions.map((tag) => tag.displayTag), ["#tag0", "#tag1", "#tag2"]);
 };
 
 const main = async (): Promise<void> => {
