@@ -64,6 +64,27 @@ const verifyNoNetworkContract = (seams: HashtagAuthoringVerifierSeams): void => 
 const verifyFoundationFocus = async (fixture: Fixture): Promise<void> => {
   await assertFixtureIsolation(fixture);
   verifyNoNetworkContract(createOfflineSeams());
+  const [{ parseHashtagAuthoringConfig }, { createEpisodeDraftState, normalizeEpisodeDraftState, normalizeHashtagTag }] = await Promise.all([
+    import("../config/env.js"),
+    import("../schemas/episode-draft-state.js"),
+  ]);
+  const authoringConfig = parseHashtagAuthoringConfig({});
+  assert.deepEqual(authoringConfig.retryDelaysMs, [60_000, 300_000, 900_000, 3_600_000]);
+  assert.equal(authoringConfig.automaticDailyCalls, 90);
+  assert.equal(authoringConfig.manualDailyCalls, 10);
+  assert.equal(authoringConfig.lookupLaneCount, 1);
+  assert.throws(() => parseHashtagAuthoringConfig({ YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS: "invalid" }));
+
+  const state = createEpisodeDraftState(18);
+  assert.equal(state.suggestedTags.status, "idle");
+  assert.equal(state.suggestedTags.version, state.version);
+  assert.deepEqual(normalizeHashtagTag("  #RPG  "), {
+    displayTag: "#rpg",
+    normalizedTag: "#rpg",
+  });
+  const legacy = normalizeEpisodeDraftState({ episodeId: 18, version: 4, status: "done" });
+  assert.equal(legacy?.suggestedTags.status, "idle");
+  assert.equal(legacy?.suggestedTags.version, 4);
 };
 
 const main = async (): Promise<void> => {
