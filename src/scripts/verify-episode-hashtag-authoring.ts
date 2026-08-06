@@ -368,8 +368,8 @@ const verifyRouteFocus = async (fixture: Fixture): Promise<void> => {
   assert.match(lookupPath.post.requestBody.content["application/json"].schema.properties.tag.pattern, /#\?\[/);
   assert.equal(schemas.SuggestedTagRetrieval.properties.approximateCount.description.includes("approximate"), true);
   assert.match(schemas.SuggestedTagRetrieval.properties.displayTag.description, /lower-case/i);
-  const lookupResponseProperties = schemas.HashtagLookupResponse.allOf.find((entry: AnyRecord) => entry.properties)?.properties as AnyRecord;
-  assert.equal((lookupResponseProperties.state as AnyRecord).enum.includes("available"), true);
+  const lookupResponseProperties = (schemas.HashtagLookupResponse.allOf as AnyRecord[]).find((entry) => entry.properties)?.properties as AnyRecord;
+  assert.equal(((lookupResponseProperties.state as AnyRecord).enum as unknown[]).includes("available"), true);
   const publicHashtagContract = JSON.stringify({ lookupPath, retrieval: schemas.SuggestedTagRetrieval, snapshot: schemas.SuggestedTagsSnapshot, response: schemas.HashtagLookupResponse });
   assert.doesNotMatch(publicHashtagContract, /"(?:accessToken|refreshToken|providerPayload|providerResponse|absolutePath|cacheLedger|rawResponse|sessionLocation)"/i);
   console.log("offline hashtag-authoring protected route, DTO redaction, OpenAPI parity, and no-store contract verified");
