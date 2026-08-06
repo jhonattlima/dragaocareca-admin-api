@@ -145,6 +145,84 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   assert.deepEqual(authored.suggestions.map((tag) => tag.displayTag), ["#tag0", "#tag1", "#tag2"]);
 };
 
+const verifyLifecycleFocus = async (fixture: Fixture): Promise<void> => {
+  process.env.MEDIA_STORAGE_ROOT = fixture.mediaRoot;
+  const [{ createEpisodeSummaryService }, media, schema] = await Promise.all([
+    import("../services/episode-summary.service.js"),
+    import("../services/episode-media-layout.service.js"),
+    import("../schemas/episode-draft-state.js"),
+  ]);
+  const episodeId = 1803;
+  const statePath = media.getEpisodeMediaDraftStatePath(episodeId);
+  const summaryPath = media.getEpisodeMediaDraftSummaryPath(episodeId);
+  const transcriptPath = media.getEpisodeMediaFinalPath(episodeId, "transcript");
+  await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.promises.mkdir(path.dirname(transcriptPath), { recursive: true });
+  await fs.promises.writeFile(summaryPath, "saved summary", "utf8");
+  await fs.promises.writeFile(transcriptPath, "transcript", "utf8");
+
+  let authorCalls = 0;
+  const authoring = { author: async () => {
+    authorCalls += 1;
+    return { status: "done" as const, errorCategory: null, retryAt: null, candidates: [], retrievals: [], suggestions: [] };
+  } };
+  const service = createEpisodeSummaryService({ hashtagAuthoring: authoring as never, now: () => "2026-08-06T12:00:00.000Z" });
+  const digest = (await import("node:crypto")).createHash("sha256").update("saved summary").digest("hex");
+  const baseState = schema.createEpisodeDraftState(episodeId, { version: 1 });
+  const state = {
+    ...baseState,
+    transcript: { ...baseState.transcript, status: "done" as const, version: 1, fileName: "episodes/1803/transcript.txt", progress: 100 },
+    aiSummary: { ...baseState.aiSummary, status: "done" as const, version: 1, summaryFileName: "episodes/1803/summary.txt", fileName: "episodes/1803/summary.txt", progress: 100 },
+    suggestedTags: { ...baseState.suggestedTags, status: "pending" as const, version: 1, summaryDigest: digest },
+  };
+  await fs.promises.writeFile(statePath, `${JSON.stringify(state)}\n`, "utf8");
+  await service.recoverSuggestedTagsAuthoring(episodeId);
+  const completed = JSON.parse(await fs.promises.readFile(statePath, "utf8"));
+  assert.equal(completed.aiSummary.status, "done");
+  assert.equal(completed.suggestedTags.status, "done");
+  assert.equal(authorCalls, 1);
+
+  let release!: () => void;
+  let staleStarted = false;
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  const staleService = createEpisodeSummaryService({
+    hashtagAuthoring: { author: async () => { staleStarted = true; await wait; return { status: "done" as const, errorCategory: null, retryAt: null, candidates: [], retrievals: [], suggestions: [] }; } } as never,
+    now: () => "2026-08-06T12:00:00.000Z",
+  });
+  const stale = { ...completed, version: 2, updatedAt: "2026-08-06T12:01:00.000Z", suggestedTags: { ...completed.suggestedTags, status: "pending", version: 2, summaryDigest: digest } };
+  await fs.promises.writeFile(statePath, `${JSON.stringify(stale)}\n`, "utf8");
+  const inFlight = staleService.enqueueSuggestedTagsAuthoring(episodeId);
+  for (let attempt = 0; attempt < 20 && !staleStarted; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const newer = { ...stale, version: 3, suggestedTags: { ...stale.suggestedTags, version: 3, summaryDigest: "new-summary-digest", status: "pending" } };
+  await fs.promises.writeFile(statePath, `${JSON.stringify(newer)}\n`, "utf8");
+  release();
+  await inFlight;
+  const afterStale = JSON.parse(await fs.promises.readFile(statePath, "utf8"));
+  assert.equal(afterStale.version, 3);
+  assert.equal(afterStale.suggestedTags.summaryDigest, "new-summary-digest");
+  console.log("offline hashtag-authoring lifecycle verified");
+};
+
+const verifyRouteFocus = async (): Promise<void> => {
+  const [{ swaggerSpec }, { getEpisodeDraftSummary }] = await Promise.all([
+    import("../docs/openapi.js"),
+    import("../services/episode-summary.service.js"),
+  ]);
+  const paths = (swaggerSpec as unknown as { paths: Record<string, unknown> }).paths;
+  assert.ok(paths["/v1/episodes/{episodeId}/hashtag-lookup"]);
+  assert.ok(paths["/v1/episodes/{episodeId}/episodes-generated-summary"]);
+  const lookupPath = paths["/v1/episodes/{episodeId}/hashtag-lookup"] as { post?: { security?: unknown[]; description?: string; responses?: Record<string, unknown> } };
+  assert.deepEqual(lookupPath.post?.security, [{ bearerAuth: [] }]);
+  assert.match(lookupPath.post?.description ?? "", /approximate|quota|no-store/i);
+  assert.ok(lookupPath.post?.responses?.["400"]);
+  const snapshot = getEpisodeDraftSummary(999999);
+  assert.ok(snapshot.suggestedTags);
+  assert.equal(snapshot.suggestedTags.suggestions.length, 0);
+  console.log("offline hashtag-authoring route contract verified");
+};
+
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development");
 
@@ -154,8 +232,9 @@ const main = async (): Promise<void> => {
   try {
     if (!focus || focus === "foundation") await verifyFoundationFocus(fixture);
     if (focus === "lookup") await verifyLookupFocus(fixture);
-    if (focus && focus !== "foundation" && focus !== "lookup") verifyNoNetworkContract(createOfflineSeams());
-    console.log(`offline hashtag-authoring ${focus ?? "all"} scaffold verified`);
+    if (focus === "lifecycle") await verifyLifecycleFocus(fixture);
+    if (focus === "route") await verifyRouteFocus();
+    console.log(`offline hashtag-authoring ${focus ?? "all"} verified`);
   } finally {
     await fs.promises.rm(fixture.root, { recursive: true, force: true });
   }

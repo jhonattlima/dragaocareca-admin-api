@@ -841,6 +841,10 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       errorCategory: null,
       promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
     } });
+    if (!config.youtube.hashtagAuthoring.enabled) {
+      await persistTagOutcome(episodeId, version, summaryDigest, { status: "unavailable", errorCategory: "disabled", retryAt: null, candidates: [], retrievals: [], suggestions: [] });
+      return;
+    }
     const transcript = await readTranscriptText(episodeId);
     if (!transcript.transcriptText) {
       await persistTagOutcome(episodeId, version, summaryDigest, { status: "unavailable", errorCategory: "provider_unavailable", retryAt: new Date(Date.parse(startedAt) + tagRetryDelay(1)).toISOString(), candidates: [], retrievals: [], suggestions: [] });

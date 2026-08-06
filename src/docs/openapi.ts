@@ -124,6 +124,53 @@ export const swaggerSpec = swaggerJsdoc({
             completedAt: { type: "string", format: "date-time", nullable: true },
           },
         },
+        SuggestedTagRetrieval: {
+          type: "object",
+          additionalProperties: false,
+          required: ["displayTag", "normalizedTag", "approximateCount", "retrievedAt", "cacheStatus", "regionCode", "relevanceLanguage"],
+          properties: {
+            displayTag: { type: "string", description: "Canonical lower-case hashtag, including one leading #.", example: "#rpg" },
+            normalizedTag: { type: "string", description: "Canonical lower-case lookup identity.", example: "#rpg" },
+            approximateCount: { type: "integer", minimum: 0, maximum: 1000000, nullable: true, description: "Advisory approximate YouTube search result count, not an exact hashtag inventory; null when unavailable." },
+            retrievedAt: { type: "string", format: "date-time", nullable: true },
+            cacheStatus: { type: "string", enum: ["hit", "miss"] },
+            regionCode: { type: "string", example: "BR" },
+            relevanceLanguage: { type: "string", example: "pt" },
+          },
+        },
+        SuggestedTagsSnapshot: {
+          type: "object",
+          additionalProperties: false,
+          required: ["status", "version", "updatedAt", "startedAt", "finishedAt", "retryAt", "errorCategory", "promptVersion", "suggestions"],
+          description: "Persisted advisory state grounded in the saved summary. It does not trigger generation when read and exposes at most three suggestions.",
+          properties: {
+            status: { type: "string", enum: ["idle", "pending", "processing", "done", "unavailable"] },
+            version: { type: "integer", minimum: 0 },
+            updatedAt: { type: "string", format: "date-time" },
+            startedAt: { type: "string", format: "date-time", nullable: true },
+            finishedAt: { type: "string", format: "date-time", nullable: true },
+            retryAt: { type: "string", format: "date-time", nullable: true },
+            errorCategory: { type: "string", nullable: true, enum: ["disabled", "missing_credentials", "unauthorized", "quota_exhausted", "rate_limited", "provider_unavailable", "invalid_provider_response"] },
+            promptVersion: { type: "string", nullable: true },
+            suggestions: { type: "array", maxItems: 3, items: { allOf: [{ $ref: "#/components/schemas/SuggestedTagRetrieval" }, { type: "object", required: ["relevanceScore"], properties: { relevanceScore: { type: "integer", minimum: 0, maximum: 100 } } }] } },
+          },
+        },
+        HashtagLookupResponse: {
+          allOf: [
+            { $ref: "#/components/schemas/SuggestedTagRetrieval" },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["state", "source", "errorCategory", "retryAt"],
+              properties: {
+                state: { type: "string", enum: ["available", "unavailable"] },
+                source: { type: "string", enum: ["youtube-search-list", "cache", "admission", "provider"] },
+                errorCategory: { type: "string", nullable: true, enum: ["disabled", "missing_credentials", "unauthorized", "quota_exhausted", "rate_limited", "provider_unavailable", "invalid_provider_response"] },
+                retryAt: { type: "string", format: "date-time", nullable: true },
+              },
+            },
+          ],
+        },
         PublicEpisodeCatalogGuest: {
           type: "object",
           required: ["name"],
@@ -904,6 +951,40 @@ export const swaggerSpec = swaggerJsdoc({
             },
           },
           responses: { "200": { description: "Updated" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+        },
+      },
+      "/v1/episodes/{episodeId}/episodes-generated-summary": {
+        get: {
+          tags: ["Episodes"],
+          summary: "Read generated summary and persisted hashtag suggestions",
+          description: "Protected no-store snapshot. Reading never starts or regenerates authoring; suggestions are advisory, grounded in the saved summary, and contain at most three sanitized approximate-count records.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          responses: {
+            "200": { description: "Summary status, text when done, and persisted suggested-tags snapshot.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { type: "object", properties: { suggestedTags: { $ref: "#/components/schemas/SuggestedTagsSnapshot" } } } } } },
+            "400": { description: "Invalid episodeId." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+          },
+        },
+      },
+      "/v1/episodes/{episodeId}/hashtag-lookup": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Look up one hashtag approximate count",
+          description: "Protected, no-store manual lookup. The server canonicalizes one strict tag, serves the shared durable cache when fresh, and applies the non-borrowable server-managed manual quota/rate allocation. Counts are approximate and advisory; allocation ledger values, OAuth credentials, prompts, transcript/summary text, raw provider responses, and provider URLs are never exposed. A browser may debounce this request for two seconds, but debounce is not an API control.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { type: "object", additionalProperties: false, required: ["tag"], properties: { tag: { type: "string", minLength: 1, maxLength: 100, pattern: "^#?[^\\s#]+$", description: "One hashtag with an optional leading #; Unicode normalization and lower-case canonicalization are server-owned." } } } } },
+          },
+          responses: {
+            "200": { description: "Available approximate count and retrieval metadata, from cache or provider.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/HashtagLookupResponse" } } } },
+            "400": { description: "Invalid episodeId or strict one-tag JSON body." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "429": { description: "Manual server-managed admission is exhausted; response is a safe unavailable DTO with retryAt." },
+            "503": { description: "Provider/configuration failure; response is a safe unavailable DTO with errorCategory and retryAt." },
+          },
         },
       },
       "/v1/episodes/{episodeId}/audio": {
