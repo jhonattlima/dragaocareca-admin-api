@@ -15,6 +15,7 @@ import {
 } from "./episode-media-layout.service";
 import {
   createAiSummaryDraftState,
+  createSuggestedTagsDraftState,
   createTranscriptDraftState,
   normalizeEpisodeDraftState,
   type EpisodeDraftState,
@@ -570,6 +571,9 @@ const buildDraftStateForSummary = (
       summaryFileName: buildSummaryFileName(episodeId),
       error: error ?? null,
     },
+    suggestedTags: currentState?.suggestedTags
+      ? { ...currentState.suggestedTags, version, updatedAt: now }
+      : createSuggestedTagsDraftState({ version, updatedAt: now }),
   };
 };
 

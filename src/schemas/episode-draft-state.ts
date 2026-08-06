@@ -44,12 +44,59 @@ export type AiSummaryDraftState = EpisodeDraftStepState & {
   summaryFileName: string | null;
 };
 
+export type SafeTagErrorCategory =
+  | "disabled"
+  | "missing_credentials"
+  | "unauthorized"
+  | "quota_exhausted"
+  | "rate_limited"
+  | "provider_unavailable"
+  | "invalid_provider_response";
+
+export type SuggestedTagCandidate = {
+  displayTag: string;
+  normalizedTag: string;
+  relevant: boolean;
+  relevanceScore: number;
+};
+
+export type SuggestedTagRetrieval = {
+  displayTag: string;
+  normalizedTag: string;
+  approximateCount: number;
+  retrievedAt: string;
+  cacheStatus: "hit" | "miss";
+  regionCode: string;
+  relevanceLanguage: string;
+};
+
+export type SuggestedTagSuggestion = SuggestedTagRetrieval & {
+  relevanceScore: number;
+};
+
+export type SuggestedTagsDraftState = {
+  status: "idle" | "pending" | "processing" | "done" | "unavailable";
+  version: number;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  retryAt: string | null;
+  errorCategory: SafeTagErrorCategory | null;
+  promptVersion: string | null;
+  summaryDigest: string | null;
+  attemptCount: number;
+  candidates: SuggestedTagCandidate[];
+  retrievals: SuggestedTagRetrieval[];
+  suggestions: SuggestedTagSuggestion[];
+};
+
 export type EpisodeDraftState = {
   episodeId: number;
   version: number;
   updatedAt: string;
   transcript: TranscriptDraftState;
   aiSummary: AiSummaryDraftState;
+  suggestedTags: SuggestedTagsDraftState;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,6 +112,102 @@ const toNullableString = (value: unknown): string | null => (typeof value === "s
 
 const toNullableNumber = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const safeTagErrorCategories: SafeTagErrorCategory[] = [
+  "disabled",
+  "missing_credentials",
+  "unauthorized",
+  "quota_exhausted",
+  "rate_limited",
+  "provider_unavailable",
+  "invalid_provider_response",
+];
+
+const isSafeTagErrorCategory = (value: unknown): value is SafeTagErrorCategory =>
+  typeof value === "string" && safeTagErrorCategories.includes(value as SafeTagErrorCategory);
+
+const boundedAttemptCount = (value: unknown): number =>
+  typeof value === "number" && Number.isInteger(value) ? Math.min(20, Math.max(0, value)) : 0;
+
+const boundedScore = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100 ? value : null;
+
+const boundedApproximateCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1_000_000 ? value : null;
+
+export const normalizeHashtagTag = (value: unknown): { displayTag: string; normalizedTag: string } | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  const withoutHash = normalized.startsWith("#") ? normalized.slice(1) : normalized;
+  if (!withoutHash || /[\u0000-\u001f\u007f]/u.test(withoutHash) || /\s/u.test(withoutHash)) return null;
+  const canonical = withoutHash.toLowerCase();
+  return { displayTag: `#${canonical}`, normalizedTag: `#${canonical}` };
+};
+
+const normalizeSuggestedTags = (value: unknown, version: number, updatedAt: string): SuggestedTagsDraftState => {
+  const record = isRecord(value) ? value : {};
+  const status = record.status === "pending" || record.status === "processing" || record.status === "done" || record.status === "unavailable" ? record.status : "idle";
+  const candidates = Array.isArray(record.candidates)
+    ? record.candidates.flatMap((candidate): SuggestedTagCandidate[] => {
+        if (!isRecord(candidate)) return [];
+        const tag = normalizeHashtagTag(candidate.displayTag ?? candidate.normalizedTag);
+        const relevanceScore = boundedScore(candidate.relevanceScore);
+        if (!tag || typeof candidate.relevant !== "boolean" || relevanceScore == null) return [];
+        return [{ ...tag, relevant: candidate.relevant, relevanceScore }];
+      })
+    : [];
+  const normalizeRetrievals = (retrievals: unknown): SuggestedTagRetrieval[] =>
+    Array.isArray(retrievals)
+      ? retrievals.flatMap((retrieval): SuggestedTagRetrieval[] => {
+          if (!isRecord(retrieval)) return [];
+          const tag = normalizeHashtagTag(retrieval.displayTag ?? retrieval.normalizedTag);
+          const approximateCount = boundedApproximateCount(retrieval.approximateCount);
+          if (!tag || approximateCount == null || typeof retrieval.retrievedAt !== "string" || !retrieval.retrievedAt.trim()) return [];
+          const cacheStatus = retrieval.cacheStatus === "hit" || retrieval.cacheStatus === "miss" ? retrieval.cacheStatus : null;
+          if (!cacheStatus || typeof retrieval.regionCode !== "string" || typeof retrieval.relevanceLanguage !== "string") return [];
+          return [{ ...tag, approximateCount, retrievedAt: retrieval.retrievedAt, cacheStatus, regionCode: retrieval.regionCode, relevanceLanguage: retrieval.relevanceLanguage }];
+        })
+      : [];
+  const retrievals = normalizeRetrievals(record.retrievals);
+  const suggestions = Array.isArray(record.suggestions)
+    ? record.suggestions.flatMap((suggestion): SuggestedTagSuggestion[] => {
+        const normalized = normalizeRetrievals([suggestion])[0];
+        const relevanceScore = isRecord(suggestion) ? boundedScore(suggestion.relevanceScore) : null;
+        return normalized && relevanceScore != null ? [{ ...normalized, relevanceScore }] : [];
+      })
+    : [];
+  return {
+    status,
+    version,
+    updatedAt: toIsoString(record.updatedAt, updatedAt),
+    startedAt: toNullableString(record.startedAt),
+    finishedAt: toNullableString(record.finishedAt),
+    retryAt: toNullableString(record.retryAt),
+    errorCategory: isSafeTagErrorCategory(record.errorCategory) ? record.errorCategory : null,
+    promptVersion: toNullableString(record.promptVersion),
+    summaryDigest: toNullableString(record.summaryDigest),
+    attemptCount: boundedAttemptCount(record.attemptCount),
+    candidates,
+    retrievals,
+    suggestions,
+  };
+};
+
+export const createSuggestedTagsDraftState = (overrides: Partial<SuggestedTagsDraftState> = {}): SuggestedTagsDraftState => ({
+  status: overrides.status ?? "idle",
+  version: overrides.version ?? 0,
+  updatedAt: overrides.updatedAt ?? new Date().toISOString(),
+  startedAt: overrides.startedAt ?? null,
+  finishedAt: overrides.finishedAt ?? null,
+  retryAt: overrides.retryAt ?? null,
+  errorCategory: overrides.errorCategory ?? null,
+  promptVersion: overrides.promptVersion ?? null,
+  summaryDigest: overrides.summaryDigest ?? null,
+  attemptCount: boundedAttemptCount(overrides.attemptCount),
+  candidates: overrides.candidates ?? [],
+  retrievals: overrides.retrievals ?? [],
+  suggestions: overrides.suggestions ?? [],
+});
 
 const normalizeStepState = (
   value: unknown,
@@ -150,6 +293,7 @@ export const createEpisodeDraftState = (episodeId: number, overrides: Partial<Ep
   updatedAt: overrides.updatedAt ?? new Date().toISOString(),
   transcript: createTranscriptDraftState(overrides.transcript ?? {}),
   aiSummary: createAiSummaryDraftState(overrides.aiSummary ?? {}),
+  suggestedTags: createSuggestedTagsDraftState({ ...(overrides.suggestedTags ?? {}), version: overrides.suggestedTags?.version ?? overrides.version ?? 0 }),
 });
 
 export const normalizeEpisodeDraftState = (value: unknown, episodeId?: number): EpisodeDraftState | null => {
@@ -188,6 +332,7 @@ export const normalizeEpisodeDraftState = (value: unknown, episodeId?: number): 
         fileName: null,
         summaryFileName: null,
       }),
+      suggestedTags: normalizeSuggestedTags(value.suggestedTags, version, updatedAt),
     };
   }
 
@@ -216,6 +361,7 @@ export const normalizeEpisodeDraftState = (value: unknown, episodeId?: number): 
         fileName: null,
         summaryFileName: null,
       }),
+      suggestedTags: createSuggestedTagsDraftState({ version, updatedAt }),
     };
   }
 
@@ -225,5 +371,6 @@ export const normalizeEpisodeDraftState = (value: unknown, episodeId?: number): 
     updatedAt: toIsoString(value.updatedAt, new Date().toISOString()),
     transcript: createTranscriptDraftState(),
     aiSummary: createAiSummaryDraftState(),
+    suggestedTags: createSuggestedTagsDraftState(),
   };
 };

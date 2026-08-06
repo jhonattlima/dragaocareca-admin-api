@@ -20,6 +20,7 @@ import {
 } from "./episode-summary.service";
 import {
   createAiSummaryDraftState,
+  createSuggestedTagsDraftState,
   createTranscriptDraftState,
   normalizeEpisodeDraftState,
   type EpisodeDraftState,
@@ -156,6 +157,9 @@ const nextDraftState = (
       : createAiSummaryDraftState({
           summaryFileName: transcriptSummaryFileName(episodeId),
         }),
+    suggestedTags: current?.suggestedTags
+      ? { ...current.suggestedTags, version: nextVersion, updatedAt: now }
+      : createSuggestedTagsDraftState({ version: nextVersion, updatedAt: now }),
   };
 };
 

@@ -42,6 +42,81 @@ const boundedPositiveInteger = (value: string | undefined, defaultValue: number,
   return parsed;
 };
 
+export type HashtagAuthoringConfig = {
+  enabled: boolean;
+  geminiModel: string;
+  geminiPromptVersion: string;
+  cacheSuccessTtlMs: number;
+  cacheZeroResultTtlMs: number;
+  lookupLaneCount: 1;
+  automaticDailyCalls: 90;
+  manualDailyCalls: 10;
+  regionCode: string;
+  relevanceLanguage: string;
+  requestTimeoutMs: number;
+  retryDelaysMs: [number, number, number, number];
+};
+
+type HashtagAuthoringEnv = Record<string, string | undefined>;
+
+export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.env): HashtagAuthoringConfig => {
+  const automaticDailyCalls = boundedPositiveInteger(
+    env.YOUTUBE_HASHTAG_AUTOMATIC_DAILY_CALLS,
+    90,
+    "YOUTUBE_HASHTAG_AUTOMATIC_DAILY_CALLS",
+    90
+  );
+  const manualDailyCalls = boundedPositiveInteger(
+    env.YOUTUBE_HASHTAG_MANUAL_DAILY_CALLS,
+    10,
+    "YOUTUBE_HASHTAG_MANUAL_DAILY_CALLS",
+    10
+  );
+  if (automaticDailyCalls + manualDailyCalls !== 100) {
+    throw new Error("YOUTUBE_HASHTAG_AUTOMATIC_DAILY_CALLS and YOUTUBE_HASHTAG_MANUAL_DAILY_CALLS must total 100");
+  }
+
+  const lookupLaneCount = boundedPositiveInteger(env.YOUTUBE_HASHTAG_LOOKUP_LANE_COUNT, 1, "YOUTUBE_HASHTAG_LOOKUP_LANE_COUNT", 1);
+  if (lookupLaneCount !== 1) {
+    throw new Error("YOUTUBE_HASHTAG_LOOKUP_LANE_COUNT must be 1");
+  }
+
+  return {
+    enabled: (env.YOUTUBE_HASHTAG_AUTHORING_ENABLED ?? "false").toLowerCase() === "true",
+    geminiModel: env.YOUTUBE_HASHTAG_GEMINI_MODEL ?? "gemini-3.6-flash",
+    geminiPromptVersion: env.YOUTUBE_HASHTAG_GEMINI_PROMPT_VERSION ?? "1",
+    cacheSuccessTtlMs: boundedPositiveInteger(
+      env.YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS,
+      24 * 60 * 60 * 1000,
+      "YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS",
+      7 * 24 * 60 * 60 * 1000
+    ),
+    cacheZeroResultTtlMs: boundedPositiveInteger(
+      env.YOUTUBE_HASHTAG_CACHE_ZERO_RESULT_TTL_MS,
+      6 * 60 * 60 * 1000,
+      "YOUTUBE_HASHTAG_CACHE_ZERO_RESULT_TTL_MS",
+      7 * 24 * 60 * 60 * 1000
+    ),
+    lookupLaneCount: 1,
+    automaticDailyCalls: 90,
+    manualDailyCalls: 10,
+    regionCode: env.YOUTUBE_HASHTAG_REGION_CODE ?? "BR",
+    relevanceLanguage: env.YOUTUBE_HASHTAG_RELEVANCE_LANGUAGE ?? "pt",
+    requestTimeoutMs: boundedPositiveInteger(
+      env.YOUTUBE_HASHTAG_REQUEST_TIMEOUT_MS,
+      15_000,
+      "YOUTUBE_HASHTAG_REQUEST_TIMEOUT_MS",
+      120_000
+    ),
+    retryDelaysMs: [
+      boundedPositiveInteger(env.YOUTUBE_HASHTAG_RETRY_DELAY_1_MS, 60_000, "YOUTUBE_HASHTAG_RETRY_DELAY_1_MS", 3_600_000),
+      boundedPositiveInteger(env.YOUTUBE_HASHTAG_RETRY_DELAY_2_MS, 300_000, "YOUTUBE_HASHTAG_RETRY_DELAY_2_MS", 3_600_000),
+      boundedPositiveInteger(env.YOUTUBE_HASHTAG_RETRY_DELAY_3_MS, 900_000, "YOUTUBE_HASHTAG_RETRY_DELAY_3_MS", 3_600_000),
+      boundedPositiveInteger(env.YOUTUBE_HASHTAG_RETRY_DELAY_4_MS, 3_600_000, "YOUTUBE_HASHTAG_RETRY_DELAY_4_MS", 3_600_000),
+    ],
+  };
+};
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
@@ -85,6 +160,7 @@ export const config = {
     timeZone: process.env.YOUTUBE_METRICS_TIME_ZONE ?? "America/Sao_Paulo",
     timeoutMs: Number(process.env.YOUTUBE_METRICS_TIMEOUT_MS ?? 15000),
     sampleIntervalMs: Number(process.env.YOUTUBE_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
+    hashtagAuthoring: parseHashtagAuthoringConfig(),
     trailerJob: {
       enabled: (process.env.YOUTUBE_TRAILER_JOB_ENABLED ?? "false").toLowerCase() === "true",
       providerTimeoutMs: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_PROVIDER_TIMEOUT_MS, 30_000, "YOUTUBE_TRAILER_JOB_PROVIDER_TIMEOUT_MS", 300_000),
