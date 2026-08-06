@@ -22,9 +22,14 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 - **D-05:** The YouTube description is exactly the episode's final saved summary; no automatic channel boilerplate is appended.
 - **D-06:** The trailer title remains operator-editable. Its intended UI format is `Trailer - <title> <hashtag1> <hashtag2> <hashtag3>` and title plus retained hashtags must stay within YouTube's 100-character limit.
 
+### Independent hashtag-authoring workflow
+- **D-07:** When transcript generation finishes, the API continues the existing sequential authoring flow: Gemini generates the saved summary, then Gemini generates 50 hashtag candidates grounded in that transcript and summary.
+- **D-08:** The API independently queries YouTube for those 50 normalized candidates, ranks and returns three relevant suggestions with approximate retrieval metadata, and exposes them for the admin-web YouTube-tags field.
+- **D-09:** Hashtag generation and lookup are independent from trailer-video upload, private YouTube jobs, publication, and playlist insertion. The user may edit, use fewer suggestions, or discard all of them.
+
 ### Retention and failure behavior
-- **D-07:** Only confirmed successful public publication plus playlist insertion may trigger local retention cleanup.
-- **D-08:** Retain the current final trailer and the configured twelve newest prior local versions by default. If cleanup fails, preserve publication and record a recoverable cleanup error; never attempt to undo public publication.
+- **D-10:** Only confirmed successful public publication plus playlist insertion may trigger local retention cleanup.
+- **D-11:** Retain the current final trailer and the configured twelve newest prior local versions by default. If cleanup fails, preserve publication and record a recoverable cleanup error; never attempt to undo public publication.
 
 ### the agent's Discretion
 - Choose the safe idempotency, compensation, and reconciliation mechanics for public visibility and playlist insertion.
@@ -65,13 +70,12 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 <specifics>
 ## Specific Ideas
 
-The upcoming hashtag-discovery button is a separate future requirement: Gemini may generate candidates and a backend search endpoint may return approximate counts after debounce. It is not part of this phase's implementation scope.
+The automatic hashtag pipeline is independent from trailer-video work: transcript -> summary -> Gemini 50 candidates -> YouTube lookup -> three suggestions. Admin-web owns presenting the returned suggestions in its YouTube-tags field.
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- Gemini-generated candidate hashtags and approximate public YouTube search counts, invoked from an admin-web button, require a separate GSD requirement/phase.
 - Admin-web controls for publication, title editing, and hashtags remain owned by the sibling frontend project.
 </deferred>
 
