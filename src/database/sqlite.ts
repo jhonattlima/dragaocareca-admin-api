@@ -206,6 +206,31 @@ CREATE TABLE IF NOT EXISTS youtube_trailer_jobs (
   completed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS youtube_hashtag_count_cache (
+  normalized_tag TEXT NOT NULL,
+  region_code TEXT NOT NULL,
+  relevance_language TEXT NOT NULL,
+  search_shape_version TEXT NOT NULL,
+  approximate_count INTEGER NOT NULL CHECK (approximate_count BETWEEN 0 AND 1000000),
+  retrieved_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  error_category TEXT,
+  PRIMARY KEY (normalized_tag, region_code, relevance_language, search_shape_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_hashtag_count_cache_fresh
+  ON youtube_hashtag_count_cache(normalized_tag, region_code, relevance_language, search_shape_version, expires_at);
+
+CREATE TABLE IF NOT EXISTS youtube_hashtag_quota_admissions (
+  quota_date TEXT NOT NULL,
+  caller_class TEXT NOT NULL CHECK (caller_class IN ('automatic', 'manual')),
+  admitted_count INTEGER NOT NULL DEFAULT 0 CHECK (admitted_count >= 0),
+  PRIMARY KEY (quota_date, caller_class)
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_hashtag_quota_admissions_day
+  ON youtube_hashtag_quota_admissions(quota_date, caller_class);
+
 CREATE INDEX IF NOT EXISTS idx_episode_trailer_video_drafts_expiry
   ON episode_trailer_video_drafts(state, expires_at);
 
@@ -357,8 +382,35 @@ export const getDb = (): DatabaseSync => {
     ensureArtifactJobColumns(db);
     ensureEpisodeTrailerVideoDraftTable(db);
     ensureYoutubeTrailerJobColumns(db);
+    ensureYoutubeHashtagCacheTables(db);
   }
   return db;
+};
+
+const ensureYoutubeHashtagCacheTables = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS youtube_hashtag_count_cache (
+      normalized_tag TEXT NOT NULL,
+      region_code TEXT NOT NULL,
+      relevance_language TEXT NOT NULL,
+      search_shape_version TEXT NOT NULL,
+      approximate_count INTEGER NOT NULL DEFAULT 0,
+      retrieved_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      error_category TEXT,
+      PRIMARY KEY (normalized_tag, region_code, relevance_language, search_shape_version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_youtube_hashtag_count_cache_fresh
+      ON youtube_hashtag_count_cache(normalized_tag, region_code, relevance_language, search_shape_version, expires_at);
+    CREATE TABLE IF NOT EXISTS youtube_hashtag_quota_admissions (
+      quota_date TEXT NOT NULL,
+      caller_class TEXT NOT NULL CHECK (caller_class IN ('automatic', 'manual')),
+      admitted_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (quota_date, caller_class)
+    );
+    CREATE INDEX IF NOT EXISTS idx_youtube_hashtag_quota_admissions_day
+      ON youtube_hashtag_quota_admissions(quota_date, caller_class);
+  `);
 };
 
 const ensureEpisodeTrailerVideoDraftTable = (database: DatabaseSync): void => {
