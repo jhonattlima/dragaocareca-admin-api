@@ -18,6 +18,7 @@ import {
   syncDraftEpisodeTranscription,
 } from "../services/episode-transcription.service";
 import { getEpisodeDraftSummary } from "../services/episode-summary.service";
+import { createYouTubeHashtagSearchService } from "../services/youtube-hashtag-search.service";
 import {
   EpisodeArtifactSelectorValidationError,
   parseEpisodeArtifactSelectors,
@@ -71,6 +72,14 @@ const noStoreYoutubeTrailerJobs: RequestHandler = (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 };
+
+const noStoreHashtagAuthoring: RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
+const manualHashtagLookupSchema = z.object({ tag: z.string().min(1).max(100) }).strict();
+const hashtagSearchService = createYouTubeHashtagSearchService();
 
 const artifactJobRequestSchema = z.object({
   artifacts: z.array(z.enum(["episode", "trailer", "trailer-video", "transcript", "image", "image-low"])).min(1).optional(),
@@ -565,7 +574,7 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
   }
 });
 
-episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async (req, res, next) => {
+episodesRouter.get("/:episodeId/episodes-generated-summary", noStoreHashtagAuthoring, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -573,8 +582,50 @@ episodesRouter.get("/:episodeId/episodes-generated-summary", requireAuth, async 
       return;
     }
 
-    res.setHeader("Cache-Control", "no-store");
     res.json(getEpisodeDraftSummary(episodeId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.post("/:episodeId/hashtag-lookup", noStoreHashtagAuthoring, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+
+    const body = manualHashtagLookupSchema.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "tag must be one nonempty hashtag without whitespace" });
+      return;
+    }
+
+    const lookup = await hashtagSearchService.lookup(body.data.tag, "manual");
+    if (lookup.errorCategory === "invalid_provider_response") {
+      res.status(400).json({ message: "tag must be one nonempty hashtag without whitespace" });
+      return;
+    }
+
+    const safe = {
+      displayTag: lookup.displayTag,
+      normalizedTag: lookup.normalizedTag,
+      approximateCount: lookup.approximateCount,
+      retrievedAt: lookup.retrievedAt,
+      regionCode: lookup.regionCode,
+      relevanceLanguage: lookup.relevanceLanguage,
+      source: lookup.source,
+      cacheStatus: lookup.cacheStatus,
+      state: lookup.ok ? "available" : "unavailable",
+      errorCategory: lookup.errorCategory,
+      retryAt: lookup.retryAt,
+    } as const;
+    if (!lookup.ok) {
+      res.status(lookup.errorCategory === "quota_exhausted" ? 429 : 503).json(safe);
+      return;
+    }
+    res.json(safe);
   } catch (error) {
     next(error);
   }
