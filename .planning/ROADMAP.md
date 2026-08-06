@@ -86,7 +86,7 @@ Plans:
 | 15. Final Trailer Video Artifact | 4/4 | Executed; frontend UAT deferred | 2026-08-03 |
 | 16. Draft Staging and Private YouTube Job | 5/6 | In Progress|  |
 | 17. Trailer Metadata, Publication and Retention | 0/TBD | Not started | - |
-| 18. Episode Hashtag Authoring | 2/4 | In Progress|  |
+| 18. Episode Hashtag Authoring | 3/4 | In Progress|  |
 
 ## Archive Index
 
@@ -98,13 +98,13 @@ Plans:
 **Goal:** Generate and expose advisory episode hashtags from the completed transcript and summary, with independent YouTube relevance lookup.
 **Requirements**: TRAILER-06
 **Depends on:** Phase 16
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 
 - [x] 18-01-PLAN.md — Create the offline validation foundation plus persisted state and bounded configuration.
 - [x] 18-02-PLAN.md — Implement the durable cache, serial public-search boundary, and structured 50-candidate authoring service.
-- [ ] 18-03-PLAN.md — Queue tags after summary completion and expose protected persisted/manual lookup contracts.
+- [x] 18-03-PLAN.md — Queue tags after summary completion and expose protected persisted/manual lookup contracts.
 - [ ] 18-04-PLAN.md — Complete fake-provider lifecycle, route-redaction, and OpenAPI parity verification.
 
 ---
