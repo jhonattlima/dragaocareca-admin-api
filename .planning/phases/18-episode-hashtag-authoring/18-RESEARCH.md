@@ -42,11 +42,11 @@
 
 ## Summary
 
-Phase 18 should extend—not replace—the episode AI workflow. The transcript worker writes the transcript state, queues one summary, and the summary service serializes executions with an in-process promise tail before atomically persisting `aiSummary: done`. Queue tag authoring only after that successful state write, inside the same serial execution, but isolate tag errors so summary completion remains `done` even when candidate generation or YouTube lookup is unavailable. [VERIFIED: codebase grep]
+Phase 18 should extend—not replace—the episode AI workflow. The transcript worker writes the transcript state, queues one summary, and the summary service serializes executions with an in-process promise tail before atomically persisting `aiSummary: done`. Persist tag work as `pending`, `processing`, or `unavailable` with `retryAt`; a dedicated startup worker must recover due or interrupted rows into one serialized authoring lane after restart. Queue tag authoring only after that successful state write, and isolate tag errors so summary completion remains `done` even when candidate generation or YouTube lookup is unavailable. [VERIFIED: codebase grep] [ASSUMED: durable recovery design]
 
 Use one Gemini structured-output request to produce exactly 50 candidate records. Each record must include the display tag, a deterministic relevance decision, and a bounded relevance score; locally validate JSON, normalize/dedupe tags, then request YouTube `search.list` sequentially for every surviving candidate. `pageInfo.totalResults` is expressly approximate and capped at 1,000,000, so label it as an approximate public search count rather than a precise hashtag-use count. [CITED: https://ai.google.dev/gemini-api/docs/structured-output] [CITED: https://developers.google.com/youtube/v3/docs/search/list]
 
-The critical operational constraint is quota: official YouTube documentation currently assigns `search.list` a separate 100-call daily bucket, with each call costing one and invalid requests still costing quota. Fifty cold candidates consume half that bucket before manual lookups. Persist a normalized count cache in SQLite, permit only one sequential lookup at a time, and fail safely into `unavailable` with a retry time when cache misses cannot be admitted. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost]
+The critical operational constraint is quota: official YouTube documentation currently assigns `search.list` a separate 100-call daily bucket, with each call costing one and invalid requests still costing quota. Fifty cold candidates consume half that bucket before manual lookups. This phase uses a strict Pacific-time 90/10 reservation: automatic authoring can admit at most 90 cache-miss calls and manual lookup can admit at most 10 cache-miss calls per quota day; neither class may borrow the other class’s unused allocation, while fresh cache hits consume neither allocation. Persist a normalized count cache, permit only one sequential lookup at a time, and fail safely into `unavailable` with a retry time when cache misses cannot be admitted. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost] [ASSUMED: reservation policy]
 
 **Primary recommendation:** Attach a single tag-authoring stage after the durable summary write; use Gemini JSON candidate records, a SQLite normalized-count cache and one server-side lookup lane, then persist only a sanitized `suggestedTags` snapshot and return its three relevant highest-count selections. [VERIFIED: codebase grep] [CITED: https://ai.google.dev/gemini-api/docs/structured-output]
 
@@ -111,7 +111,8 @@ Transcript worker
 Summary service (existing one-at-a-time tail)
   │ Gemini summary → validate → write summary.txt → persist aiSummary: done
   ▼
-Tag authoring stage (same sequential lane; failure isolated)
+Persisted suggestedTags state + authoring worker
+  │ startup recovery + due retries enter one serialized lane; failure isolated
   │ Gemini structured JSON: exactly 50 candidate records
   ▼
 Local validation + normalization + dedupe
@@ -137,7 +138,9 @@ src/
 ├── database/repositories/youtube-hashtag-cache.repository.ts # durable normalized cache
 ├── services/episode-hashtag-authoring.service.ts  # Gemini, validation, ranking, safe DTO
 ├── services/youtube-hashtag-search.service.ts     # cache, admission, provider adapter
-├── services/episode-summary.service.ts            # enqueue stage after persisted summary done
+├── services/episode-summary.service.ts            # persist state and enqueue after summary done
+├── workers/episode-hashtag-authoring.worker.ts    # startup recovery and due-retry scheduling
+├── server.ts                                      # start/stop the enabled authoring worker
 ├── routes/episodes.routes.ts                      # protected snapshot and single lookup routes
 ├── config/env.ts                                  # bounded cache/rate/retry configuration
 └── scripts/verify-episode-hashtag-authoring.ts    # fake Gemini/YouTube offline contract
@@ -145,11 +148,11 @@ src/
 
 ### Pattern 1: Durable summary boundary, then isolated tag stage
 
-**What:** Keep the existing serialized summary tail. Write `summary.txt`, then persist `aiSummary.status = "done"`; only then queue/execute tags. A tags failure must write `suggestedTags.status = "unavailable"` without changing transcript or summary status/files. [VERIFIED: codebase grep] [VERIFIED: .planning/phases/18-episode-hashtag-authoring/18-CONTEXT.md]
+**What:** Keep the existing serialized summary tail. Write `summary.txt`, then persist `aiSummary.status = "done"`; only then durably persist `suggestedTags.status = "pending"` and enqueue tags. A tags failure must write `suggestedTags.status = "unavailable"` with `retryAt` without changing transcript or summary status/files. A worker started from server bootstrap must, before its periodic due-retry timer, scan episode state for `pending`, interrupted `processing`, and due `unavailable` states, normalize interrupted work to retryable state, and enqueue each eligible episode through the same process-wide serialized lane. [VERIFIED: codebase grep] [VERIFIED: .planning/phases/18-episode-hashtag-authoring/18-CONTEXT.md] [ASSUMED: recovery scan]
 
 **When to use:** Transcript completion and explicit summary regeneration. Regeneration must increment the shared episode-state version and make earlier tag work stale. [VERIFIED: codebase grep]
 
-**Required stale-write guard:** Capture the shared state version and a digest of the saved summary before Gemini; before each cache write and final state write, re-read the state and require the same version/digest. A later summary regeneration must suppress an older async tag result. [ASSUMED]
+**Required stale-write guard:** Capture the shared root state version and a SHA-256 digest of the saved summary before changing tags from `pending` to `processing` and before every terminal/retry `suggestedTags` persistence. Re-read the state at each guard and require the same root version plus summary digest; if either differs, discard the stale authoring result without mutating tag state. Cache entries remain independently reusable because they are keyed only by the normalized public search shape, not by an episode. A later summary regeneration must increment the root version, reset `suggestedTags` for the new digest, and suppress older async results. [ASSUMED]
 
 ### Pattern 2: Schema-constrained Gemini candidate output plus local validation
 
@@ -175,7 +178,7 @@ The requirement says all 50 normalized candidates are looked up. Therefore rejec
 
 ### Pattern 3: Canonical normalized lookup and cache identity
 
-**What:** Normalize once in a pure helper used by automatic and manual paths: Unicode NFKC, trim/collapse whitespace, accept one optional leading `#`, reject empty/control characters/whitespace inside the resulting tag, case-fold to a cache key, and return display form as `#${normalized}`. Build provider requests only with `URLSearchParams`; never concatenate operator input into a URL. [ASSUMED]
+**What:** Normalize once in a pure helper used by automatic and manual paths: Unicode NFKC, trim/collapse whitespace, accept one optional leading `#`, reject empty/control characters/whitespace inside the resulting tag, and Unicode case-fold to the cache key. The display-case policy is deliberately canonical: every public/persisted `displayTag` is `#${normalizedTag}` in the case-folded lower-case form, regardless of the Gemini or operator input spelling. This makes equivalent input share one cache identity and keeps response/display case deterministic; the raw input spelling is neither persisted nor returned. Build provider requests only with `URLSearchParams`; never concatenate operator input into a URL. [ASSUMED]
 
 **Provider request:** `GET /youtube/v3/search` with `part=snippet`, `q=#${normalizedTag}`, `type=video`, `maxResults=0`, `order=relevance`, `regionCode=BR`, and `relevanceLanguage=pt`. The documented method uses `q`, allows `maxResults` from 0 through 50, supports `type`, region and relevance-language filters, and returns `pageInfo.totalResults`; `maxResults=0` keeps the response payload minimal while requesting only the page metadata. [CITED: https://developers.google.com/youtube/v3/docs/search/list]
 
@@ -183,9 +186,9 @@ The requirement says all 50 normalized candidates are looked up. Therefore rejec
 
 ### Pattern 4: Cache-first quota admission and retries
 
-**What:** Store cache rows keyed by `(normalized_tag, region_code, relevance_language, search_shape_version)`, including count, retrieval timestamp, expiry timestamp, and only a safe normalized provider-error category. Cache hits never call YouTube. Use one process-wide, non-overlapping lookup lane shared by automatic and manual paths; automatic work enqueues all fifty in order, manual work can consume only a configured bounded share. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost] [ASSUMED]
+**What:** Store cache rows keyed by `(normalized_tag, region_code, relevance_language, search_shape_version)`, including count, retrieval timestamp, expiry timestamp, and only a safe normalized provider-error category. Cache hits never call YouTube. Use one process-wide, non-overlapping lookup lane shared by automatic and manual paths; automatic work enqueues all fifty in order and manual work has a separately persisted reserved bucket. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost] [ASSUMED]
 
-**Recommended operational defaults (agent discretion; confirm before locking):** Fresh success TTL: 24 hours; bounded zero-count TTL: 6 hours; one lookup at a time; maximum 90 provider calls in one Pacific-time quota day; reserve 10 calls for manual operator checks; retry transient 408/429/5xx/network failures with 1, 5, 15, and 60 minute delays, then mark `unavailable` and retry at the next safe admission window. These limits leave headroom below YouTube's documented 100-call search bucket and prevent a tag batch from exhausting manual lookup capacity. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost] [ASSUMED]
+**Operational policy (locked for implementation under agent discretion):** Fresh success TTL: 24 hours; bounded zero-count TTL: 6 hours; one lookup at a time; exactly 90 automatic and 10 manual provider-call admissions per Pacific-time quota day. The ledger stores the caller class, rejects automatic admission after 90 even when manual allocation is unused, and rejects manual admission after 10 even when automatic allocation is unused; cache hits need no admission. Retry transient 408/429/5xx/network failures with 1, 5, 15, and 60 minute delays; after the bounded attempts, remain `unavailable` and schedule the next retry at the next Pacific quota-day boundary if quota admission is unavailable. The durable worker executes due retries and startup recovery under the same one-at-a-time lane. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost] [ASSUMED]
 
 **Failure boundaries:** Configuration/auth failure, non-OK provider response, malformed response, rate admission refusal, or stale state must never re-run transcription or overwrite a successful summary. Persist a short error category (`disabled`, `missing_credentials`, `unauthorized`, `quota_exhausted`, `rate_limited`, `provider_unavailable`, `invalid_provider_response`) plus `retryAt`; keep status `unavailable` and do not expose raw upstream bodies. [VERIFIED: codebase grep] [ASSUMED]
 
