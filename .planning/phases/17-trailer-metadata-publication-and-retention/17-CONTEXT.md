@@ -26,10 +26,11 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 - **D-07:** When transcript generation finishes, the API continues the existing sequential authoring flow: Gemini generates the saved summary, then Gemini generates 50 hashtag candidates grounded in that transcript and summary.
 - **D-08:** The API independently queries YouTube for those 50 normalized candidates, ranks and returns three relevant suggestions with approximate retrieval metadata, and exposes them for the admin-web YouTube-tags field.
 - **D-09:** Hashtag generation and lookup are independent from trailer-video upload, private YouTube jobs, publication, and playlist insertion. The user may edit, use fewer suggestions, or discard all of them.
+- **D-10:** A protected single-hashtag endpoint accepts a manually entered tag, normalizes it, and returns its approximate YouTube result count with retrieval metadata. Admin-web calls it after two seconds without typing and displays the number to the user.
 
 ### Retention and failure behavior
-- **D-10:** Only confirmed successful public publication plus playlist insertion may trigger local retention cleanup.
-- **D-11:** Retain the current final trailer and the configured twelve newest prior local versions by default. If cleanup fails, preserve publication and record a recoverable cleanup error; never attempt to undo public publication.
+- **D-11:** Only confirmed successful public publication plus playlist insertion may trigger local retention cleanup.
+- **D-12:** Retain the current final trailer and the configured twelve newest prior local versions by default. If cleanup fails, preserve publication and record a recoverable cleanup error; never attempt to undo public publication.
 
 ### the agent's Discretion
 - Choose the safe idempotency, compensation, and reconciliation mechanics for public visibility and playlist insertion.
