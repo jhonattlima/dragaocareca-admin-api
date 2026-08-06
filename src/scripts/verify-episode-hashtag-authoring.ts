@@ -128,6 +128,8 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(repository.admit("manual", "2026-08-06", 10), true);
 
   const { createEpisodeHashtagAuthoringService } = await import("../services/episode-hashtag-authoring.service.js");
+  const { validateGeminiTagCandidates } = await import("../services/episode-hashtag-authoring.service.js");
+  assert.throws(() => validateGeminiTagCandidates({ candidates: [] }), /exactly 50/);
   const candidates = Array.from({ length: 50 }, (_, index) => ({ tag: `tag${index}`, relevant: index < 3, relevanceScore: index === 1 ? 100 : 50 }));
   const lookedUp: string[] = [];
   const authoring = createEpisodeHashtagAuthoringService({
