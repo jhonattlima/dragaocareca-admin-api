@@ -350,17 +350,13 @@ The example uses the existing server OAuth pattern; search documentation also in
 | A4 | `maxResults=0` is the right minimal payload shape while preserving `pageInfo`. | Architecture Pattern 3 | Need to increase to 1 if provider behavior contradicts the documented response shape. |
 | A5 | Persisting all sanitized candidates internally is necessary for retry; exposing only top three is sufficient to future UI. | Architecture Pattern 5 | State size/API contract might need adjustment. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the first deployed run use the proposed 90 automatic / 10 manual daily-search reservation?**
-   - What we know: YouTube documents a 100/day `search.list` bucket and the phase mandates 50 candidate lookups. [CITED: https://developers.google.com/youtube/v3/determine_quota_cost]
-   - What's unclear: Expected number of episode authoring runs and manual checks per day.
-   - Recommendation: Start at 90/10 as a configurable default and have the operator confirm it before enabling live calls. [ASSUMED]
+   - Resolution: Yes. Lock a strict Pacific-time quota-day reservation of exactly 90 automatic and 10 manual provider-call admissions. The allocations are non-borrowable: automatic work cannot use unused manual capacity, and manual work cannot use unused automatic capacity. Fresh cache hits consume neither allocation. [LOCKED]
 
 2. **Does the operator want display case preserved after normalization?**
-   - What we know: Cache/ranking needs a canonical identity, while hashtag display could retain Gemini/manual casing.
-   - What's unclear: Preferred user-facing capitalization policy.
-   - Recommendation: Persist canonical lower-case lookup key and display `#` plus the validated submitted/candidate case; state this explicitly in API docs. [ASSUMED]
+   - Resolution: No. Canonicalize every persisted and public display tag to lowercase as `#${normalizedTag}` after normalization; do not preserve Gemini or operator input casing. [LOCKED]
 
 ## Environment Availability
 
@@ -388,8 +384,8 @@ The example uses the existing server OAuth pattern; search documentation also in
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| TRAILER-06 | Summary success triggers one sequential tag stage only after durable summary state; tags failure preserves summary. | integration | `npm run verify:episode-hashtag-authoring -- --focus=sequence` | ❌ Wave 0 |
-| TRAILER-06 | Fake Gemini returns 50 records; local validator rejects malformed/duplicate/unsupported candidate sets. | integration | `npm run verify:episode-hashtag-authoring -- --focus=gemini` | ❌ Wave 0 |
+| TRAILER-06 | Summary success triggers one sequential tag stage only after durable summary state; tags failure preserves summary. | integration | `npm run verify:episode-hashtag-authoring -- --focus=lifecycle` | ❌ Wave 0 |
+| TRAILER-06 | Fake Gemini returns 50 records; local validator rejects malformed/duplicate/unsupported candidate sets. | integration | `npm run verify:episode-hashtag-authoring -- --focus=lookup` | ❌ Wave 0 |
 | TRAILER-06 | Fake YouTube proves cache hit/miss, approximate metadata, 50 sequential calls, relevance-gated top three, rate/quota unavailable state and retry. | integration | `npm run verify:episode-hashtag-authoring -- --focus=lookup` | ❌ Wave 0 |
 | TRAILER-06 | Protected manual route has no-store, normalization, safe DTO/error, and never exposes tokens/raw provider response. | integration | `npm run verify:episode-hashtag-authoring -- --focus=route` | ❌ Wave 0 |
 
