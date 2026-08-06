@@ -87,6 +87,49 @@ const verifyFoundationFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(legacy?.suggestedTags.version, 4);
 };
 
+const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
+  process.env.SQLITE_PATH = fixture.sqlitePath;
+  process.env.YOUTUBE_HASHTAG_AUTHORING_ENABLED = "true";
+  const [{ createYouTubeHashtagCacheRepository }, { createYouTubeHashtagSearchService, normalizeYouTubeHashtag }, { config }] = await Promise.all([
+    import("../database/repositories/youtube-hashtag-cache.repository.js"),
+    import("../services/youtube-hashtag-search.service.js"),
+    import("../config/env.js"),
+  ]);
+
+  assert.deepEqual(normalizeYouTubeHashtag("  #RPG  "), { displayTag: "#rpg", normalizedTag: "#rpg" });
+  assert.equal(normalizeYouTubeHashtag("#two words"), null);
+  assert.equal(normalizeYouTubeHashtag("##rpg"), null);
+
+  const repository = createYouTubeHashtagCacheRepository();
+  const providerCalls: string[] = [];
+  const service = createYouTubeHashtagSearchService({
+    repository,
+    now: () => new Date("2026-08-06T12:00:00.000Z"),
+    getAccessToken: async () => {
+      throw new Error("offline verifier must not request OAuth");
+    },
+    fetchSearch: async ({ normalizedTag }) => {
+      providerCalls.push(normalizedTag);
+      return { approximateCount: normalizedTag === "#rpg" ? 42 : 0 };
+    },
+  });
+  const first = await service.lookup("  #RPG  ", "automatic");
+  assert.equal(first.ok, true);
+  assert.equal(first.cacheStatus, "miss");
+  assert.equal(first.approximateCount, 42);
+  const second = await service.lookup("rpg", "automatic");
+  assert.equal(second.ok, true);
+  assert.equal(second.cacheStatus, "hit");
+  assert.deepEqual(providerCalls, ["#rpg"]);
+
+  const identityA = repository.getFresh({ normalizedTag: "#rpg", regionCode: config.youtube.hashtagAuthoring.regionCode, relevanceLanguage: config.youtube.hashtagAuthoring.relevanceLanguage, searchShapeVersion: "v1" }, new Date("2026-08-06T12:00:00.000Z"));
+  const identityB = repository.getFresh({ normalizedTag: "#rpg", regionCode: "US", relevanceLanguage: "en", searchShapeVersion: "v1" }, new Date("2026-08-06T12:00:00.000Z"));
+  assert.ok(identityA);
+  assert.equal(identityB, null);
+  assert.equal(repository.admit("automatic", "2026-08-06", 90), true);
+  assert.equal(repository.admit("manual", "2026-08-06", 10), true);
+};
+
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development");
 
@@ -95,10 +138,8 @@ const main = async (): Promise<void> => {
   const fixture = await createFixture();
   try {
     if (!focus || focus === "foundation") await verifyFoundationFocus(fixture);
-    if (focus && focus !== "foundation") {
-      // Later plans replace these branches with real offline service/route assertions.
-      verifyNoNetworkContract(createOfflineSeams());
-    }
+    if (focus === "lookup") await verifyLookupFocus(fixture);
+    if (focus && focus !== "foundation" && focus !== "lookup") verifyNoNetworkContract(createOfflineSeams());
     console.log(`offline hashtag-authoring ${focus ?? "all"} scaffold verified`);
   } finally {
     await fs.promises.rm(fixture.root, { recursive: true, force: true });
