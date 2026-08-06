@@ -5,15 +5,15 @@ milestone_name: Trailer Video Publishing
 current_phase: 18
 current_phase_name: episode-hashtag-authoring
 status: verifying
-stopped_at: Completed 18-03-PLAN.md
-last_updated: "2026-08-06T15:49:58.819Z"
-last_activity: 2026-08-04
-last_activity_desc: Phase 16 execution started
+stopped_at: Completed 18-04-PLAN.md
+last_updated: "2026-08-06T16:01:27.635Z"
+last_activity: 2026-08-06
+last_activity_desc: Phase 18 Plan 18-03 completed
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 14
-  completed_plans: 13
+  completed_plans: 14
 current_plan: 3
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-04)
 ## Current Position
 
 Phase: 18 (episode-hashtag-authoring) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Plan complete — ready for Plan 18-04
 Last activity: 2026-08-06 — Phase 18 Plan 18-03 completed
 
@@ -93,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 18 Plan 02 keeps provider errors retryable, serializes lookup misses, and validates exactly 50 structured Gemini candidates before relevance-gated ranking.
 - [Phase ?]: Queue hashtag authoring only after durable summary completion and guard writes with root version plus saved-summary SHA-256 digest.
 - [Phase ?]: Expose persisted advisory suggestions and manual approximate-count lookup through protected no-store contracts.
+- [Phase ?]: Keep Phase 18 proof offline with injected fake Gemini/OAuth/search seams and a fetch live-boundary tripwire.
+- [Phase ?]: Verify protected route DTOs against actual in-memory Express output and the emitted OpenAPI subset.
 
 ### Pending Todos
 
@@ -123,8 +125,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-06T15:49:58.813Z
-Stopped at: Completed 18-03-PLAN.md
+Last session: 2026-08-06T16:01:27.629Z
+Stopped at: Completed 18-04-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -154,6 +156,7 @@ Resume file: None
 | Phase 18 P01 | 12min | 2 tasks | 5 files |
 | Phase 18-episode-hashtag-authoring P02 | 12min | 3 tasks | 5 files |
 | Phase 18-episode-hashtag-authoring P03 | 18min | 3 tasks | 6 files |
+| Phase 18 P04 | 31min | 2 tasks | 2 files |
 
 ## Operator Next Steps
 
