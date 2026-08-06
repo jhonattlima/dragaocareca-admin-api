@@ -68,10 +68,10 @@ Plans:
 
 **Goal**: Administrators can prepare safe trailer metadata, explicitly publish a private-ready video, and retain local versions safely after confirmed public publication.
 **Depends on**: Phase 16
-**Requirements**: TRAILER-04, TRAILER-06, TRAILER-07, TRAILER-08
+**Requirements**: TRAILER-04, TRAILER-07, TRAILER-08
 **Success Criteria** (what must be TRUE):
 
-  1. The API suggests and validates an editable title using episode naming and selected hashtags, enforces the shared 100-Unicode-character and invalid-character policy, and returns approximate normalized-hashtag counts with retrieval metadata or a recoverable unavailable state.
+  1. The API validates the operator-edited trailer title and selected hashtags against the shared 100-Unicode-character and invalid-character policy before publication.
   2. Only an explicit authenticated publish command can change a private-ready provider video to `public`; repeated requests are idempotent/reconciled and use the final saved summary without exposing provider credentials.
   3. The protected episode contract persists and returns the canonical YouTube URL while retaining a clear `manual-sync-required` state after a local replacement.
   4. Successful public publication/update alone triggers retention, keeping the current video plus the configured newest versions with a default of 12.
@@ -86,11 +86,23 @@ Plans:
 | 15. Final Trailer Video Artifact | 4/4 | Executed; frontend UAT deferred | 2026-08-03 |
 | 16. Draft Staging and Private YouTube Job | 5/6 | In Progress|  |
 | 17. Trailer Metadata, Publication and Retention | 0/TBD | Not started | - |
+| 18. Episode Hashtag Authoring | 0/TBD | Not started | - |
 
 ## Archive Index
 
 - [MILESTONES.md](./MILESTONES.md) is the canonical completed-milestone index.
 - [Pre-GSD feature history](./milestones/PRE-GSD-HISTORY.md) preserves completed work that predates retained GSD phase artifacts.
+
+### Phase 18: Episode hashtag authoring
+
+**Goal:** Generate and expose advisory episode hashtags from the completed transcript and summary, with independent YouTube relevance lookup.
+**Requirements**: TRAILER-06
+**Depends on:** Phase 16
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 18 to break down)
 
 ---
 *Last updated: 2026-08-04 after reconciling v1.4 with the sibling admin-web workflow*

@@ -35,7 +35,7 @@
 | TRAILER-03 | 16 | Complete |
 | TRAILER-04 | 17 | Pending |
 | TRAILER-05 | 15 | Complete |
-| TRAILER-06 | 17 | Pending |
+| TRAILER-06 | 18 | Pending |
 | TRAILER-07 | 17 | Pending |
 | TRAILER-08 | 17 | Pending |
 | TRAILER-09 | 16 | Complete |
