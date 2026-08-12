@@ -42,6 +42,16 @@ const boundedPositiveInteger = (value: string | undefined, defaultValue: number,
   return parsed;
 };
 
+const boundedNonNegativeInteger = (value: string | undefined, defaultValue: number, name: string, maximum: number): number => {
+  if (value === undefined || value === "") return defaultValue;
+  if (!/^\d+$/.test(value)) throw new Error(`${name} must be a non-negative integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > maximum) {
+    throw new Error(`${name} must be a non-negative integer no greater than ${maximum}`);
+  }
+  return parsed;
+};
+
 export type HashtagAuthoringConfig = {
   enabled: boolean;
   geminiModel: string;
@@ -170,6 +180,21 @@ export const config = {
       retryAttempts: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_RETRY_ATTEMPTS, 5, "YOUTUBE_TRAILER_JOB_RETRY_ATTEMPTS", 20),
       workerCount: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_WORKER_COUNT, 1, "YOUTUBE_TRAILER_JOB_WORKER_COUNT", 1),
       chunkBytes: boundedPositiveInteger(process.env.YOUTUBE_TRAILER_JOB_CHUNK_BYTES, 8 * 1024 * 1024, "YOUTUBE_TRAILER_JOB_CHUNK_BYTES", 32 * 1024 * 1024),
+    },
+    trailerPublication: {
+      enabled: (process.env.YOUTUBE_TRAILER_PUBLICATION_ENABLED ?? "false").toLowerCase() === "true",
+      channelId: "UCq-TjauoYJrr3po121gA6iw",
+      playlistId: "PLlsWY6yTsd_EsW1HlbXZs3Sz72o42376t",
+      requiredScopes: [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.force-ssl",
+      ] as const,
+      retentionKeepCount: boundedNonNegativeInteger(
+        process.env.YOUTUBE_TRAILER_RETENTION_KEEP_COUNT,
+        12,
+        "YOUTUBE_TRAILER_RETENTION_KEEP_COUNT",
+        10_000,
+      ),
     },
   },
   transcription: {
