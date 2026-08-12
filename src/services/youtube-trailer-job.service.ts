@@ -45,6 +45,7 @@ export type YoutubeTrailerJobStatusDto = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  privateWatchUrl: string | null;
 };
 
 // Deliberately map only operator-safe lifecycle state. Provider identifiers,
@@ -77,7 +78,29 @@ export const toYoutubeTrailerJobStatusDto = (job: YoutubeTrailerJobRow): Youtube
   createdAt: job.createdAt,
   updatedAt: job.updatedAt,
   completedAt: job.completedAt,
+  privateWatchUrl: sanitizedPrivateWatchUrl(job.providerVideoId),
 });
+
+const sanitizedPrivateWatchUrl = (providerVideoId: string | null): string | null => {
+  if (!providerVideoId || !/^[A-Za-z0-9_-]{6,64}$/.test(providerVideoId)) return null;
+  const url = new URL("https://www.youtube.com/watch");
+  url.searchParams.set("v", providerVideoId);
+  return url.toString();
+};
+
+type YoutubeTrailerJobMetadata = { title: string; summary: string };
+
+const metadataForJob = (job: YoutubeTrailerJobRow): YoutubeTrailerJobMetadata | undefined => {
+  if (!job.metadataSnapshotJson) return undefined;
+  try {
+    const value = JSON.parse(job.metadataSnapshotJson) as { title?: unknown; summary?: unknown };
+    return typeof value.title === "string" && typeof value.summary === "string"
+      ? { title: value.title, summary: value.summary }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 const sourceForJob = (job: YoutubeTrailerJobRow): YoutubeTrailerSource => ({
   episodeId: job.episodeId,
@@ -249,7 +272,7 @@ const transferPrivateSource = async (
     // The worker asks the injected provider to prove authorization before it
     // obtains a resumable session, so missing upload scope cannot transfer bytes.
     await provider.checkReadiness();
-    const session = await provider.beginPrivateSession(job.sourceBytes);
+    const session = await provider.beginPrivateSession(job.sourceBytes, metadataForJob(job));
     const persisted = await guardedProviderUpdate(job, pendingLease, {
       sessionUri: session.sessionUri,
       providerPrivacyStatus: session.privacyStatus,
@@ -310,10 +333,30 @@ const transferPrivateSource = async (
   }
 };
 
-export const createYoutubeTrailerJob = async (episodeId: number): Promise<YoutubeTrailerJobRow> => {
+export const createYoutubeTrailerJob = async (episodeId: number, metadata?: YoutubeTrailerJobMetadata): Promise<YoutubeTrailerJobRow> => {
   const source = await fingerprintYoutubeTrailerSource(episodeId);
   youtubeTrailerJobRepository.obsoletePriorSource(episodeId, source);
-  return youtubeTrailerJobRepository.createOrReuse({ jobId: randomUUID(), ...source });
+  return youtubeTrailerJobRepository.createOrReuse({
+    jobId: randomUUID(),
+    ...source,
+    metadataSnapshotJson: metadata ? JSON.stringify(metadata) : null,
+  });
+};
+
+export const getCurrentYoutubeTrailerJob = async (episodeId: number): Promise<YoutubeTrailerJobRow | null> => {
+  const source = await fingerprintYoutubeTrailerSource(episodeId);
+  youtubeTrailerJobRepository.obsoletePriorSource(episodeId, source);
+  return youtubeTrailerJobRepository.findActive(source);
+};
+
+export const retryYoutubeTrailerJob = async (episodeId: number, jobId: string): Promise<YoutubeTrailerJobRow | null> => {
+  const job = youtubeTrailerJobRepository.findByJobId(episodeId, jobId);
+  if (!job) return null;
+  const current = await fingerprintYoutubeTrailerSource(episodeId);
+  if (current.sourceFileName !== job.sourceFileName || current.sourceSha256 !== job.sourceSha256 || current.sourceBytes !== job.sourceBytes) return null;
+  if (["queued", "claimed", "transferring", "processing", "cancel_requested"].includes(job.status)) return job;
+  if (job.status !== "failed") return null;
+  return youtubeTrailerJobRepository.retry(current, job.jobId, job.revision, new Date().toISOString());
 };
 
 export const getYoutubeTrailerJob = (episodeId: number, jobId: string): YoutubeTrailerJobRow | null =>

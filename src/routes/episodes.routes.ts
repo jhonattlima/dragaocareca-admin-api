@@ -41,10 +41,13 @@ import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.se
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import {
   createYoutubeTrailerJob,
+  getCurrentYoutubeTrailerJob,
   getYoutubeTrailerJob,
+  retryYoutubeTrailerJob,
   requestYoutubeTrailerJobCancellation,
   toYoutubeTrailerJobStatusDto,
 } from "../services/youtube-trailer-job.service";
+import { publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -85,8 +88,16 @@ const artifactJobRequestSchema = z.object({
   artifacts: z.array(z.enum(["episode", "trailer", "trailer-video", "transcript", "image", "image-low"])).min(1).optional(),
 }).strict().optional();
 
-const youtubeTrailerJobStartSchema = z.object({}).strict().optional();
+const youtubeTrailerJobStartSchema = z.object({
+  title: z.string().trim().min(1).max(100).optional(),
+  summary: z.string().trim().max(5000).optional(),
+}).strict().optional();
+const youtubeTrailerJobControlSchema = z.object({}).strict().optional();
 const youtubeTrailerJobIdSchema = z.uuid();
+const youtubeTrailerPublicationSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_-]+$/u)).max(3),
+}).strict();
 
 // D-01/D-02/D-03/D-08/D-09/D-10/D-11: the route boundary owns auth, canonical
 // selector validation, preflight availability, opaque job lookup, and safe delivery.
@@ -770,17 +781,45 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs", noStoreYoutubeTrailerJob
       res.status(400).json({ message: "Invalid episodeId" });
       return;
     }
-    if (!youtubeTrailerJobStartSchema.safeParse(req.body).success) {
-      res.status(400).json({ message: "Request body must be empty when supplied" });
+    const body = youtubeTrailerJobStartSchema.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "Request body must contain only an optional title and summary." });
       return;
     }
 
-    const job = await createYoutubeTrailerJob(episodeId);
+    const episode = episodeRepository.findByEpisodeId(episodeId);
+    const metadata = {
+      title: body.data?.title ?? episode?.title ?? `Episode ${episodeId}`,
+      summary: body.data?.summary ?? episode?.summary ?? "",
+    };
+    const job = await createYoutubeTrailerJob(episodeId, metadata);
     res.setHeader("Location", `/v1/episodes/${episodeId}/youtube-trailer-jobs/${job.jobId}`);
     res.status(job.status === "queued" ? 202 : 200).json(toYoutubeTrailerJobStatusDto(job));
   } catch (error) {
     if (error instanceof Error && error.message === "Final trailer-video source is missing") {
       res.status(404).json({ message: "Final trailer-video source is missing" });
+      return;
+    }
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/youtube-trailer-jobs/current", noStoreYoutubeTrailerJobs, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    const job = await getCurrentYoutubeTrailerJob(episodeId);
+    if (!job) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    res.json(toYoutubeTrailerJobStatusDto(job));
+  } catch (error) {
+    if (error instanceof Error && error.message === "Final trailer-video source is missing") {
+      res.status(404).json({ message: "YouTube trailer job not found" });
       return;
     }
     next(error);
@@ -823,7 +862,7 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/cancel", noStoreYou
       res.status(404).json({ message: "YouTube trailer job not found" });
       return;
     }
-    if (!youtubeTrailerJobStartSchema.safeParse(req.body).success) {
+    if (!youtubeTrailerJobControlSchema.safeParse(req.body).success) {
       res.status(400).json({ message: "Request body must be empty when supplied" });
       return;
     }
@@ -834,6 +873,66 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/cancel", noStoreYou
       return;
     }
     res.status(202).json(toYoutubeTrailerJobStatusDto(job));
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/retry", noStoreYoutubeTrailerJobs, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const parsedJobId = youtubeTrailerJobIdSchema.safeParse(req.params.jobId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (!parsedJobId.success) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    if (!youtubeTrailerJobControlSchema.safeParse(req.body).success) {
+      res.status(400).json({ message: "Request body must be empty when supplied" });
+      return;
+    }
+    const job = await retryYoutubeTrailerJob(episodeId, parsedJobId.data);
+    if (!job) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    res.status(202).json(toYoutubeTrailerJobStatusDto(job));
+  } catch (error) {
+    if (error instanceof Error && error.message === "Final trailer-video source is missing") {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    next(error);
+  }
+});
+
+episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/publish", noStoreYoutubeTrailerJobs, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const parsedJobId = youtubeTrailerJobIdSchema.safeParse(req.params.jobId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    if (!parsedJobId.success) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    const body = youtubeTrailerPublicationSchema.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "Publication body must contain only a title and up to three hashtags." });
+      return;
+    }
+    if (!config.youtube.trailerPublication.enabled) {
+      res.status(503).json({ message: "YouTube trailer publication is disabled." });
+      return;
+    }
+
+    const publication = await publishYoutubeTrailer(episodeId, parsedJobId.data, body.data);
+    res.json(publication);
   } catch (error) {
     next(error);
   }
