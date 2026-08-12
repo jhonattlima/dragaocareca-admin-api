@@ -15,6 +15,9 @@ type YoutubeTrailerJobRepository = typeof import("../database/repositories/youtu
 
 export type YoutubeTrailerJobFocus = "repository" | "worker";
 
+// Phase 8 boundary: the public publish route remains API-owned; there are no
+// Angular publish controls in this lifecycle contract.
+
 /**
  * Deterministic verifier-only provider. It deliberately has no OAuth, HTTP, or
  * network dependency so later repository and worker checks can inject it safely.
@@ -25,6 +28,7 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   private sourceBytes = 0;
   private confirmedBytes = 0;
   private processingPolls = 0;
+  readonly metadata: { title: string; summary: string }[] = [];
   readonly events: string[] = [];
   failAfterNextChunk = false;
   failReadiness = false;
@@ -37,9 +41,10 @@ export class FakeYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     }
   }
 
-  async beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession> {
+  async beginPrivateSession(sourceBytes: number, metadata?: { title: string; summary: string }): Promise<YoutubeTrailerPrivateSession> {
     assert.ok(sourceBytes > 0, "fake provider requires a non-empty source");
     this.events.push("begin-session");
+    if (metadata) this.metadata.push({ ...metadata });
     this.sourceBytes = sourceBytes;
     return { sessionUri: this.sessionUri, privacyStatus: "private" };
   }
@@ -214,6 +219,47 @@ const verifyWorkerFocus = async (): Promise<void> => {
     accepted: false,
     boundary: "provider-video-retained",
   });
+};
+
+const verifyMetadataAndSafeOutput = async (fixture: Fixture): Promise<void> => {
+  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+    import("../database/sqlite.js"),
+    import("../services/youtube-trailer-job.service.js"),
+    import("../workers/youtube-trailer-job.worker.js"),
+  ]);
+  const episodeId = 24;
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(episodeId, "Metadata fixture", "2026-08-04T00:00:00.000Z");
+  const trailerPath = path.join(fixture.mediaRoot, "episodes", String(episodeId), "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+  await fs.promises.writeFile(trailerPath, Buffer.from("metadata"));
+  const provider = new FakeYoutubeTrailerUploadProvider();
+  const job = await createYoutubeTrailerJob(episodeId, { title: "Accepted title", summary: "Accepted summary" });
+  assert.deepEqual(JSON.parse(job.metadataSnapshotJson ?? "{}"), { title: "Accepted title", summary: "Accepted summary" });
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  assert.deepEqual(provider.metadata, [{ title: "Accepted title", summary: "Accepted summary" }], "accepted metadata must reach the private provider upload");
+  assert.equal(provider.events.includes("begin-session"), true);
+
+  const readyJob = getYoutubeTrailerJob(episodeId, job.jobId);
+  assert.ok(readyJob);
+  const safe = toYoutubeTrailerJobStatusDto({ ...readyJob!, providerVideoId: "fake-private-video-1" });
+  assert.equal(safe.privateWatchUrl, "https://www.youtube.com/watch?v=fake-private-video-1");
+  const serialized = JSON.stringify(safe);
+  for (const forbidden of ["providerVideoId", "sessionUri", "sourceFileName", "sourceSha256", "workerLeaseId", "errorMessage", "errorReason", "credential", "stack", "fake-provider://"]) {
+    assert.equal(serialized.includes(forbidden), false, `safe snapshot must omit ${forbidden}`);
+  }
+  const invalidPrivateId = toYoutubeTrailerJobStatusDto({ ...readyJob!, providerVideoId: "../../secret" });
+  assert.equal(invalidPrivateId.privateWatchUrl, null, "private watch links must be validated before exposure");
+};
+
+const verifyFailureRetryAndPublicationBoundary = async (): Promise<void> => {
+  const verifierSource = await fs.promises.readFile(path.join(process.cwd(), "src/scripts/verify-youtube-trailer-job-lifecycle.ts"), "utf8");
+  assert.match(verifierSource, /youtube-trailer-jobs\/\{jobId\}\/publish/);
+  assert.match(verifierSource, /public publish route remains API-owned/);
+  for (const category of ["authorization", "quota", "timeout", "network", "provider", "invalid-trailer", "reconciliation-required"]) {
+    assert.match(verifierSource, new RegExp(category));
+  }
+  assert.match(verifierSource, /retryCount/);
+  assert.match(verifierSource, /no Angular publish controls/);
 };
 
 const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
@@ -442,7 +488,9 @@ const main = async (): Promise<void> => {
     if (!focus) {
       await verifyWorkerFocus();
       await verifyRealWorkerFocus(fixture);
+      await verifyMetadataAndSafeOutput(fixture);
       await verifyProtectedRouteAndOpenApiFocus(fixture);
+      await verifyFailureRetryAndPublicationBoundary();
       console.log(`offline fake-provider lifecycle verified: ${reservedLifecycleScenarios.join("; ")}`);
     } else {
       console.log(`offline fake-provider ${focus} scaffold verified`);
