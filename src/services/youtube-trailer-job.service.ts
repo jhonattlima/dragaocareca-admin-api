@@ -48,6 +48,14 @@ export type YoutubeTrailerJobStatusDto = {
   privateWatchUrl: string | null;
 };
 
+const safeErrorCategory = (category: string | null): string | null => {
+  if (!category) return null;
+  if (category === "authorization" || category === "configuration") return "authentication";
+  if (category === "session-expired") return "session-expired";
+  if (category === "quota" || category === "timeout" || category === "network" || category === "provider" || category === "invalid-trailer" || category === "reconciliation-required") return category;
+  return category === "unrecoverable" ? "provider" : "network";
+};
+
 // Deliberately map only operator-safe lifecycle state. Provider identifiers,
 // resumable session locations, source evidence, raw provider details, and
 // worker lease data stay internal to the service/repository boundary.
@@ -68,7 +76,7 @@ export const toYoutubeTrailerJobStatusDto = (job: YoutubeTrailerJobRow): Youtube
     boundary: job.cancellationBoundary,
   },
   error: {
-    category: job.errorCategory,
+    category: safeErrorCategory(job.errorCategory),
     occurredAt: job.errorAt,
   },
   retry: {

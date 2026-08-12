@@ -24,6 +24,21 @@ export type YoutubeTrailerJobLease = YoutubeTrailerSource & {
   leaseId: string;
 };
 
+export type YoutubeTrailerPublicationStatus =
+  | "not_started"
+  | "metadata_accepted"
+  | "playlist_confirmed"
+  | "public_confirmed"
+  | "failed";
+
+export type YoutubeTrailerRetentionStatus = "not_started" | "pending" | "complete" | "retryable-error";
+
+export type YoutubeTrailerPublicationLease = YoutubeTrailerSource & {
+  jobId: string;
+  revision: number;
+  leaseId: string;
+};
+
 export type YoutubeTrailerJobRow = YoutubeTrailerSource & {
   jobId: string;
   sourceCapturedAt: string;
@@ -56,9 +71,25 @@ export type YoutubeTrailerJobRow = YoutubeTrailerSource & {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  publicationStatus: YoutubeTrailerPublicationStatus;
+  publicationLeaseId: string | null;
+  publicationLeaseClaimedAt: string | null;
+  metadataSnapshotJson: string | null;
+  metadataDigest: string | null;
+  metadataAcceptedAt: string | null;
+  playlistMembershipConfirmedAt: string | null;
+  publicConfirmedAt: string | null;
+  canonicalUrl: string | null;
+  retentionStatus: YoutubeTrailerRetentionStatus;
+  retentionErrorCategory: string | null;
+  retentionErrorMessage: string | null;
+  retentionErrorAt: string | null;
 };
 
-export type CreateYoutubeTrailerJobInput = YoutubeTrailerSource & { jobId: string };
+export type CreateYoutubeTrailerJobInput = YoutubeTrailerSource & {
+  jobId: string;
+  metadataSnapshotJson?: string | null;
+};
 
 export type YoutubeTrailerProviderUpdate = {
   sessionUri?: string | null;
@@ -79,6 +110,20 @@ export type YoutubeTrailerJobError = {
   reason?: string | null;
   httpStatus?: number | null;
   nextAttemptAt?: string | null;
+};
+
+export type YoutubeTrailerPublicationUpdate = {
+  publicationStatus?: YoutubeTrailerPublicationStatus;
+  metadataSnapshotJson?: string | null;
+  metadataDigest?: string | null;
+  metadataAcceptedAt?: string | null;
+  playlistMembershipConfirmedAt?: string | null;
+  publicConfirmedAt?: string | null;
+  canonicalUrl?: string | null;
+  retentionStatus?: YoutubeTrailerRetentionStatus;
+  retentionErrorCategory?: string | null;
+  retentionErrorMessage?: string | null;
+  retentionErrorAt?: string | null;
 };
 
 type SqliteYoutubeTrailerJobRow = {
@@ -117,6 +162,19 @@ type SqliteYoutubeTrailerJobRow = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  publication_status: YoutubeTrailerPublicationStatus;
+  publication_lease_id: string | null;
+  publication_lease_claimed_at: string | null;
+  metadata_snapshot_json: string | null;
+  metadata_digest: string | null;
+  metadata_accepted_at: string | null;
+  playlist_membership_confirmed_at: string | null;
+  public_confirmed_at: string | null;
+  canonical_url: string | null;
+  retention_status: YoutubeTrailerRetentionStatus;
+  retention_error_category: string | null;
+  retention_error_message: string | null;
+  retention_error_at: string | null;
 };
 
 const activeStatuses = "'queued', 'claimed', 'transferring', 'processing', 'cancel_requested'";
@@ -160,6 +218,19 @@ const mapRow = (row: SqliteYoutubeTrailerJobRow | undefined): YoutubeTrailerJobR
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    publicationStatus: row.publication_status ?? "not_started",
+    publicationLeaseId: row.publication_lease_id,
+    publicationLeaseClaimedAt: row.publication_lease_claimed_at,
+    metadataSnapshotJson: row.metadata_snapshot_json,
+    metadataDigest: row.metadata_digest,
+    metadataAcceptedAt: row.metadata_accepted_at,
+    playlistMembershipConfirmedAt: row.playlist_membership_confirmed_at,
+    publicConfirmedAt: row.public_confirmed_at,
+    canonicalUrl: row.canonical_url,
+    retentionStatus: row.retention_status ?? "not_started",
+    retentionErrorCategory: row.retention_error_category,
+    retentionErrorMessage: row.retention_error_message,
+    retentionErrorAt: row.retention_error_at,
   };
 };
 
@@ -180,16 +251,34 @@ const updateWithLease = (lease: YoutubeTrailerJobLease, setClause: string, value
   return selectAfterCas(lease);
 };
 
+const selectAfterPublicationCas = (lease: YoutubeTrailerPublicationLease): YoutubeTrailerJobRow | null =>
+  selectOne("job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ? AND revision = ?", lease.jobId, lease.episodeId, lease.sourceFileName, lease.sourceSha256, lease.sourceBytes, lease.revision + 1);
+
+const updateWithPublicationLease = (
+  lease: YoutubeTrailerPublicationLease,
+  setClause: string,
+  values: Array<string | number | null>
+): YoutubeTrailerJobRow | null => {
+  const now = nowIso();
+  const result = getDb().prepare(`
+    UPDATE youtube_trailer_jobs SET ${setClause}, revision = revision + 1, updated_at = ?
+    WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
+      AND revision = ? AND publication_lease_id = ? AND status = 'ready'
+  `).run(...values, now, lease.jobId, lease.episodeId, lease.sourceFileName, lease.sourceSha256, lease.sourceBytes, lease.revision, lease.leaseId);
+  if (result.changes !== 1) return null;
+  return selectAfterPublicationCas(lease);
+};
+
 export const youtubeTrailerJobRepository = {
   createOrReuse(input: CreateYoutubeTrailerJobInput): YoutubeTrailerJobRow {
     const now = nowIso();
     getDb().prepare(`
       INSERT INTO youtube_trailer_jobs (
         job_id, episode_id, source_file_name, source_sha256, source_bytes, source_captured_at,
-        status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        status, metadata_snapshot_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
       ON CONFLICT DO NOTHING
-    `).run(input.jobId, input.episodeId, input.sourceFileName, input.sourceSha256, input.sourceBytes, now, now, now);
+    `).run(input.jobId, input.episodeId, input.sourceFileName, input.sourceSha256, input.sourceBytes, now, input.metadataSnapshotJson ?? null, now, now);
     return youtubeTrailerJobRepository.findActive(input) as YoutubeTrailerJobRow;
   },
 
@@ -281,6 +370,40 @@ export const youtubeTrailerJobRepository = {
 
   markReady(lease: YoutubeTrailerJobLease): YoutubeTrailerJobRow | null {
     return updateWithLease(lease, "status = 'ready', completed_at = ?", [nowIso()], "'processing'");
+  },
+
+  claimPublication(source: YoutubeTrailerSource, jobId: string, expectedRevision: number, leaseId: string): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const result = getDb().prepare(`
+      UPDATE youtube_trailer_jobs
+      SET publication_lease_id = ?, publication_lease_claimed_at = ?, revision = revision + 1, updated_at = ?
+      WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
+        AND revision = ? AND status = 'ready' AND provider_video_id IS NOT NULL
+    `).run(leaseId, now, now, jobId, source.episodeId, source.sourceFileName, source.sourceSha256, source.sourceBytes, expectedRevision);
+    if (result.changes !== 1) return null;
+    return selectOne("job_id = ? AND revision = ? AND publication_lease_id = ?", jobId, expectedRevision + 1, leaseId);
+  },
+
+  updatePublication(lease: YoutubeTrailerPublicationLease, update: YoutubeTrailerPublicationUpdate): YoutubeTrailerJobRow | null {
+    const fields: Array<[string, string | number | null]> = [];
+    const mappings: Array<[keyof YoutubeTrailerPublicationUpdate, string]> = [
+      ["publicationStatus", "publication_status"],
+      ["metadataSnapshotJson", "metadata_snapshot_json"],
+      ["metadataDigest", "metadata_digest"],
+      ["metadataAcceptedAt", "metadata_accepted_at"],
+      ["playlistMembershipConfirmedAt", "playlist_membership_confirmed_at"],
+      ["publicConfirmedAt", "public_confirmed_at"],
+      ["canonicalUrl", "canonical_url"],
+      ["retentionStatus", "retention_status"],
+      ["retentionErrorCategory", "retention_error_category"],
+      ["retentionErrorMessage", "retention_error_message"],
+      ["retentionErrorAt", "retention_error_at"],
+    ];
+    for (const [key, column] of mappings) {
+      if (update[key] !== undefined) fields.push([column, update[key] as string | null]);
+    }
+    if (fields.length === 0) return youtubeTrailerJobRepository.findByJobId(lease.episodeId, lease.jobId);
+    return updateWithPublicationLease(lease, fields.map(([name]) => `${name} = ?`).join(", "), fields.map(([, value]) => value));
   },
 
   retry(source: YoutubeTrailerSource, jobId: string, expectedRevision: number, nextAttemptAt: string | null): YoutubeTrailerJobRow | null {

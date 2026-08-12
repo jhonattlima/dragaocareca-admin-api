@@ -2,6 +2,10 @@ import { OAuth2Client } from "google-auth-library";
 import { config } from "../config/env";
 
 const uploadScope = "https://www.googleapis.com/auth/youtube.upload";
+const publicationScope = "https://www.googleapis.com/auth/youtube.force-ssl";
+const configuredChannelId = "UCq-TjauoYJrr3po121gA6iw";
+const configuredPlaylistId = "PLlsWY6yTsd_EsW1HlbXZs3Sz72o42376t";
+const fallbackCategoryId = "22";
 const resumableUploadBaseUrl = "https://www.googleapis.com/upload/youtube/v3/videos";
 
 export type YoutubeTrailerUploadProviderError = {
@@ -14,6 +18,11 @@ export type YoutubeTrailerUploadProviderError = {
 export type YoutubeTrailerPrivateSession = {
   sessionUri: string;
   privacyStatus: "private";
+};
+
+export type YoutubeTrailerJobMetadata = {
+  title: string;
+  summary: string;
 };
 
 export type YoutubeTrailerRangeResume = {
@@ -40,22 +49,52 @@ export type YoutubeTrailerCancellationResult = {
   boundary: "local-cancelled" | "provider-video-retained";
 };
 
+export type YoutubeTrailerVideoRecord = {
+  videoId: string;
+  channelId: string | null;
+  privacyStatus: string | null;
+  uploadStatus: string | null;
+  processingStatus: string | null;
+  title: string | null;
+  description: string | null;
+  categoryId: string | null;
+};
+
+export type YoutubeTrailerMetadata = {
+  title: string;
+  description: string;
+  categoryId?: string;
+};
+
+export type YoutubeTrailerPlaylistMembership = {
+  playlistId: string;
+  videoId: string;
+  itemId: string;
+};
+
 /**
  * Internal-only provider contract. Session URIs, access tokens, local paths, and
  * raw provider responses never cross this boundary into status DTOs or routes.
  */
 export interface YoutubeTrailerUploadProvider {
   checkReadiness(): Promise<void>;
-  beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession>;
+  beginPrivateSession(sourceBytes: number, metadata?: YoutubeTrailerJobMetadata): Promise<YoutubeTrailerPrivateSession>;
   resumeRange(sessionUri: string, sourceBytes: number): Promise<YoutubeTrailerRangeResume>;
   uploadChunk(sessionUri: string, sourceBytes: number, offset: number, chunk: Buffer): Promise<YoutubeTrailerChunkResult>;
   pollProcessing(providerVideoId: string): Promise<YoutubeTrailerProcessingState>;
   cancel(sessionUri: string, providerVideoId: string | null): Promise<YoutubeTrailerCancellationResult>;
+  checkPublicationReadiness?(): Promise<void>;
+  getVideo?(providerVideoId: string): Promise<YoutubeTrailerVideoRecord>;
+  updateMetadata?(providerVideoId: string, metadata: YoutubeTrailerMetadata): Promise<YoutubeTrailerVideoRecord>;
+  findPlaylistMembership?(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership | null>;
+  insertPlaylistItem?(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership>;
+  publishVideo?(providerVideoId: string): Promise<YoutubeTrailerVideoRecord>;
   normalizeFailure(error: unknown): YoutubeTrailerUploadProviderError;
 }
 
 type YoutubeVideoResponse = {
   id?: string;
+  snippet?: { channelId?: string; title?: string; description?: string; categoryId?: string };
   status?: { privacyStatus?: string; uploadStatus?: string };
   processingDetails?: {
     processingStatus?: string;
@@ -96,7 +135,29 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     }
   }
 
-  async beginPrivateSession(sourceBytes: number): Promise<YoutubeTrailerPrivateSession> {
+  async checkPublicationReadiness(): Promise<void> {
+    if (!config.youtube.trailerJob.enabled || !config.youtube.clientId || !config.youtube.clientSecret || !config.youtube.refreshToken) {
+      throw this.error("retryable", "YouTube trailer publication readiness is unavailable.");
+    }
+    let token: string;
+    try {
+      token = await this.getAccessToken();
+    } catch {
+      throw this.error("retryable", "YouTube trailer publication authorization is unavailable.");
+    }
+    try {
+      const info = await this.client.getTokenInfo(token);
+      const scopes = new Set(info.scopes);
+      if (!scopes.has(uploadScope) || !scopes.has(publicationScope)) {
+        throw this.error("retryable", "YouTube trailer publication authorization is missing a required scope.");
+      }
+    } catch (error) {
+      if (this.isProviderError(error)) throw error;
+      throw this.error("retryable", "YouTube trailer publication authorization could not be verified.");
+    }
+  }
+
+  async beginPrivateSession(sourceBytes: number, metadata?: YoutubeTrailerJobMetadata): Promise<YoutubeTrailerPrivateSession> {
     if (!Number.isSafeInteger(sourceBytes) || sourceBytes <= 0) {
       throw this.error("unrecoverable", "Trailer source bytes are invalid.");
     }
@@ -108,7 +169,10 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
         "X-Upload-Content-Length": String(sourceBytes),
         "X-Upload-Content-Type": "video/mp4",
       },
-      body: JSON.stringify({ status: { privacyStatus: "private" } }),
+      body: JSON.stringify({
+        snippet: metadata ? { title: metadata.title, description: metadata.summary, categoryId: fallbackCategoryId } : undefined,
+        status: { privacyStatus: "private" },
+      }),
     });
     if (!response.ok) throw await this.errorFromResponse(response);
     const sessionUri = response.headers.get("location");
@@ -160,6 +224,79 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     };
   }
 
+  async getVideo(providerVideoId: string): Promise<YoutubeTrailerVideoRecord> {
+    const query = new URLSearchParams({ part: "status,processingDetails,snippet", id: providerVideoId });
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/videos?${query.toString()}`, { method: "GET" });
+    if (!response.ok) throw await this.errorFromResponse(response);
+    const payload = (await response.json()) as { items?: YoutubeVideoResponse[] };
+    const video = payload.items?.[0];
+    if (!video?.id) throw this.error("retryable", "YouTube trailer video could not be reconciled.");
+    if (video.snippet?.channelId && video.snippet.channelId !== configuredChannelId) {
+      throw this.error("retryable", "YouTube trailer video belongs to an unexpected channel.");
+    }
+    return this.toVideoRecord(video);
+  }
+
+  async updateMetadata(providerVideoId: string, metadata: YoutubeTrailerMetadata): Promise<YoutubeTrailerVideoRecord> {
+    await this.checkPublicationReadiness();
+    const current = await this.getVideo(providerVideoId);
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/videos?part=snippet`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({
+        id: providerVideoId,
+        snippet: {
+          title: metadata.title,
+          description: metadata.description,
+          categoryId: current.categoryId || metadata.categoryId || fallbackCategoryId,
+        },
+      }),
+    });
+    if (!response.ok) throw await this.errorFromResponse(response);
+    return this.toVideoRecord((await response.json()) as YoutubeVideoResponse);
+  }
+
+  async findPlaylistMembership(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership | null> {
+    const query = new URLSearchParams({ part: "id,snippet", playlistId: configuredPlaylistId, videoId: providerVideoId, maxResults: "50" });
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/playlistItems?${query.toString()}`, { method: "GET" });
+    if (!response.ok) throw await this.errorFromResponse(response);
+    const payload = (await response.json()) as { items?: Array<{ id?: string; snippet?: { playlistId?: string; resourceId?: { videoId?: string } } }> };
+    const item = payload.items?.find((candidate) => candidate.snippet?.resourceId?.videoId === providerVideoId);
+    if (!item?.id) return null;
+    if (item.snippet?.playlistId !== configuredPlaylistId) throw this.error("retryable", "YouTube playlist does not match the configured playlist.");
+    return { playlistId: configuredPlaylistId, videoId: providerVideoId, itemId: item.id };
+  }
+
+  async insertPlaylistItem(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership> {
+    await this.checkPublicationReadiness();
+    const existing = await this.findPlaylistMembership(providerVideoId);
+    if (existing) return existing;
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/playlistItems?part=snippet`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ snippet: { playlistId: configuredPlaylistId, resourceId: { kind: "youtube#video", videoId: providerVideoId } } }),
+    });
+    if (!response.ok) throw await this.errorFromResponse(response);
+    const item = (await response.json()) as { id?: string; snippet?: { playlistId?: string; resourceId?: { videoId?: string } } };
+    if (!item.id || item.snippet?.playlistId !== configuredPlaylistId || item.snippet?.resourceId?.videoId !== providerVideoId) {
+      throw this.error("retryable", "YouTube playlist membership could not be reconciled.");
+    }
+    return { playlistId: configuredPlaylistId, videoId: providerVideoId, itemId: item.id };
+  }
+
+  async publishVideo(providerVideoId: string): Promise<YoutubeTrailerVideoRecord> {
+    await this.checkPublicationReadiness();
+    const current = await this.getVideo(providerVideoId);
+    if (current.privacyStatus === "public") return current;
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/videos?part=status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ id: providerVideoId, status: { privacyStatus: "public" } }),
+    });
+    if (!response.ok) throw await this.errorFromResponse(response);
+    return this.toVideoRecord((await response.json()) as YoutubeVideoResponse);
+  }
+
   async cancel(_sessionUri: string, providerVideoId: string | null): Promise<YoutubeTrailerCancellationResult> {
     return providerVideoId ? { accepted: false, boundary: "provider-video-retained" } : { accepted: true, boundary: "local-cancelled" };
   }
@@ -167,6 +304,19 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   normalizeFailure(error: unknown): YoutubeTrailerUploadProviderError {
     if (this.isProviderError(error)) return error;
     return this.error("retryable", "YouTube trailer upload is temporarily unavailable.");
+  }
+
+  private toVideoRecord(video: YoutubeVideoResponse): YoutubeTrailerVideoRecord {
+    return {
+      videoId: video.id ?? "",
+      channelId: video.snippet?.channelId ?? null,
+      privacyStatus: video.status?.privacyStatus ?? null,
+      uploadStatus: video.status?.uploadStatus ?? null,
+      processingStatus: video.processingDetails?.processingStatus ?? null,
+      title: video.snippet?.title ?? null,
+      description: video.snippet?.description ?? null,
+      categoryId: video.snippet?.categoryId ?? null,
+    };
   }
 
   private async authorizedFetch(url: string, init: RequestInit): Promise<Response> {
