@@ -9,6 +9,7 @@ import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
 import { refreshCoverMosaicBackground } from "../services/cover-mosaic.service";
 import { episodeRepository } from "../database/repositories/episode.repository";
+import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
 import {
   abortDraftEpisodeTranscription,
   clearEpisodeTranscription,
@@ -41,6 +42,7 @@ import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.se
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import {
   createYoutubeTrailerJob,
+  cleanupYoutubeTrailerVideos,
   getCurrentYoutubeTrailerJob,
   getYoutubeTrailerJob,
   retryYoutubeTrailerJob,
@@ -91,6 +93,8 @@ const artifactJobRequestSchema = z.object({
 const youtubeTrailerJobStartSchema = z.object({
   title: z.string().trim().min(1).max(100).optional(),
   summary: z.string().trim().max(5000).optional(),
+  hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_-]+$/u)).max(3).optional(),
+  draftId: z.uuid().optional(),
 }).strict().optional();
 const youtubeTrailerJobControlSchema = z.object({}).strict().optional();
 const youtubeTrailerJobIdSchema = z.uuid();
@@ -471,7 +475,7 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
   }
   const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
   const draftId = trailerVideoDraftId(req);
-  if (!currentEpisode) {
+  if (!currentEpisode || currentEpisode.isDraft) {
     const checked = checkTrailerVideoDraft(draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
     if (!checked.ok) {
       res.status(checked.status).json({ message: checked.message });
@@ -506,7 +510,7 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
         return;
       }
 
-      if (!currentEpisode) {
+      if (!currentEpisode || currentEpisode.isDraft) {
         const checked = checkTrailerVideoDraft(draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
         if (!checked.ok) {
           await fs.promises.unlink(file.path).catch(() => undefined);
@@ -551,6 +555,31 @@ makeDeleteRoute("audio", uploadSpecs.audio);
 makeDeleteRoute("trailer", uploadSpecs.trailer);
 makeDeleteRoute("cover", uploadSpecs.cover);
 makeDeleteRoute("cover-webp", uploadSpecs.coverLow);
+
+episodesRouter.delete("/:episodeId/trailer-video", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    const episode = episodeRepository.findByEpisodeId(episodeId);
+    if (!episode) {
+      res.status(404).json({ message: "Episode not found" });
+      return;
+    }
+    const jobs = youtubeTrailerJobRepository.findByEpisodeId(episodeId);
+    await cleanupYoutubeTrailerVideos(jobs);
+    await Promise.all([
+      fs.promises.rm(getEpisodeMediaFinalPath(episodeId, "trailerVideo"), { force: true }),
+      fs.promises.rm(getEpisodeMediaStagingPath(episodeId, "trailerVideo"), { force: true }),
+    ]);
+    episodeRepository.updateMedia(episodeId, { trailerVideoFileName: null, trailerVideoSyncStatus: "unpublished" });
+    res.json({ episodeId, message: "Trailer video and associated YouTube videos removed." });
+  } catch (error) {
+    next(error);
+  }
+});
 
 episodesRouter.get("/", requireAuth, async (_req, res, next) => {
   try {
@@ -692,6 +721,32 @@ episodesRouter.post("/:episodeId/artifacts/jobs", noStoreArtifactPreparation, re
   }
 });
 
+episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTrailerJobs, requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    const episode = episodeRepository.findByEpisodeId(episodeId);
+    if (!episode) {
+      res.status(404).json({ message: "Episode not found" });
+      return;
+    }
+    const current = getYoutubeTrailerJob(episodeId, typeof req.body?.jobId === "string" ? req.body.jobId : "")
+      ?? await getCurrentYoutubeTrailerJob(episodeId);
+    if (!current) {
+      res.status(404).json({ message: "YouTube trailer job not found" });
+      return;
+    }
+    const requested = youtubeTrailerJobRepository.requestPublication(current);
+    const snapshot = requested ?? current;
+    if (snapshot.status === "ready") {
+      const tags = (episode.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
+      await publishYoutubeTrailer(episodeId, snapshot.jobId, { title: episode.title, hashtags: tags });
+    }
+    res.status(snapshot.status === "ready" ? 200 : 202).json(toYoutubeTrailerJobStatusDto(snapshot));
+  } catch (error) {
+    next(error);
+  }
+});
+
 episodesRouter.get("/:episodeId/artifacts/jobs/:jobId", noStoreArtifactPreparation, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
@@ -788,9 +843,28 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs", noStoreYoutubeTrailerJob
     }
 
     const episode = episodeRepository.findByEpisodeId(episodeId);
+    if (!episode && body.data?.draftId) {
+      const checked = checkTrailerVideoDraft(body.data.draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
+      if (!checked.ok) {
+        res.status(checked.status).json({ message: checked.message });
+        return;
+      }
+    }
+    if (!episode && !body.data?.draftId) {
+      res.status(404).json({ message: "Episode draft reservation is required before YouTube upload." });
+      return;
+    }
+    if (episode?.isDraft) {
+      const checked = checkTrailerVideoDraft(body.data?.draftId, episodeId, req.user?.email ?? "", { allowStaged: true });
+      if (!checked.ok) {
+        res.status(checked.status).json({ message: checked.message });
+        return;
+      }
+    }
     const metadata = {
       title: body.data?.title ?? episode?.title ?? `Episode ${episodeId}`,
       summary: body.data?.summary ?? episode?.summary ?? "",
+      hashtags: body.data?.hashtags ?? (episode?.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`),
     };
     const job = await createYoutubeTrailerJob(episodeId, metadata);
     res.setHeader("Location", `/v1/episodes/${episodeId}/youtube-trailer-jobs/${job.jobId}`);

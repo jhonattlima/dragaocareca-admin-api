@@ -32,6 +32,7 @@ export type YoutubeTrailerPublicationStatus =
   | "failed";
 
 export type YoutubeTrailerRetentionStatus = "not_started" | "pending" | "complete" | "retryable-error";
+export type YoutubeTrailerProviderCleanupStatus = "not_required" | "pending" | "complete" | "retryable-error";
 
 export type YoutubeTrailerPublicationLease = YoutubeTrailerSource & {
   jobId: string;
@@ -74,6 +75,7 @@ export type YoutubeTrailerJobRow = YoutubeTrailerSource & {
   publicationStatus: YoutubeTrailerPublicationStatus;
   publicationLeaseId: string | null;
   publicationLeaseClaimedAt: string | null;
+  publicationRequestedAt: string | null;
   metadataSnapshotJson: string | null;
   metadataDigest: string | null;
   metadataAcceptedAt: string | null;
@@ -84,6 +86,9 @@ export type YoutubeTrailerJobRow = YoutubeTrailerSource & {
   retentionErrorCategory: string | null;
   retentionErrorMessage: string | null;
   retentionErrorAt: string | null;
+  providerCleanupStatus: YoutubeTrailerProviderCleanupStatus;
+  providerCleanupError: string | null;
+  providerCleanupAt: string | null;
 };
 
 export type CreateYoutubeTrailerJobInput = YoutubeTrailerSource & {
@@ -124,6 +129,9 @@ export type YoutubeTrailerPublicationUpdate = {
   retentionErrorCategory?: string | null;
   retentionErrorMessage?: string | null;
   retentionErrorAt?: string | null;
+  providerCleanupStatus?: YoutubeTrailerProviderCleanupStatus;
+  providerCleanupError?: string | null;
+  providerCleanupAt?: string | null;
 };
 
 type SqliteYoutubeTrailerJobRow = {
@@ -165,6 +173,7 @@ type SqliteYoutubeTrailerJobRow = {
   publication_status: YoutubeTrailerPublicationStatus;
   publication_lease_id: string | null;
   publication_lease_claimed_at: string | null;
+  publication_requested_at: string | null;
   metadata_snapshot_json: string | null;
   metadata_digest: string | null;
   metadata_accepted_at: string | null;
@@ -175,6 +184,9 @@ type SqliteYoutubeTrailerJobRow = {
   retention_error_category: string | null;
   retention_error_message: string | null;
   retention_error_at: string | null;
+  provider_cleanup_status: YoutubeTrailerProviderCleanupStatus;
+  provider_cleanup_error: string | null;
+  provider_cleanup_at: string | null;
 };
 
 const activeStatuses = "'queued', 'claimed', 'transferring', 'processing', 'cancel_requested'";
@@ -221,6 +233,7 @@ const mapRow = (row: SqliteYoutubeTrailerJobRow | undefined): YoutubeTrailerJobR
     publicationStatus: row.publication_status ?? "not_started",
     publicationLeaseId: row.publication_lease_id,
     publicationLeaseClaimedAt: row.publication_lease_claimed_at,
+    publicationRequestedAt: row.publication_requested_at,
     metadataSnapshotJson: row.metadata_snapshot_json,
     metadataDigest: row.metadata_digest,
     metadataAcceptedAt: row.metadata_accepted_at,
@@ -231,6 +244,9 @@ const mapRow = (row: SqliteYoutubeTrailerJobRow | undefined): YoutubeTrailerJobR
     retentionErrorCategory: row.retention_error_category,
     retentionErrorMessage: row.retention_error_message,
     retentionErrorAt: row.retention_error_at,
+    providerCleanupStatus: row.provider_cleanup_status ?? "not_required",
+    providerCleanupError: row.provider_cleanup_error,
+    providerCleanupAt: row.provider_cleanup_at,
   };
 };
 
@@ -284,6 +300,26 @@ export const youtubeTrailerJobRepository = {
 
   findByJobId(episodeId: number, jobId: string): YoutubeTrailerJobRow | null {
     return selectOne("episode_id = ? AND job_id = ?", episodeId, jobId);
+  },
+
+  findByEpisodeId(episodeId: number): YoutubeTrailerJobRow[] {
+    return (getDb().prepare("SELECT * FROM youtube_trailer_jobs WHERE episode_id = ? ORDER BY datetime(created_at) DESC, job_id DESC").all(episodeId) as SqliteYoutubeTrailerJobRow[]).map((row) => mapRow(row) as YoutubeTrailerJobRow);
+  },
+
+  updateProviderCleanup(job: YoutubeTrailerJobRow, status: YoutubeTrailerProviderCleanupStatus, error: string | null = null): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const updated = getDb().prepare(`
+      UPDATE youtube_trailer_jobs
+      SET provider_cleanup_status = ?, provider_cleanup_error = ?, provider_cleanup_at = ?, revision = revision + 1, updated_at = ?
+      WHERE episode_id = ? AND job_id = ? AND revision = ?
+    `).run(status, error, now, now, job.episodeId, job.jobId, job.revision);
+    return updated.changes === 1 ? selectOne("episode_id = ? AND job_id = ?", job.episodeId, job.jobId) : null;
+  },
+
+  requestPublication(job: YoutubeTrailerJobRow): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const updated = getDb().prepare(`UPDATE youtube_trailer_jobs SET publication_requested_at = ?, revision = revision + 1, updated_at = ? WHERE episode_id = ? AND job_id = ? AND revision = ?`).run(now, now, job.episodeId, job.jobId, job.revision);
+    return updated.changes === 1 ? selectOne("episode_id = ? AND job_id = ?", job.episodeId, job.jobId) : null;
   },
 
   findActive(source: YoutubeTrailerSource): YoutubeTrailerJobRow | null {

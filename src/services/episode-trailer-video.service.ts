@@ -7,7 +7,7 @@ import {
   getEpisodeMediaRelativePath,
   getEpisodeMediaStagingPath,
 } from "./episode-media-layout.service";
-import { obsoleteYoutubeTrailerJobsForCurrentSource } from "./youtube-trailer-job.service";
+import { cleanupYoutubeTrailerVideos, obsoleteYoutubeTrailerJobsForCurrentSource } from "./youtube-trailer-job.service";
 
 const fileExists = async (filePath: string): Promise<boolean> =>
   fs.promises
@@ -66,7 +66,8 @@ export const replaceEpisodeTrailerVideo = async (
     // The canonical file has changed. Invalidate old-source leases before a
     // later worker result can be accepted; accepted private videos are retained
     // by the job lifecycle for reconciliation.
-    await obsoleteYoutubeTrailerJobsForCurrentSource(episodeId);
+    const obsoleteJobs = await obsoleteYoutubeTrailerJobsForCurrentSource(episodeId);
+    await cleanupYoutubeTrailerVideos(obsoleteJobs);
 
     return updated;
   } catch (error) {

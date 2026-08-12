@@ -23,11 +23,13 @@ export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   launchNotificationError?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  isDraft?: boolean;
 };
 
 type SqliteEpisodeRow = {
   id: number;
   episode_id: number;
+  is_draft: number;
   title: string;
   summary: string;
   episode_number: number | null;
@@ -385,6 +387,7 @@ const cleanupReferenceTable = (table: "guest_references" | "music_references", e
 
 const mapRow = (row: SqliteEpisodeRow): EpisodeRow => ({
   episodeId: row.episode_id,
+  isDraft: row.is_draft === 1,
   title: row.title,
   summary: row.summary,
   episodeNumber: row.episode_number ?? undefined,
@@ -429,14 +432,14 @@ const fetchOne = (episodeId: number): EpisodeRow | null => {
 
 const baseInsert = `
 INSERT INTO episodes (
-  episode_id, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
+  episode_id, is_draft, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
   authors_json, guests_json, tags_json, citations_json, file_name, cover_file_name, cover_low_file_name,
   trailer_file_name, trailer_video_file_name, trailer_video_sync_status, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json,
   transcript_file_name, transcript_status, transcript_updated_at, transcript_error,
   launch_notification_state, launch_notification_queued_at, launch_notification_sent_at, launch_notification_error,
   created_at, updated_at
 ) VALUES (
-  @episodeId, @title, @summary, @episodeNumber, @episodeType, @pubDate, @duration, @bytes, @explicit,
+  @episodeId, @isDraft, @title, @summary, @episodeNumber, @episodeType, @pubDate, @duration, @bytes, @explicit,
   @authorsJson, @guestsJson, @tagsJson, @citationsJson, @fileName, @coverFileName, @coverLowFileName,
   @trailerFileName, @trailerVideoFileName, @trailerVideoSyncStatus, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson,
   @transcriptFileName, @transcriptStatus, @transcriptUpdatedAt, @transcriptError,
@@ -589,12 +592,12 @@ export const episodeRepository = {
     getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE draft_id = ?").run(draftId);
   },
   listAll(): EpisodeRow[] {
-    const rows = getDb().prepare("SELECT * FROM episodes ORDER BY datetime(pub_date) DESC, episode_id DESC").all() as SqliteEpisodeRow[];
+    const rows = getDb().prepare("SELECT * FROM episodes WHERE is_draft = 0 ORDER BY datetime(pub_date) DESC, episode_id DESC").all() as SqliteEpisodeRow[];
     return rows.map(mapRow);
   },
   listPublished(now = new Date()): EpisodeRow[] {
     const rows = getDb()
-      .prepare("SELECT * FROM episodes WHERE datetime(pub_date) <= datetime(?) ORDER BY datetime(pub_date) DESC, episode_id DESC")
+      .prepare("SELECT * FROM episodes WHERE is_draft = 0 AND datetime(pub_date) <= datetime(?) ORDER BY datetime(pub_date) DESC, episode_id DESC")
       .all(now.toISOString()) as SqliteEpisodeRow[];
     return rows.map(mapRow);
   },
@@ -665,27 +668,35 @@ export const episodeRepository = {
     };
   },
   countPublished(now = new Date()): number {
-    const row = getDb().prepare("SELECT count(*) as count FROM episodes WHERE datetime(pub_date) <= datetime(?)").get(now.toISOString()) as { count: number };
+    const row = getDb().prepare("SELECT count(*) as count FROM episodes WHERE is_draft = 0 AND datetime(pub_date) <= datetime(?)").get(now.toISOString()) as { count: number };
     return row.count;
   },
   countScheduled(now = new Date()): number {
-    const row = getDb().prepare("SELECT count(*) as count FROM episodes WHERE datetime(pub_date) > datetime(?)").get(now.toISOString()) as { count: number };
+    const row = getDb().prepare("SELECT count(*) as count FROM episodes WHERE is_draft = 0 AND datetime(pub_date) > datetime(?)").get(now.toISOString()) as { count: number };
     return row.count;
   },
   findNextScheduled(now = new Date()): EpisodeRow | null {
     const row = getDb()
-      .prepare("SELECT * FROM episodes WHERE datetime(pub_date) > datetime(?) ORDER BY datetime(pub_date) ASC, episode_id ASC LIMIT 1")
+      .prepare("SELECT * FROM episodes WHERE is_draft = 0 AND datetime(pub_date) > datetime(?) ORDER BY datetime(pub_date) ASC, episode_id ASC LIMIT 1")
       .get(now.toISOString()) as SqliteEpisodeRow | undefined;
     return row ? mapRow(row) : null;
   },
   findByEpisodeId(episodeId: number): EpisodeRow | null {
     return fetchOne(episodeId);
   },
-  create(input: EpisodeInput): EpisodeRow {
+  create(input: EpisodeInput, isDraft = false): EpisodeRow {
+    const existing = this.findByEpisodeId(input.episodeId);
+    if (existing?.isDraft && isDraft) {
+      return existing;
+    }
+    if (existing?.isDraft && !isDraft) {
+      return this.update(input.episodeId, input) as EpisodeRow;
+    }
     const db = getDb();
     const now = nowIso();
     const result = db.prepare(baseInsert).run({
       episodeId: input.episodeId,
+      isDraft: isDraft ? 1 : 0,
       title: input.title,
       summary: input.summary ?? "",
       episodeNumber: input.episodeNumber ?? null,
@@ -723,12 +734,28 @@ export const episodeRepository = {
     touchMediaRelations(input.episodeId, input);
     return this.findByEpisodeId(input.episodeId) as EpisodeRow;
   },
+  createDraftEpisode(episodeId: number, now = new Date()): EpisodeRow {
+    return this.create({
+      episodeId,
+      title: `[Draft episode ${episodeId}]`,
+      summary: "",
+      pubDate: now,
+      explicit: "no",
+      authors: [],
+      guests: [],
+      tags: [],
+      citations: [],
+      musicCredits: [],
+      coverCredits: [],
+    }, true);
+  },
   update(episodeId: number, input: EpisodeInput): EpisodeRow | null {
     const existing = this.findByEpisodeId(episodeId);
     if (!existing) return null;
     const now = nowIso();
     getDb().prepare(`
       UPDATE episodes SET
+        is_draft = 0,
         title = @title,
         summary = @summary,
         episode_number = @episodeNumber,
@@ -833,6 +860,16 @@ export const episodeRepository = {
 
     assignments.push("updated_at = @updatedAt");
     getDb().prepare(`UPDATE episodes SET ${assignments.join(", ")} WHERE episode_id = @episodeId`).run(params);
+    return this.findByEpisodeId(episodeId);
+  },
+  updateYoutubePublication(episodeId: number, youtube: string | null, trailerVideoSyncStatus: TrailerVideoSyncStatus): EpisodeRow | null {
+    const existing = this.findByEpisodeId(episodeId);
+    if (!existing) return null;
+    getDb().prepare(`
+      UPDATE episodes
+      SET youtube = ?, trailer_video_sync_status = ?, updated_at = ?
+      WHERE episode_id = ?
+    `).run(youtube, trailerVideoSyncStatus, nowIso(), episodeId);
     return this.findByEpisodeId(episodeId);
   },
   queueTranscription(episodeId: number): EpisodeRow | null {

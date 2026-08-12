@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS episodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   episode_id INTEGER NOT NULL UNIQUE,
+  is_draft INTEGER NOT NULL DEFAULT 0,
   title TEXT NOT NULL,
   summary TEXT NOT NULL DEFAULT '',
   episode_number INTEGER,
@@ -201,6 +202,23 @@ CREATE TABLE IF NOT EXISTS youtube_trailer_jobs (
   cancelled_at TEXT,
   cancellation_boundary TEXT,
   obsolete_at TEXT,
+  publication_status TEXT NOT NULL DEFAULT 'not_started' CHECK (publication_status IN ('not_started', 'metadata_accepted', 'playlist_confirmed', 'public_confirmed', 'failed')),
+  publication_lease_id TEXT,
+  publication_lease_claimed_at TEXT,
+  publication_requested_at TEXT,
+  metadata_snapshot_json TEXT,
+  metadata_digest TEXT,
+  metadata_accepted_at TEXT,
+  playlist_membership_confirmed_at TEXT,
+  public_confirmed_at TEXT,
+  canonical_url TEXT,
+  retention_status TEXT NOT NULL DEFAULT 'not_started' CHECK (retention_status IN ('not_started', 'pending', 'complete', 'retryable-error')),
+  retention_error_category TEXT,
+  retention_error_message TEXT,
+  retention_error_at TEXT,
+  provider_cleanup_status TEXT NOT NULL DEFAULT 'not_required',
+  provider_cleanup_error TEXT,
+  provider_cleanup_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   completed_at TEXT
@@ -378,6 +396,7 @@ export const getDb = (): DatabaseSync => {
     db.exec(schema);
     ensureYoutubeMetricSampleColumns(db);
     ensureEpisodeTranscriptColumns(db);
+    ensureEpisodeDraftColumn(db);
     ensureEpisodeTrailerVideoColumns(db);
     ensureArtifactJobColumns(db);
     ensureEpisodeTrailerVideoDraftTable(db);
@@ -455,6 +474,13 @@ const ensureEpisodeTranscriptColumns = (database: DatabaseSync): void => {
   }
 };
 
+const ensureEpisodeDraftColumn = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(episodes)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "is_draft")) {
+    database.exec("ALTER TABLE episodes ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0;");
+  }
+};
+
 const ensureEpisodeTrailerVideoColumns = (database: DatabaseSync): void => {
   const columns = database.prepare("PRAGMA table_info(episodes)").all() as Array<{ name: string }>;
   const columnNames = new Set(columns.map((column) => column.name));
@@ -509,6 +535,23 @@ const ensureYoutubeTrailerJobColumns = (database: DatabaseSync): void => {
       cancelled_at TEXT,
       cancellation_boundary TEXT,
       obsolete_at TEXT,
+      publication_status TEXT NOT NULL DEFAULT 'not_started',
+      publication_lease_id TEXT,
+      publication_lease_claimed_at TEXT,
+      publication_requested_at TEXT,
+      metadata_snapshot_json TEXT,
+      metadata_digest TEXT,
+      metadata_accepted_at TEXT,
+      playlist_membership_confirmed_at TEXT,
+      public_confirmed_at TEXT,
+      canonical_url TEXT,
+      retention_status TEXT NOT NULL DEFAULT 'not_started',
+      retention_error_category TEXT,
+      retention_error_message TEXT,
+      retention_error_at TEXT,
+      provider_cleanup_status TEXT NOT NULL DEFAULT 'not_required',
+      provider_cleanup_error TEXT,
+      provider_cleanup_at TEXT,
       created_at TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT '',
       completed_at TEXT
@@ -548,6 +591,23 @@ const ensureYoutubeTrailerJobColumns = (database: DatabaseSync): void => {
     ["cancelled_at", "TEXT"],
     ["cancellation_boundary", "TEXT"],
     ["obsolete_at", "TEXT"],
+    ["publication_status", "TEXT NOT NULL DEFAULT 'not_started'"],
+    ["publication_lease_id", "TEXT"],
+    ["publication_lease_claimed_at", "TEXT"],
+    ["publication_requested_at", "TEXT"],
+    ["metadata_snapshot_json", "TEXT"],
+    ["metadata_digest", "TEXT"],
+    ["metadata_accepted_at", "TEXT"],
+    ["playlist_membership_confirmed_at", "TEXT"],
+    ["public_confirmed_at", "TEXT"],
+    ["canonical_url", "TEXT"],
+    ["retention_status", "TEXT NOT NULL DEFAULT 'not_started'"],
+    ["retention_error_category", "TEXT"],
+    ["retention_error_message", "TEXT"],
+    ["retention_error_at", "TEXT"],
+    ["provider_cleanup_status", "TEXT NOT NULL DEFAULT 'not_required'"],
+    ["provider_cleanup_error", "TEXT"],
+    ["provider_cleanup_at", "TEXT"],
     ["created_at", "TEXT NOT NULL DEFAULT ''"],
     ["updated_at", "TEXT NOT NULL DEFAULT ''"],
     ["completed_at", "TEXT"],

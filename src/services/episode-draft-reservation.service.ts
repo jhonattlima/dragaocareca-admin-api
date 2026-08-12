@@ -38,6 +38,9 @@ export const reserveTrailerVideoDraft = async (episodeId: number, ownerEmail: st
     expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS).toISOString(),
     state: "reserved",
   };
+  // Keep a draft episode row so durable YouTube jobs can reference the
+  // reserved episode ID before the operator submits the final form.
+  episodeRepository.createDraftEpisode(episodeId, now);
   episodeRepository.createTrailerVideoDraft(reservation);
   return { draftId: reservation.draftId, episodeId, state: "reserved", expiresAt: reservation.expiresAt };
 };

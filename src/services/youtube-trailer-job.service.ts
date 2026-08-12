@@ -7,12 +7,14 @@ import {
   type YoutubeTrailerSource,
 } from "../database/repositories/youtube-trailer-job.repository";
 import { config } from "../config/env";
-import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath } from "./episode-media-layout.service";
+import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath, getEpisodeMediaStagingPath } from "./episode-media-layout.service";
 import {
   createLiveYoutubeTrailerUploadProvider,
   type YoutubeTrailerUploadProvider,
   type YoutubeTrailerUploadProviderError,
 } from "./youtube-trailer-upload.provider";
+import { publishYoutubeTrailer } from "./youtube-trailer-publication.service";
+import { episodeRepository } from "../database/repositories/episode.repository";
 
 type ProcessOptions = {
   provider?: YoutubeTrailerUploadProvider;
@@ -46,6 +48,8 @@ export type YoutubeTrailerJobStatusDto = {
   updatedAt: string;
   completedAt: string | null;
   privateWatchUrl: string | null;
+  publicationStatus: YoutubeTrailerJobRow["publicationStatus"];
+  publicationErrorCategory: string | null;
 };
 
 const safeErrorCategory = (category: string | null): string | null => {
@@ -87,6 +91,8 @@ export const toYoutubeTrailerJobStatusDto = (job: YoutubeTrailerJobRow): Youtube
   updatedAt: job.updatedAt,
   completedAt: job.completedAt,
   privateWatchUrl: sanitizedPrivateWatchUrl(job.providerVideoId),
+  publicationStatus: job.publicationStatus,
+  publicationErrorCategory: safeErrorCategory(job.errorCategory),
 });
 
 const sanitizedPrivateWatchUrl = (providerVideoId: string | null): string | null => {
@@ -96,14 +102,14 @@ const sanitizedPrivateWatchUrl = (providerVideoId: string | null): string | null
   return url.toString();
 };
 
-type YoutubeTrailerJobMetadata = { title: string; summary: string };
+type YoutubeTrailerJobMetadata = { title: string; summary: string; hashtags?: string[] };
 
 const metadataForJob = (job: YoutubeTrailerJobRow): YoutubeTrailerJobMetadata | undefined => {
   if (!job.metadataSnapshotJson) return undefined;
   try {
-    const value = JSON.parse(job.metadataSnapshotJson) as { title?: unknown; summary?: unknown };
+    const value = JSON.parse(job.metadataSnapshotJson) as { title?: unknown; summary?: unknown; hashtags?: unknown };
     return typeof value.title === "string" && typeof value.summary === "string"
-      ? { title: value.title, summary: value.summary }
+      ? { title: value.title, summary: value.summary, hashtags: Array.isArray(value.hashtags) ? value.hashtags.filter((tag): tag is string => typeof tag === "string") : [] }
       : undefined;
   } catch {
     return undefined;
@@ -131,7 +137,9 @@ const calculateRetryAt = (retryCount: number): string => {
 };
 
 export const fingerprintYoutubeTrailerSource = async (episodeId: number): Promise<YoutubeTrailerSource> => {
-  const sourcePath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
+  const finalPath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
+  const stagingPath = getEpisodeMediaStagingPath(episodeId, "trailerVideo");
+  const sourcePath = (await fs.promises.lstat(finalPath).catch(() => null))?.isFile() ? finalPath : stagingPath;
   const stats = await fs.promises.lstat(sourcePath).catch(() => null);
   if (!stats?.isFile()) throw new Error("Final trailer-video source is missing");
 
@@ -257,7 +265,15 @@ const pollPrivateProcessing = async (
     details.uploadStatus === "processed" &&
     details.processingStatus === "succeeded"
   ) {
-    youtubeTrailerJobRepository.markReady(updatedLease);
+    const ready = youtubeTrailerJobRepository.markReady(updatedLease);
+    if (ready?.publicationRequestedAt) {
+      const metadata = metadataForJob(ready);
+      const episode = episodeRepository.findByEpisodeId(ready.episodeId);
+      const hashtags = metadata?.hashtags?.length
+        ? metadata.hashtags
+        : (episode?.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
+      await publishYoutubeTrailer(ready.episodeId, ready.jobId, { title: metadata?.title ?? episode?.title ?? `Episode ${ready.episodeId}`, hashtags }, provider);
+    }
   }
 };
 
@@ -305,7 +321,9 @@ const transferPrivateSource = async (
 
   if (job.providerVideoId) return pollPrivateProcessing(job, lease, provider);
 
-  const sourcePath = getEpisodeMediaFinalPath(job.episodeId, "trailerVideo");
+  const finalPath = getEpisodeMediaFinalPath(job.episodeId, "trailerVideo");
+  const stagingPath = getEpisodeMediaStagingPath(job.episodeId, "trailerVideo");
+  const sourcePath = (await fs.promises.lstat(finalPath).catch(() => null))?.isFile() ? finalPath : stagingPath;
   const handle = await fs.promises.open(sourcePath, "r");
   try {
     let offset = job.confirmedBytes;
@@ -379,6 +397,26 @@ export const requestYoutubeTrailerJobCancellation = (episodeId: number, jobId: s
 export const obsoleteYoutubeTrailerJobsForCurrentSource = async (episodeId: number): Promise<YoutubeTrailerJobRow[]> => {
   const source = await fingerprintYoutubeTrailerSource(episodeId);
   return youtubeTrailerJobRepository.obsoletePriorSource(episodeId, source);
+};
+
+export const cleanupYoutubeTrailerVideos = async (
+  jobs: YoutubeTrailerJobRow[],
+  provider: YoutubeTrailerUploadProvider = createLiveYoutubeTrailerUploadProvider(),
+): Promise<void> => {
+  for (const job of jobs) {
+    if (!job.providerVideoId || job.providerCleanupStatus === "complete") continue;
+    youtubeTrailerJobRepository.updateProviderCleanup(job, "pending");
+    try {
+      if (!provider.deleteVideo) throw new Error("YouTube provider deletion is unavailable.");
+      await provider.deleteVideo(job.providerVideoId);
+      const latest = youtubeTrailerJobRepository.findByJobId(job.episodeId, job.jobId);
+      if (latest) youtubeTrailerJobRepository.updateProviderCleanup(latest, "complete");
+    } catch (error) {
+      const latest = youtubeTrailerJobRepository.findByJobId(job.episodeId, job.jobId);
+      if (latest) youtubeTrailerJobRepository.updateProviderCleanup(latest, "retryable-error", error instanceof Error ? error.message : "YouTube video cleanup failed.");
+      console.warn("YouTube trailer cleanup requires reconciliation", { episodeId: job.episodeId, jobId: job.jobId });
+    }
+  }
 };
 
 export const initializeYoutubeTrailerJobs = async (): Promise<void> => {

@@ -9,7 +9,7 @@ const fallbackCategoryId = "22";
 const resumableUploadBaseUrl = "https://www.googleapis.com/upload/youtube/v3/videos";
 
 export type YoutubeTrailerUploadProviderError = {
-  code: "configuration" | "authorization" | "retryable" | "unrecoverable" | "session-expired";
+  code: "configuration" | "authorization" | "quota" | "retryable" | "unrecoverable" | "session-expired";
   message: string;
   httpStatus?: number;
   reason?: string;
@@ -89,6 +89,7 @@ export interface YoutubeTrailerUploadProvider {
   findPlaylistMembership?(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership | null>;
   insertPlaylistItem?(providerVideoId: string): Promise<YoutubeTrailerPlaylistMembership>;
   publishVideo?(providerVideoId: string): Promise<YoutubeTrailerVideoRecord>;
+  deleteVideo?(providerVideoId: string): Promise<void>;
   normalizeFailure(error: unknown): YoutubeTrailerUploadProviderError;
 }
 
@@ -295,6 +296,18 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
     });
     if (!response.ok) throw await this.errorFromResponse(response);
     return this.toVideoRecord((await response.json()) as YoutubeVideoResponse);
+  }
+
+  async deleteVideo(providerVideoId: string): Promise<void> {
+    const token = await this.getAccessToken();
+    const response = await fetch(`${resumableUploadBaseUrl}?id=${encodeURIComponent(providerVideoId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok && response.status !== 404) {
+      const reason = await responseReason(response);
+      throw this.error(response.status === 403 ? "authorization" : response.status === 429 ? "quota" : "retryable", "YouTube trailer deletion failed.", response.status, reason);
+    }
   }
 
   async cancel(_sessionUri: string, providerVideoId: string | null): Promise<YoutubeTrailerCancellationResult> {

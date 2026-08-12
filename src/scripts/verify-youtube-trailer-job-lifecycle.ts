@@ -235,8 +235,10 @@ const verifyMetadataAndSafeOutput = async (fixture: Fixture): Promise<void> => {
   const provider = new FakeYoutubeTrailerUploadProvider();
   const job = await createYoutubeTrailerJob(episodeId, { title: "Accepted title", summary: "Accepted summary" });
   assert.deepEqual(JSON.parse(job.metadataSnapshotJson ?? "{}"), { title: "Accepted title", summary: "Accepted summary" });
-  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
-  assert.deepEqual(provider.metadata, [{ title: "Accepted title", summary: "Accepted summary" }], "accepted metadata must reach the private provider upload");
+  for (let attempt = 0; attempt < 32 && provider.metadata.length === 0; attempt += 1) {
+    await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  }
+  assert.deepEqual(provider.metadata, [{ title: "Accepted title", summary: "Accepted summary", hashtags: [] }], "accepted metadata must reach the private provider upload");
   assert.equal(provider.events.includes("begin-session"), true);
 
   const readyJob = getYoutubeTrailerJob(episodeId, job.jobId);

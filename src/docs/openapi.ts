@@ -123,6 +123,8 @@ export const swaggerSpec = swaggerJsdoc({
             updatedAt: { type: "string", format: "date-time" },
             completedAt: { type: "string", format: "date-time", nullable: true },
             privateWatchUrl: { type: "string", format: "uri", nullable: true, description: "Sanitized private YouTube watch URL only after provider video evidence exists; never a public-publishing signal." },
+            publicationStatus: { type: "string", enum: ["not_started", "metadata_accepted", "playlist_confirmed", "public_confirmed", "failed"] },
+            publicationErrorCategory: { type: "string", nullable: true },
           },
         },
         YoutubeTrailerPublicationRequest: {
@@ -930,10 +932,10 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Start or reuse a private trailer-video transfer job",
-          description: "Creates one durable API-owned private-first YouTube job for the current canonical final trailer source, or reuses its active job. This operation never publishes a video, changes metadata, stores a public URL, or manages retention. Cache-Control is no-store.",
+          description: "Creates one durable API-owned private-first YouTube job for the current canonical source, including an authenticated staged draft source, or reuses its active job. A private watch URL may be returned before Save; publication is requested separately by the Save-time commit route. Cache-Control is no-store.",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." }],
-          requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, properties: { title: { type: "string", minLength: 1, maxLength: 100 }, summary: { type: "string", maxLength: 5000 } } } } } },
+          requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, properties: { title: { type: "string", minLength: 1, maxLength: 100 }, summary: { type: "string", maxLength: 5000 }, hashtags: { type: "array", maxItems: 3, items: { type: "string", pattern: "^#[\\p{L}\\p{N}_-]+$" } }, draftId: { type: "string", format: "uuid", description: "Authenticated trailer draft reservation when the episode has not been saved yet." } } } } } },
           responses: {
             "200": { description: "An active job for the current finalized source was reused.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } }, Location: { schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } },
             "202": { description: "A private-first job was queued.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } }, Location: { schema: { type: "string" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } },
@@ -948,6 +950,14 @@ export const swaggerSpec = swaggerJsdoc({
           tags: ["Episodes"], summary: "Get the current finalized-source YouTube trailer job", description: "Authenticated no-store reload/restart recovery lookup for the current canonical trailer source.", security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
           responses: { "200": { description: "Safe current-source snapshot.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "No current-source job." } },
+        },
+      },
+      "/v1/episodes/{episodeId}/youtube-trailer-jobs/commit": {
+        post: {
+          tags: ["Episodes"], summary: "Commit Save-time metadata and publication intent", description: "Records durable publication intent after episode Save. If the private job is ready, the API updates the saved summary/title/hashtags and publishes; otherwise the worker completes publication after private readiness.", security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, properties: { jobId: { type: "string", format: "uuid" } } } } } },
+          responses: { "200": { description: "Publication completed or reconciled." }, "202": { description: "Publication intent recorded; the private job is still transferring or processing." }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "Episode or current job not found." } },
         },
       },
       "/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}": {
@@ -1107,7 +1117,7 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Upload or replace the final trailer video",
-          description: "Authenticated administrators upload one MP4 through multipart field file. The server enforces EPISODE_TRAILER_VIDEO_MAX_BYTES (524288000 bytes / 500 MiB by default), stores only the canonical final trailer.mp4, and never accepts client paths. A replacement is allowed, retains any existing publication reference, and reports manual-sync-required until an administrator re-syncs it to YouTube.",
+          description: "Authenticated administrators upload one MP4 through multipart field file. New drafts remain staged until Save, while persisted replacements are promoted atomically. A staged upload can begin a private YouTube job; replacement cleanup deletes superseded provider videos through the server-owned provider boundary.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },
@@ -1135,6 +1145,11 @@ export const swaggerSpec = swaggerJsdoc({
             "404": { description: "Episode not found." },
             "409": { description: "Missing, expired, reused, or unreserved draft reservation." },
           },
+        },
+        delete: {
+          tags: ["Episodes"], summary: "Delete the local trailer and associated YouTube videos", description: "Cancels active work, removes the local trailer, and idempotently deletes associated provider videos. Temporary provider failures are recorded as retryable cleanup reconciliation.", security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          responses: { "200": { description: "Trailer and cleanup targets removed." }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "Episode not found." } },
         },
       },
       "/v1/episodes/{episodeId}/cover": {
