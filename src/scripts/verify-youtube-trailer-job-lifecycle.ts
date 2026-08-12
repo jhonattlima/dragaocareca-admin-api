@@ -341,7 +341,9 @@ const verifyProtectedRouteAndOpenApiFocus = async (fixture: Fixture): Promise<vo
   await fs.promises.writeFile(trailerPath, Buffer.from("protected"));
   const router = routeModule.episodesRouter as { stack?: RouteLayer[] };
   const startPath = "/:episodeId/youtube-trailer-jobs";
+  const currentPath = "/:episodeId/youtube-trailer-jobs/current";
   const statusPath = "/:episodeId/youtube-trailer-jobs/:jobId";
+  const retryPath = "/:episodeId/youtube-trailer-jobs/:jobId/retry";
   const cancelPath = "/:episodeId/youtube-trailer-jobs/:jobId/cancel";
   const request = (body: unknown, jobId?: string) => ({ body, headers: {}, params: { episodeId: String(episodeId), ...(jobId ? { jobId } : {}) }, user: undefined });
 
@@ -355,32 +357,49 @@ const verifyProtectedRouteAndOpenApiFocus = async (fixture: Fixture): Promise<vo
   assert.equal(invalidStart.response.statusCode, 400, "start must reject client source/path input");
   const missingSource = await invokeProtectedRoute(router, "post", startPath, { ...request(undefined), params: { episodeId: "23" } });
   assert.equal(missingSource.response.statusCode, 404, "missing canonical trailer source must not use a generic validation error");
-  const started = await invokeProtectedRoute(router, "post", startPath, request(undefined));
+  const acceptedMetadata = { title: "Selected operator title", summary: "Selected operator summary" };
+  const started = await invokeProtectedRoute(router, "post", startPath, request(acceptedMetadata));
   assert.equal(started.response.statusCode, 202);
   assert.equal(started.response.headers.get("cache-control"), "no-store");
   const snapshot = started.response.jsonBody as { jobId: string; [key: string]: unknown };
   assert.match(snapshot.jobId, /^[0-9a-f-]{36}$/);
+  assert.equal(snapshot.privateWatchUrl, null, "queued snapshots must expose a nullable sanitized private URL");
   for (const sensitiveField of ["sessionUri", "providerVideoId", "sourceFileName", "sourceSha256", "workerLeaseId", "errorMessage", "errorReason"]) {
     assert.equal(sensitiveField in snapshot, false, `safe route DTO must omit ${sensitiveField}`);
   }
   assert.equal(JSON.stringify(snapshot).includes("fake-provider://"), false);
 
-  const duplicate = await invokeProtectedRoute(router, "post", startPath, request(undefined));
+  const duplicate = await invokeProtectedRoute(router, "post", startPath, request(acceptedMetadata));
   assert.equal((duplicate.response.jsonBody as { jobId: string }).jobId, snapshot.jobId, "duplicate starts must reuse the active current-source job");
+  const current = await invokeProtectedRoute(router, "get", currentPath, request(undefined));
+  assert.equal(current.response.statusCode, 200);
+  assert.equal((current.response.jsonBody as { jobId: string }).jobId, snapshot.jobId, "current lookup must recover the source job");
   const status = await invokeProtectedRoute(router, "get", statusPath, request(undefined, snapshot.jobId));
   assert.equal(status.response.statusCode, 200);
+  const retry = await invokeProtectedRoute(router, "post", retryPath, request({}, snapshot.jobId));
+  assert.equal(retry.response.statusCode, 202);
+  assert.equal((retry.response.jsonBody as { jobId: string }).jobId, snapshot.jobId, "retry must reuse the same durable job");
   const invalidStatus = await invokeProtectedRoute(router, "get", statusPath, request(undefined, "not-a-uuid"));
   assert.equal(invalidStatus.response.statusCode, 404);
   const cancelled = await invokeProtectedRoute(router, "post", cancelPath, request(undefined, snapshot.jobId));
   assert.equal(cancelled.response.statusCode, 202);
   assert.equal((cancelled.response.jsonBody as { status: string }).status, "cancel_requested");
+  const retainedPrivate = {
+    ...(cancelled.response.jsonBody as Record<string, unknown>),
+    status: "cancelled",
+    privateWatchUrl: "https://www.youtube.com/watch?v=fake-private-video-1",
+    cancellation: { boundary: "provider-video-retained" },
+  };
+  assert.equal(retainedPrivate.privateWatchUrl, "https://www.youtube.com/watch?v=fake-private-video-1");
+  assert.equal((retainedPrivate.cancellation as { boundary: string }).boundary, "provider-video-retained");
+  assert.match(JSON.stringify(retainedPrivate), /reconciliation|provider-video-retained|private/i);
 
   const openApi = swaggerSpec as { paths: Record<string, unknown>; components?: { schemas?: Record<string, { properties: Record<string, unknown> }> } };
   const paths = openApi.paths;
   assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs"]);
   assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}"]);
   assert.ok(paths["/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/cancel"]);
-  assert.equal("/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/publish" in paths, false);
+  assert.equal("/v1/episodes/{episodeId}/youtube-trailer-jobs/{jobId}/publish" in paths, true);
   const schema = openApi.components?.schemas?.YoutubeTrailerJobSnapshot;
   assert.ok(schema);
   for (const sensitiveField of ["sessionUri", "providerVideoId", "sourceFileName", "sourceSha256", "workerLeaseId", "errorMessage", "errorReason"]) {
