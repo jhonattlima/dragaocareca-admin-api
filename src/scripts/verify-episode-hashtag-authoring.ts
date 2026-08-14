@@ -132,7 +132,7 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
           ok: true,
           displayTag: normalizedTag,
           normalizedTag,
-          approximateCount: normalizedTag === "#tag0" ? 10 : normalizedTag === "#tag1" ? 9 : normalizedTag === "#tag2" ? 8 : normalizedTag === "#tag49" ? 1_000_000 : 1,
+          approximateCount: normalizedTag === "#tag0" ? 10 : normalizedTag === "#tag1" ? 9 : normalizedTag === "#tag2" ? 1_000_000 : normalizedTag === "#tag49" ? 1_000_000 : 1,
           retrievedAt: clock.value.toISOString(),
           cacheStatus: "miss" as const,
           regionCode: "BR",
@@ -147,7 +147,7 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   const authored = await authoring.author("transcript", "summary");
   assert.equal(authored.status, "done");
   assert.equal(lookedUp.length, 50, "automatic authoring must look up all 50 candidates");
-  assert.deepEqual(authored.suggestions.map((tag) => tag.displayTag), ["#tag0", "#tag1", "#tag2"], "irrelevant high-count tags cannot rank");
+  assert.deepEqual(authored.suggestions.map((tag) => tag.displayTag), ["#tag1", "#tag2", "#tag0"], "semantic relevance must outrank approximate search counts");
 
   await Promise.all([service.lookup("#serial-a", "automatic"), service.lookup("#serial-b", "automatic"), service.lookup("#serial-c", "automatic")]);
   assert.equal(maximumActive, 1, "provider lookups must use one serial lane");

@@ -134,7 +134,9 @@ export const createEpisodeHashtagAuthoringService = (options: { generateCandidat
       }
       const suggestions = lookupResults
         .filter(({ candidate }) => candidate.relevant)
-        .sort((a, b) => b.retrieval.approximateCount - a.retrieval.approximateCount || b.candidate.relevanceScore - a.candidate.relevanceScore || a.candidate.normalizedTag.localeCompare(b.candidate.normalizedTag))
+        // YouTube's totalResults is approximate and capped at 1,000,000. It is
+        // useful as an availability signal, but must not outrank semantic fit.
+        .sort((a, b) => b.candidate.relevanceScore - a.candidate.relevanceScore || a.candidate.normalizedTag.localeCompare(b.candidate.normalizedTag))
         .slice(0, 3)
         .map(({ candidate, retrieval }) => ({ ...retrieval, relevanceScore: candidate.relevanceScore }));
       return { status: "done", errorCategory: null, retryAt: null, candidates, retrievals, suggestions };
