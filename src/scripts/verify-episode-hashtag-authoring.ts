@@ -112,6 +112,9 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   const second = await service.lookup("rpg", "automatic");
   assert.equal(second.cacheStatus, "hit");
   assert.deepEqual(providerCalls, ["#rpg"]);
+  clock.value = new Date(clock.value.getTime() + 60 * 60 * 1000 + 1);
+  const successExpired = await service.lookup("#rpg", "automatic");
+  assert.equal(successExpired.cacheStatus, "miss", "successful entries must expire after one hour");
 
   const candidates = createCandidates();
   const lookedUp: string[] = [];
@@ -184,19 +187,51 @@ const writeState = async (statePath: string, state: AnyRecord): Promise<void> =>
 };
 
 const verifyLifecycleFocus = async (fixture: Fixture): Promise<void> => {
-  const [{ createEpisodeSummaryService }, media, schema, { config }, publication] = await Promise.all([
+  const [{ createEpisodeSummaryService }, media, schema, { config }, publication, jobs, episodes] = await Promise.all([
     import("../services/episode-summary.service.js"),
     import("../services/episode-media-layout.service.js"),
     import("../schemas/episode-draft-state.js"),
     import("../config/env.js"),
     import("../services/youtube-trailer-publication.service.js"),
+    import("../database/repositories/youtube-trailer-job.repository.js"),
+    import("../database/repositories/episode.repository.js"),
   ]);
   assert.equal(config.youtube.hashtagAuthoring.enabled, true);
-  assert.equal(typeof publication.assembleYoutubeTrailerTitle, "function", "start and publication must share the assembled-title validator");
-  assert.equal(publication.assembleYoutubeTrailerTitle({ title: `Trailer - ${"a".repeat(90)}`, hashtags: ["#é"] }), `Trailer - ${"a".repeat(90)} #é`);
-  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: `Trailer - ${"a".repeat(91)}`, hashtags: ["#é"] }), /100 characters/);
-  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["bad tag"] }), /hashtags are invalid/);
   const episodeId = 1803;
+  episodes.episodeRepository.create({
+    episodeId,
+    title: "Authored episode",
+    summary: "saved summary",
+    pubDate: new Date("2026-08-06T12:00:00.000Z"),
+    explicit: "no",
+    authors: [],
+    guests: [],
+    tags: ["legacy-tag"],
+    citations: [],
+    musicCredits: [JSON.stringify({ name: "Fixture music", links: [{ label: "reference", url: "https://example.com/music" }] })],
+    coverCredits: [],
+  });
+  assert.equal(typeof publication.assembleYoutubeTrailerTitle, "function", "start and publication must share the assembled-title validator");
+  assert.equal(publication.assembleYoutubeTrailerTitle({ title: "a".repeat(97), hashtags: ["#é"] }), `${"a".repeat(97)} #é`);
+  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "a".repeat(98), hashtags: ["#é"] }), /100 characters/);
+  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["bad tag"] }), /hashtags are invalid/);
+  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["#same", "#same"] }), /unique/);
+  const durable = jobs.youtubeTrailerJobRepository.createOrReuse({
+    jobId: "00000000-0000-4000-8000-000000000901",
+    episodeId,
+    sourceFileName: `episodes/${episodeId}/trailer-video.mp4`,
+    sourceSha256: "a".repeat(64),
+    sourceBytes: 10,
+  });
+  const authoredMetadata = { title: "Trailer - Authored episode", summary: "saved summary", hashtags: ["#manual", "#gerado"] };
+  const requested = jobs.youtubeTrailerJobRepository.requestPublication(durable, authoredMetadata);
+  assert.ok(requested);
+  assert.deepEqual(JSON.parse(jobs.youtubeTrailerJobRepository.findByJobId(episodeId, durable.jobId)?.metadataSnapshotJson ?? "{}"), authoredMetadata);
+  const reloaded = jobs.youtubeTrailerJobRepository.findByJobId(episodeId, durable.jobId);
+  assert.ok(reloaded);
+  const retried = jobs.youtubeTrailerJobRepository.requestPublication(reloaded, authoredMetadata);
+  assert.ok(retried, "repeating Save commit must remain idempotent");
+  assert.deepEqual(JSON.parse(retried?.metadataSnapshotJson ?? "{}"), authoredMetadata);
   const statePath = media.getEpisodeMediaDraftStatePath(episodeId);
   const summaryPath = media.getEpisodeMediaDraftSummaryPath(episodeId);
   const transcriptPath = media.getEpisodeMediaFinalPath(episodeId, "transcript");

@@ -49,7 +49,7 @@ import {
   requestYoutubeTrailerJobCancellation,
   toYoutubeTrailerJobStatusDto,
 } from "../services/youtube-trailer-job.service";
-import { publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
+import { assembleYoutubeTrailerTitle, publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
 import { extractEpisodeAudioMetadata } from "../services/episode-audio-metadata.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
@@ -100,6 +100,11 @@ const youtubeTrailerJobStartSchema = z.object({
 const youtubeTrailerJobControlSchema = z.object({}).strict().optional();
 const youtubeTrailerJobIdSchema = z.uuid();
 const youtubeTrailerPublicationSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_-]+$/u)).max(3),
+}).strict();
+const youtubeTrailerCommitSchema = z.object({
+  jobId: z.uuid().optional(),
   title: z.string().trim().min(1).max(100),
   hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_-]+$/u)).max(3),
 }).strict();
@@ -757,12 +762,22 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTra
       res.status(404).json({ message: "YouTube trailer job not found" });
       return;
     }
-    const tags = (episode.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
-    const publicationMetadata = { title: `Trailer - ${episode.title}`, summary: episode.summary ?? "", hashtags: tags };
+    const body = youtubeTrailerCommitSchema.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ message: "Save publication metadata must contain a title and up to three hashtags." });
+      return;
+    }
+    const publicationMetadata = { title: body.data.title, summary: episode.summary ?? "", hashtags: body.data.hashtags };
+    try {
+      assembleYoutubeTrailerTitle(publicationMetadata);
+    } catch (error) {
+      res.status(400).json({ message: error instanceof Error ? error.message : "Invalid trailer publication metadata." });
+      return;
+    }
     const requested = youtubeTrailerJobRepository.requestPublication(current, publicationMetadata);
     const snapshot = requested ?? current;
     if (snapshot.status === "ready") {
-      await publishYoutubeTrailer(episodeId, snapshot.jobId, { title: publicationMetadata.title, hashtags: tags });
+      await publishYoutubeTrailer(episodeId, snapshot.jobId, body.data);
     }
     res.status(snapshot.status === "ready" ? 200 : 202).json(toYoutubeTrailerJobStatusDto(snapshot));
   } catch (error) {
@@ -885,10 +900,16 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs", noStoreYoutubeTrailerJob
       }
     }
     const metadata = {
-      title: body.data?.title ?? episode?.title ?? `Episode ${episodeId}`,
+      title: body.data?.title ?? `Trailer - ${episode?.title ?? `Episode ${episodeId}`}`,
       summary: body.data?.summary ?? episode?.summary ?? "",
-      hashtags: body.data?.hashtags ?? (episode?.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`),
+      hashtags: body.data?.hashtags ?? [],
     };
+    try {
+      assembleYoutubeTrailerTitle(metadata);
+    } catch (error) {
+      res.status(400).json({ message: error instanceof Error ? error.message : "Invalid trailer metadata." });
+      return;
+    }
     const job = await createYoutubeTrailerJob(episodeId, metadata);
     res.setHeader("Location", `/v1/episodes/${episodeId}/youtube-trailer-jobs/${job.jobId}`);
     res.status(job.status === "queued" ? 202 : 200).json(toYoutubeTrailerJobStatusDto(job));

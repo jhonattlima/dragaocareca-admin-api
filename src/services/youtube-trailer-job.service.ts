@@ -269,10 +269,8 @@ const pollPrivateProcessing = async (
     if (ready?.publicationRequestedAt) {
       const metadata = metadataForJob(ready);
       const episode = episodeRepository.findByEpisodeId(ready.episodeId);
-      const hashtags = metadata?.hashtags?.length
-        ? metadata.hashtags
-        : (episode?.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
-      await publishYoutubeTrailer(ready.episodeId, ready.jobId, { title: metadata?.title ?? episode?.title ?? `Episode ${ready.episodeId}`, hashtags }, provider);
+      const hashtags = metadata?.hashtags ?? [];
+      await publishYoutubeTrailer(ready.episodeId, ready.jobId, { title: metadata?.title ?? `Trailer - ${episode?.title ?? `Episode ${ready.episodeId}`}`, hashtags }, provider);
     }
   }
 };

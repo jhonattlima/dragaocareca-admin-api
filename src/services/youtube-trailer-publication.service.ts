@@ -28,12 +28,14 @@ const invalidMetadata = (message: string): Error & { category: string } => Objec
 const sourceOf = (job: YoutubeTrailerJobRow): YoutubeTrailerSource => ({ episodeId: job.episodeId, sourceFileName: job.sourceFileName, sourceSha256: job.sourceSha256, sourceBytes: job.sourceBytes });
 const leaseOf = (job: YoutubeTrailerJobRow): YoutubeTrailerPublicationLease => ({ ...sourceOf(job), jobId: job.jobId, revision: job.revision, leaseId: job.publicationLeaseId! });
 
-const assembledTitle = (input: YoutubeTrailerPublicationInput): string => {
-  if (typeof input.title !== "string" || !input.title.trim() || /[<>]/u.test(input.title)) throw invalidMetadata("Trailer title is invalid.");
+export const assembleYoutubeTrailerTitle = (input: YoutubeTrailerPublicationInput): string => {
+  if (typeof input.title !== "string" || !input.title.trim() || /[<>\u0000-\u001F\u007F]/u.test(input.title)) throw invalidMetadata("Trailer title is invalid.");
   if (!Array.isArray(input.hashtags) || input.hashtags.some((tag) => typeof tag !== "string" || !/^#[\p{L}\p{N}_-]+$/u.test(tag.trim()))) throw invalidMetadata("Trailer hashtags are invalid.");
   if (input.hashtags.length > 3) throw invalidMetadata("Trailer hashtags are limited to three values.");
-  const title = `${input.title.trim()} ${input.hashtags.map((tag) => tag.trim()).join(" ")}`.trim();
-  if ([...title].length > 100 || /[<>]/u.test(title)) throw invalidMetadata("Trailer title and hashtags must be at most 100 characters.");
+  const hashtags = input.hashtags.map((tag) => tag.trim());
+  if (new Set(hashtags.map((tag) => tag.normalize("NFKC").toLocaleLowerCase("en-US"))).size !== hashtags.length) throw invalidMetadata("Trailer hashtags must be unique.");
+  const title = `${input.title.trim()} ${hashtags.join(" ")}`.trim();
+  if ([...title].length > 100 || /[<>\u0000-\u001F\u007F]/u.test(title)) throw invalidMetadata("Trailer title and hashtags must be at most 100 characters.");
   return title;
 };
 
@@ -70,7 +72,7 @@ export const publishYoutubeTrailer = async (
   input: YoutubeTrailerPublicationInput,
   provider: YoutubeTrailerUploadProvider = createLiveYoutubeTrailerUploadProvider()
 ): Promise<YoutubeTrailerPublicationDto> => {
-  const title = assembledTitle(input);
+  const title = assembleYoutubeTrailerTitle(input);
   const episode = episodeRepository.findByEpisodeId(episodeId);
   const initial = youtubeTrailerJobRepository.findByJobId(episodeId, jobId);
   if (!episode || !initial || initial.status !== "ready" || !initial.providerVideoId) throw new Error("Ready trailer publication job was not found.");
