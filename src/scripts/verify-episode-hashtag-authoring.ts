@@ -85,6 +85,8 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
     import("../services/episode-hashtag-authoring.service.js"),
   ]);
   const clock = { value: new Date("2026-08-06T12:00:00.000Z") };
+  assert.equal(config.youtube.hashtagAuthoring.cacheSuccessTtlMs, 60 * 60 * 1000);
+  assert.equal(config.youtube.hashtagAuthoring.cacheZeroResultTtlMs, 60 * 60 * 1000);
   const repository = createYouTubeHashtagCacheRepository();
   const providerCalls: string[] = [];
   let active = 0;
@@ -150,7 +152,7 @@ const verifyLookupFocus = async (fixture: Fixture): Promise<void> => {
   const zeroHit = await service.lookup("#zero", "automatic");
   assert.equal(zeroFirst.cacheStatus, "miss");
   assert.equal(zeroHit.cacheStatus, "hit");
-  clock.value = new Date(clock.value.getTime() + 6 * 60 * 60 * 1000 + 1);
+  clock.value = new Date(clock.value.getTime() + 60 * 60 * 1000 + 1);
   const zeroExpired = await service.lookup("#zero", "automatic");
   assert.equal(zeroExpired.cacheStatus, "miss", "zero-result TTL must expire independently");
 
@@ -182,13 +184,18 @@ const writeState = async (statePath: string, state: AnyRecord): Promise<void> =>
 };
 
 const verifyLifecycleFocus = async (fixture: Fixture): Promise<void> => {
-  const [{ createEpisodeSummaryService }, media, schema, { config }] = await Promise.all([
+  const [{ createEpisodeSummaryService }, media, schema, { config }, publication] = await Promise.all([
     import("../services/episode-summary.service.js"),
     import("../services/episode-media-layout.service.js"),
     import("../schemas/episode-draft-state.js"),
     import("../config/env.js"),
+    import("../services/youtube-trailer-publication.service.js"),
   ]);
   assert.equal(config.youtube.hashtagAuthoring.enabled, true);
+  assert.equal(typeof publication.assembleYoutubeTrailerTitle, "function", "start and publication must share the assembled-title validator");
+  assert.equal(publication.assembleYoutubeTrailerTitle({ title: `Trailer - ${"a".repeat(90)}`, hashtags: ["#é"] }), `Trailer - ${"a".repeat(90)} #é`);
+  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: `Trailer - ${"a".repeat(91)}`, hashtags: ["#é"] }), /100 characters/);
+  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["bad tag"] }), /hashtags are invalid/);
   const episodeId = 1803;
   const statePath = media.getEpisodeMediaDraftStatePath(episodeId);
   const summaryPath = media.getEpisodeMediaDraftSummaryPath(episodeId);
