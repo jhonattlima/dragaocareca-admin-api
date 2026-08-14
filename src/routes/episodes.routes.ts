@@ -525,7 +525,20 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
           message: "Trailer video staged; save the episode to finalize it.",
         };
         episodeRepository.updateTrailerVideoDraftState(checked.reservation.draftId, "staged");
-        res.json(response);
+        let youtubeJob = null;
+        if (config.youtube.trailerJob.enabled) {
+          try {
+            const job = await createYoutubeTrailerJob(episodeId, {
+              title: `Trailer - Episode ${episodeId}`,
+              summary: "",
+              hashtags: [],
+            });
+            youtubeJob = toYoutubeTrailerJobStatusDto(job);
+          } catch (youtubeError) {
+            console.warn("Private YouTube trailer job could not be queued after staging", youtubeError instanceof Error ? youtubeError.message : String(youtubeError));
+          }
+        }
+        res.json({ ...response, youtubeJob });
         return;
       }
 
@@ -735,11 +748,12 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTra
       res.status(404).json({ message: "YouTube trailer job not found" });
       return;
     }
-    const requested = youtubeTrailerJobRepository.requestPublication(current);
+    const tags = (episode.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
+    const publicationMetadata = { title: `Trailer - ${episode.title}`, summary: episode.summary ?? "", hashtags: tags };
+    const requested = youtubeTrailerJobRepository.requestPublication(current, publicationMetadata);
     const snapshot = requested ?? current;
     if (snapshot.status === "ready") {
-      const tags = (episode.tags ?? []).slice(0, 3).map((tag) => tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`);
-      await publishYoutubeTrailer(episodeId, snapshot.jobId, { title: episode.title, hashtags: tags });
+      await publishYoutubeTrailer(episodeId, snapshot.jobId, { title: publicationMetadata.title, hashtags: tags });
     }
     res.status(snapshot.status === "ready" ? 200 : 202).json(toYoutubeTrailerJobStatusDto(snapshot));
   } catch (error) {

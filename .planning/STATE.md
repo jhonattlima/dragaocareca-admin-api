@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 18
-current_phase_name: episode-hashtag-authoring
-status: verifying
-stopped_at: Completed 18-04-PLAN.md
-last_updated: "2026-08-06T16:01:27.635Z"
-last_activity: 2026-08-06
-last_activity_desc: Phase 18 Plan 18-03 completed
+current_phase_name: Episode hashtag authoring
+status: planning
+stopped_at: Completed 17-05-PLAN.md
+last_updated: "2026-08-11T19:53:18.012Z"
+last_activity: 2026-08-11
+last_activity_desc: Phase 17 complete, transitioned to Phase 18
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
-current_plan: 3
+  completed_phases: 4
+  total_plans: 20
+  completed_plans: 20
+current_plan: 4
 ---
 
 # Project State
@@ -24,14 +24,14 @@ current_plan: 3
 See: .planning/PROJECT.md (updated 2026-08-04)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 18 — episode-hashtag-authoring
+**Current focus:** Phase 17 — trailer-metadata-publication-and-retention
 
 ## Current Position
 
-Phase: 18 (episode-hashtag-authoring) — EXECUTING
-Plan: 4 of 4
-Status: Plan complete — ready for Plan 18-04
-Last activity: 2026-08-06 — Phase 18 Plan 18-03 completed
+Phase: 18 — Episode hashtag authoring
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-11 — Phase 17 complete, transitioned to Phase 18
 
 ## Accumulated Context
 
@@ -95,6 +95,18 @@ Recent decisions affecting current work:
 - [Phase ?]: Expose persisted advisory suggestions and manual approximate-count lookup through protected no-store contracts.
 - [Phase ?]: Keep Phase 18 proof offline with injected fake Gemini/OAuth/search seams and a fetch live-boundary tripwire.
 - [Phase ?]: Verify protected route DTOs against actual in-memory Express output and the emitted OpenAPI subset.
+- [Phase ?]: Keep the Phase 17 verifier fully offline with injected fake-provider behavior and a global fetch/OAuth tripwire.
+- [Phase ?]: Use unique temporary SQLite/media/staging roots for the new harness; existing regression verifiers remain standalone commands.
+- [Phase ?]: Use additive job-row publication state with exact source fingerprint, revision, and publication lease CAS guards.
+- [Phase ?]: Keep YouTube publication methods internal with fixed server-side channel/playlist authority and normalized provider records.
+- [Phase ?]: Private-first publication persists the exact saved summary and only exposes the canonical URL after playlist and public confirmation.
+- [Phase ?]: Retention keeps the current trailer plus the newest 12 eligible versions and restores files on cleanup failure without public rollback.
+- [Phase ?]: Keep trailer publication explicitly disabled by default after read-only OAuth/channel readiness approval; enabling remains a separate deployment choice.
+- [Phase ?]: Verify the compiled protected Express route in memory with no-store-before-auth, strict DTO, delegation, and OpenAPI parity assertions; no local listener or live network is required.
+- [Phase ?]: Keep live OAuth, YouTube writes, and VPS access outside the automated validation gate.
+- [Phase ?]: Update stale Phase 16 verifier boundaries to accept and assert the Phase 17 publication route while preserving draft and private-job safety checks.
+- [Phase ?]: Keep Phase 17 provider and retention failure evidence inside the existing offline verifier with no live YouTube or OAuth writes.
+- [Phase ?]: Enforce a maximum of three hashtags at the publication service boundary and reject invalid metadata before provider delegation.
 
 ### Pending Todos
 
@@ -125,8 +137,8 @@ The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemin
 
 ## Session Continuity
 
-Last session: 2026-08-06T16:01:27.629Z
-Stopped at: Completed 18-04-PLAN.md
+Last session: 2026-08-11T19:49:14.475Z
+Stopped at: Completed 17-05-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -157,6 +169,12 @@ Resume file: None
 | Phase 18-episode-hashtag-authoring P02 | 12min | 3 tasks | 5 files |
 | Phase 18-episode-hashtag-authoring P03 | 18min | 3 tasks | 6 files |
 | Phase 18 P04 | 31min | 2 tasks | 2 files |
+| Phase 17-trailer-metadata-publication-and-retention P00 | ~15 minutes | 2 tasks | 2 files |
+| Phase 17 P01 | 12 | 2 tasks | 5 files |
+| Phase 17 P02 | 12min | 2 tasks | 3 files |
+| Phase 17 P3 | 10 | 2 tasks | 5 files |
+| Phase 17 P04 | ~15 minutes | 2 tasks | 3 files |
+| Phase 17 P5 | 35min | 2 tasks | 4 files |
 
 ## Operator Next Steps
 

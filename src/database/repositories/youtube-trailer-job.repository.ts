@@ -316,9 +316,10 @@ export const youtubeTrailerJobRepository = {
     return updated.changes === 1 ? selectOne("episode_id = ? AND job_id = ?", job.episodeId, job.jobId) : null;
   },
 
-  requestPublication(job: YoutubeTrailerJobRow): YoutubeTrailerJobRow | null {
+  requestPublication(job: YoutubeTrailerJobRow, metadata?: { title: string; summary: string; hashtags: string[] }): YoutubeTrailerJobRow | null {
     const now = nowIso();
-    const updated = getDb().prepare(`UPDATE youtube_trailer_jobs SET publication_requested_at = ?, revision = revision + 1, updated_at = ? WHERE episode_id = ? AND job_id = ? AND revision = ?`).run(now, now, job.episodeId, job.jobId, job.revision);
+    const metadataJson = metadata ? JSON.stringify(metadata) : job.metadataSnapshotJson;
+    const updated = getDb().prepare(`UPDATE youtube_trailer_jobs SET publication_requested_at = ?, metadata_snapshot_json = ?, metadata_digest = NULL, revision = revision + 1, updated_at = ? WHERE episode_id = ? AND job_id = ? AND revision = ?`).run(now, metadataJson, now, job.episodeId, job.jobId, job.revision);
     return updated.changes === 1 ? selectOne("episode_id = ? AND job_id = ?", job.episodeId, job.jobId) : null;
   },
 

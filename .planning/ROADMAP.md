@@ -16,7 +16,7 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 
 - [ ] **Phase 15: Final Trailer Video Artifact** - Give each episode a protected final trailer-video artifact that is safely available in artifact ZIPs.
 - [ ] **Phase 16: Draft Staging and Private YouTube Job** - Let New Episode safely stage its MP4 before Save, then run one durable private-first YouTube job per finalized trailer source.
-- [ ] **Phase 17: Trailer Metadata, Publication and Retention** - Validate title/hashtag metadata, explicitly publish private-ready videos, persist the URL, and prune local versions only after successful publication.
+- [x] **Phase 17: Trailer Metadata, Publication and Retention** - Validate title/hashtag metadata, explicitly publish private-ready videos, persist the URL, and prune local versions only after successful publication. (completed 2026-08-11)
 
 ## Phase Details
 
@@ -77,7 +77,29 @@ Plans:
   4. Successful public publication/update alone triggers retention, keeping the current video plus the configured newest versions with a default of 12.
   5. OpenAPI, environment documentation, and executable repository-native verification cover the complete API lifecycle and its failure boundaries.
 
-**Plans**: TBD
+**Plans**: 6/6 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 17-00-PLAN.md — Create Wave 0 verifier fixtures and regression gates for artifact downloads and draft staging/promotion/rollback.
+- [x] 17-01-PLAN.md — Establish guarded publication persistence and the internal YouTube Data API boundary.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 17-02-PLAN.md — Implement private-first publication orchestration and success-gated local retention.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 17-03-PLAN.md — Expose and document the protected publication lifecycle and gate live OAuth/channel readiness.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 17-04-PLAN.md — Run the complete offline validation and regression suite.
+
+**Wave 5** *(gap closure; blocked on Wave 4 completion)*
+
+- [x] 17-05-PLAN.md — Add executable provider, retention, and Unicode metadata failure-boundary coverage.
 
 ## Progress
 
@@ -85,7 +107,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 15. Final Trailer Video Artifact | 4/4 | Executed; frontend UAT deferred | 2026-08-03 |
 | 16. Draft Staging and Private YouTube Job | 5/6 | In Progress|  |
-| 17. Trailer Metadata, Publication and Retention | 0/TBD | Not started | - |
+| 17. Trailer Metadata, Publication and Retention | 6/6 | Complete    | 2026-08-11 |
 | 18. Episode Hashtag Authoring | 4/4 | In Progress|  |
 
 ## Archive Index

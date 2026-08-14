@@ -14,19 +14,15 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 
 ### Publication and playlist transaction
 - **D-01:** One explicit authenticated publication operation must publish the ready private video and insert it into the configured Dragao Careca playlist.
-- **D-02:** If playlist insertion fails, abort the operation and do not leave the video public. The implementation must compensate visibility back to private when public visibility was already changed, and expose a recoverable failure state.
+- **D-02:** Insert the ready video into the configured playlist while it is still `private`, then change visibility to `public` only after playlist insertion succeeds. If either operation fails, abort the publication and expose a recoverable failure state; the video must not be left public after a failed operation.
 - **D-03:** The target playlist is `PLlsWY6yTsd_EsW1HlbXZs3Sz72o42376t`; the authenticated channel is `UCq-TjauoYJrr3po121gA6iw` (`Dragao Careca Oficial`).
 - **D-04:** After confirmed public publication and playlist insertion, persist and return the canonical YouTube video URL in the protected episode/publication response so admin-web can populate its YouTube URL field.
+- **D-07:** Repeated publication requests reconcile against the same provider video and do not create a duplicate YouTube video.
+- **D-08:** When the local trailer is replaced, preserve the existing published YouTube video and mark the replacement `manual-sync-required`; the replacement must complete the private-ready workflow before any later publication.
 
 ### Metadata
 - **D-05:** The YouTube description is exactly the episode's final saved summary; no automatic channel boilerplate is appended.
 - **D-06:** The trailer title remains operator-editable. Its intended UI format is `Trailer - <title> <hashtag1> <hashtag2> <hashtag3>` and title plus retained hashtags must stay within YouTube's 100-character limit.
-
-### Independent hashtag-authoring workflow
-- **D-07:** When transcript generation finishes, the API continues the existing sequential authoring flow: Gemini generates the saved summary, then Gemini generates 50 hashtag candidates grounded in that transcript and summary.
-- **D-08:** The API independently queries YouTube for those 50 normalized candidates, ranks and returns three relevant suggestions with approximate retrieval metadata, and exposes them for the admin-web YouTube-tags field.
-- **D-09:** Hashtag generation and lookup are independent from trailer-video upload, private YouTube jobs, publication, and playlist insertion. The user may edit, use fewer suggestions, or discard all of them.
-- **D-10:** A protected single-hashtag endpoint accepts a manually entered tag, normalizes it, and returns its approximate YouTube result count with retrieval metadata. Admin-web calls it after two seconds without typing and displays the number to the user.
 
 ### Retention and failure behavior
 - **D-11:** Only confirmed successful public publication plus playlist insertion may trigger local retention cleanup.
@@ -42,7 +38,7 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 
 ### Milestone scope
 - `.planning/ROADMAP.md` — Phase 17 goal and success criteria.
-- `.planning/REQUIREMENTS.md` — TRAILER-04, TRAILER-06, TRAILER-07, and TRAILER-08 acceptance requirements.
+- `.planning/REQUIREMENTS.md` — TRAILER-04, TRAILER-07, and TRAILER-08 acceptance requirements.
 - `.planning/phases/16-draft-staging-and-private-youtube-job/VERIFICATION.md` — verified private-job contract and the default-disabled worker boundary.
 
 ### Existing implementation
@@ -71,16 +67,18 @@ Deliver API-owned trailer metadata validation, explicit private-to-public public
 <specifics>
 ## Specific Ideas
 
-The automatic hashtag pipeline is independent from trailer-video work: transcript -> summary -> Gemini 50 candidates -> YouTube lookup -> three suggestions. Admin-web owns presenting the returned suggestions in its YouTube-tags field.
+- Publication remains an explicit authenticated API operation; the browser never receives YouTube credentials or calls the provider directly.
+- The publication transaction should prefer provider operations that preserve the invariant that a failed playlist operation cannot leave a public video.
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
 - Admin-web controls for publication, title editing, and hashtags remain owned by the sibling frontend project.
+- Automatic hashtag generation, candidate lookup, and manual hashtag relevance lookup are owned by Phase 18 and are not part of this phase.
 </deferred>
 
 ---
 
 *Phase: 17-trailer-metadata-publication-and-retention*
-*Context gathered: 2026-08-06*
+*Context gathered: 2026-08-09*

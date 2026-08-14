@@ -5,11 +5,11 @@
 - [x] **TRAILER-01**: An authenticated administrator can upload or replace one finalized trailer video for an existing episode through the protected API; the episode exposes the current final trailer-video artifact without accepting arbitrary server paths.
 - [x] **TRAILER-02**: An authenticated administrator can start one durable, API-owned YouTube job for the current finalized trailer source; the provider transfer begins as `private`, never as an implicit public release.
 - [x] **TRAILER-03**: The API persists source identity, provider identifiers, state, transfer/processing progress, cancellation boundary, and recoverable failure data so polling, restart recovery, retry, and replacement cannot create duplicate jobs or let stale work update a newer trailer.
-- [ ] **TRAILER-04**: An authenticated administrator can explicitly publish a private-ready trailer video as `public`; repeated publish requests reconcile safely, persist the canonical YouTube URL, and return it through the protected episode contract.
+- [x] **TRAILER-04**: An authenticated administrator can explicitly publish a private-ready trailer video as `public`; repeated publish requests reconcile safely, persist the canonical YouTube URL, and return it through the protected episode contract.
 - [x] **TRAILER-05**: An authenticated administrator can include the final trailer video in an episode artifact ZIP through the fixed artifact allowlist; the archive never exposes staging, backup, version-history, or arbitrary filesystem files.
 - [x] **TRAILER-06**: After transcript completion, the API generates the saved summary and then independently asks Gemini for 50 transcript/summary-grounded YouTube hashtag candidates. It looks up their normalized, cached/rate-limited approximate public YouTube search counts, returns the three most relevant candidates with retrieval metadata through a protected episode contract for an admin-web YouTube-tags field, and does not depend on trailer-video upload or publication. A protected single-hashtag lookup endpoint returns the same normalized approximate count for a manually entered UI tag after debounce. The operator may edit or discard the returned tags; trailer-title validation enforces the shared 100-Unicode-character and invalid-character policy separately.
-- [ ] **TRAILER-07**: The configured local trailer-video retention count is controlled by an environment variable that defaults to `12`; older local trailer-video versions are removed only after a successful public YouTube publication/update, while the current final video and the configured number of newest retained versions remain available.
-- [ ] **TRAILER-08**: The API documents and verifies protected upload, draft staging/promotion, YouTube job/publication, URL persistence, metadata, artifact-download, configuration, authentication, and retention behavior alongside typecheck and build validation.
+- [x] **TRAILER-07**: The configured local trailer-video retention count is controlled by an environment variable that defaults to `12`; older local trailer-video versions are removed only after a successful public YouTube publication/update, while the current final video and the configured number of newest retained versions remain available.
+- [x] **TRAILER-08**: The API documents and verifies protected upload, draft staging/promotion, YouTube job/publication, URL persistence, metadata, artifact-download, configuration, authentication, and retention behavior alongside typecheck and build validation.
 - [x] **TRAILER-09**: A New Episode can receive a server-issued, owner-bound, expiring draft reservation, stage a validated MP4 before Save, and atomically promote it to the final artifact only when the same authenticated reservation is consumed by episode creation; failed, canceled, or abandoned work preserves any last-known-good final video.
 
 ## Future Requirements
@@ -33,11 +33,11 @@
 | TRAILER-01 | 15 | Complete |
 | TRAILER-02 | 16 | Complete |
 | TRAILER-03 | 16 | Complete |
-| TRAILER-04 | 17 | Pending |
+| TRAILER-04 | 17 | Complete |
 | TRAILER-05 | 15 | Complete |
 | TRAILER-06 | 18 | Complete |
-| TRAILER-07 | 17 | Pending |
-| TRAILER-08 | 17 | Pending |
+| TRAILER-07 | 17 | Complete |
+| TRAILER-08 | 17 | Complete |
 | TRAILER-09 | 16 | Complete |
 
 ---
