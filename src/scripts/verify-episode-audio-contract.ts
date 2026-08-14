@@ -54,6 +54,8 @@ const runMusicCreditContract = (): void => {
   assert.equal(isCompleteMusicCredit({ name: "Theme song", links: [] }), false);
   assert.equal(isCompleteMusicCredit({ name: "  ", links: [{ label: "Spotify", url: "https://example.test/theme" }] }), false);
   assert.equal(isCompleteMusicCredit({ name: "Theme song", links: [{ label: "Spotify", url: "   " }] }), false);
+  assert.equal(isCompleteMusicCredit(JSON.stringify({ name: "Theme song", links: [{ label: "Spotify", url: " https://example.test/theme " }] })), true);
+  assert.equal(isCompleteMusicCredit("not-json"), false);
 };
 
 const runResponseContract = (): void => {
