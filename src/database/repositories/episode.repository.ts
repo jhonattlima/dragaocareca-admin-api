@@ -839,6 +839,8 @@ export const episodeRepository = {
   updateMedia(
     episodeId: number,
     patch: Partial<Record<"fileName" | "trailerFileName" | "coverFileName" | "coverLowFileName" | "trailerVideoFileName", string | null>> & {
+      duration?: string;
+      bytes?: number;
       trailerVideoSyncStatus?: TrailerVideoSyncStatus;
     }
   ): EpisodeRow | null {
@@ -861,9 +863,13 @@ export const episodeRepository = {
               ? "trailer_video_file_name"
               : key === "trailerVideoSyncStatus"
                 ? "trailer_video_sync_status"
-                : key === "coverFileName"
-                  ? "cover_file_name"
-                  : "cover_low_file_name";
+                : key === "duration"
+                  ? "duration"
+                  : key === "bytes"
+                    ? "bytes"
+                    : key === "coverFileName"
+                      ? "cover_file_name"
+                      : "cover_low_file_name";
       assignments.push(`${column} = @${key}`);
       params[key] = value;
     }

@@ -50,6 +50,7 @@ import {
   toYoutubeTrailerJobStatusDto,
 } from "../services/youtube-trailer-job.service";
 import { publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
+import { extractEpisodeAudioMetadata } from "../services/episode-audio-metadata.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -293,6 +294,9 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
 
         const fileName = spec.buildFileName(episodeId);
         const currentEpisode = episodeRepository.findByEpisodeId(episodeId);
+        const audioMetadata = spec.kind === "audio"
+          ? await extractEpisodeAudioMetadata(file.path)
+          : null;
         console.info(`[episodes] upload ${spec.kind} episode=${episodeId} current=${Boolean(currentEpisode)}`);
         if (!currentEpisode) {
           if (spec.kind === "audio") {
@@ -308,6 +312,8 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
             res.json({
               episodeId,
               [spec.field]: fileName,
+              duration: audioMetadata?.duration,
+              bytes: audioMetadata?.bytes,
               transcriptStatus: draftState.status,
               transcriptUpdatedAt: new Date().toISOString(),
               transcriptStartedAt: draftState.progress !== null && draftState.status === "processing" ? new Date().toISOString() : undefined,
@@ -326,7 +332,10 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
           return;
         }
 
-        const updated = episodeRepository.updateMedia(episodeId, { [spec.field]: fileName });
+        const updated = episodeRepository.updateMedia(episodeId, {
+          [spec.field]: fileName,
+          ...(audioMetadata ? { duration: audioMetadata.duration, bytes: audioMetadata.bytes } : {}),
+        });
 
         if (spec.kind === "audio") {
           await clearEpisodeTranscription(episodeId);

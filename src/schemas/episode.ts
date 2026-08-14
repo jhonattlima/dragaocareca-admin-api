@@ -3,6 +3,43 @@ import { z } from "zod";
 export const trailerVideoSyncStatusSchema = z.enum(["unpublished", "manual-sync-required", "synced"]);
 export type TrailerVideoSyncStatus = z.infer<typeof trailerVideoSyncStatusSchema>;
 
+type MusicCredit = {
+  name?: unknown;
+  links?: unknown;
+};
+
+const parseMusicCredit = (value: unknown): MusicCredit | null => {
+  const parsed = typeof value === "string"
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return null;
+        }
+      })()
+    : value;
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as MusicCredit
+    : null;
+};
+
+export const isCompleteMusicCredit = (value: unknown): boolean => {
+  const credit = parseMusicCredit(value);
+  const name = typeof credit?.name === "string" ? credit.name.trim() : "";
+  const links = Array.isArray(credit?.links) ? credit.links : [];
+  return name.length > 0 && links.some((link) => {
+    if (link === null || typeof link !== "object") return false;
+    const url = (link as { url?: unknown }).url;
+    return typeof url === "string" && url.trim().length > 0;
+  });
+};
+
+const completeMusicCredits = z.array(z.string()).default([]).superRefine((credits, ctx) => {
+  if (!credits.some(isCompleteMusicCredit)) {
+    ctx.addIssue({ code: "custom", message: "At least one complete music credit is required" });
+  }
+});
+
 export const episodeSchema = z.object({
   episodeId: z.coerce.number().int().positive(),
   title: z.string().min(1),
@@ -26,7 +63,7 @@ export const episodeSchema = z.object({
   youtube: z.string().optional(),
   spotifyId: z.string().optional(),
   xmlSnapshot: z.string().optional(),
-  musicCredits: z.array(z.string()).default([]),
+  musicCredits: completeMusicCredits,
   coverCredits: z.array(z.string()).default([]),
 });
 
