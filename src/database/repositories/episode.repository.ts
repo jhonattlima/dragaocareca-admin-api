@@ -553,6 +553,14 @@ export const episodeRepository = {
     `).get(episodeId) as EpisodeTrailerVideoDraftReservation | undefined;
     return row ? { ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle } : null;
   },
+  findTrailerVideoDraftByEpisodeId(episodeId: number): EpisodeTrailerVideoDraftReservation | null {
+    const row = getDb().prepare(`
+      SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
+        created_at AS createdAt, expires_at AS expiresAt, state
+      FROM episode_trailer_video_drafts WHERE episode_id = ?
+    `).get(episodeId) as EpisodeTrailerVideoDraftReservation | undefined;
+    return row ? { ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle } : null;
+  },
   updateTrailerVideoDraftState(draftId: string, state: EpisodeTrailerVideoDraftLifecycle): boolean {
     return getDb().prepare("UPDATE episode_trailer_video_drafts SET state = ? WHERE draft_id = ?").run(state, draftId).changes > 0;
   },
@@ -590,6 +598,9 @@ export const episodeRepository = {
   },
   deleteTrailerVideoDraft(draftId: string): void {
     getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE draft_id = ?").run(draftId);
+  },
+  deleteTrailerVideoDraftByEpisodeId(episodeId: number): void {
+    getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id = ?").run(episodeId);
   },
   listAll(): EpisodeRow[] {
     const rows = getDb().prepare("SELECT * FROM episodes WHERE is_draft = 0 ORDER BY datetime(pub_date) DESC, episode_id DESC").all() as SqliteEpisodeRow[];
@@ -821,6 +832,9 @@ export const episodeRepository = {
   },
   delete(episodeId: number): void {
     getDb().prepare("DELETE FROM episodes WHERE episode_id = ?").run(episodeId);
+  },
+  deleteDraftEpisodeIfUnused(episodeId: number): void {
+    getDb().prepare("DELETE FROM episodes WHERE episode_id = ? AND is_draft = 1 AND NOT EXISTS (SELECT 1 FROM youtube_trailer_jobs WHERE episode_id = ?)").run(episodeId, episodeId);
   },
   updateMedia(
     episodeId: number,

@@ -24,11 +24,20 @@ export const cleanupExpiredTrailerVideoDrafts = async (now = new Date()): Promis
 export const reserveTrailerVideoDraft = async (episodeId: number, ownerEmail: string, now = new Date()): Promise<EpisodeTrailerVideoDraftDto> => {
   await cleanupExpiredTrailerVideoDrafts(now);
   const owner = normalizedOwnerOrThrow(ownerEmail);
-  if (episodeRepository.findByEpisodeId(episodeId)) {
+  const existingEpisode = episodeRepository.findByEpisodeId(episodeId);
+  if (existingEpisode && !existingEpisode.isDraft) {
     throw new Error("Episode already exists");
   }
-  if (episodeRepository.findActiveTrailerVideoDraftByEpisodeId(episodeId)) {
-    throw new Error("Episode draft is already reserved");
+  const active = episodeRepository.findActiveTrailerVideoDraftByEpisodeId(episodeId);
+  if (active) {
+    if (active.ownerEmail !== owner) throw new Error("Episode draft is already reserved");
+    return { draftId: active.draftId, episodeId, state: "reserved", expiresAt: active.expiresAt };
+  }
+  const stale = episodeRepository.findTrailerVideoDraftByEpisodeId(episodeId);
+  if (stale) {
+    // The draft table has one row per episode. Expired/consumed rows are no
+    // longer usable, so remove only that stale reservation before replacing it.
+    episodeRepository.deleteTrailerVideoDraftByEpisodeId(episodeId);
   }
   const reservation: EpisodeTrailerVideoDraftReservation = {
     draftId: randomUUID(),

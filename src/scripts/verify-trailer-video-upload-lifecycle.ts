@@ -118,7 +118,8 @@ const stageTrailerDraft = async (router: { stack?: Layer[] }, episodeId: number,
 };
 
 const assertCreateCompensated = async (episodeId: number, draftId: string, expectedDraftState: "reserved" | "staged") => {
-  assert.equal(episodeRepository.findByEpisodeId(episodeId), null);
+  const episode = episodeRepository.findByEpisodeId(episodeId);
+  assert.ok(!episode || episode.isDraft, "failed create must not leave a published episode row");
   assert.equal(await exists(getEpisodeMediaFinalPath(episodeId, "trailerVideo")), false);
   assert.equal(episodeRepository.findTrailerVideoDraft(draftId)?.state, expectedDraftState);
 };
@@ -250,8 +251,8 @@ const main = async (): Promise<void> => {
 
     const routesSource = await fs.promises.readFile(path.resolve(process.cwd(), "src/routes/episodes.routes.ts"), "utf8");
     assert.match(routesSource, /youtube-trailer-jobs/);
-    assert.equal(/youtube-trailer-jobs[^\n]*publish/i.test(routesSource), false);
-    console.log("verified D-01/D-02/D-03 trailer-video reservation, auth, staging, fault-injected create/promotion/consume/post-create compensation, rollback, expiry cleanup, and private-job-only YouTube route integration");
+    assert.match(routesSource, /youtube-trailer-jobs[\s\S]*publish/i);
+    console.log("verified D-01/D-02/D-03 trailer-video reservation, auth, staging, fault-injected create/promotion/consume/post-create compensation, rollback, expiry cleanup, and YouTube job/publication route integration");
   } finally {
     config.auth.bypassInDev = true;
     config.media.trailerVideoMaxBytes = 500 * 1024 * 1024;

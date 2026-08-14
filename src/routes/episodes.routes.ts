@@ -1101,6 +1101,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       // A failed create must not leave a partially persisted row. The reservation
       // remains owner-bound so a retained staged file can be retried safely.
       episodeRepository.delete(createdEpisodeId);
+      episodeRepository.deleteDraftEpisodeIfUnused(createdEpisodeId);
       await fs.promises.rm(getEpisodeMediaFinalPath(createdEpisodeId, "trailerVideo"), { force: true }).catch(() => undefined);
     }
     if (draftForRetry) {
