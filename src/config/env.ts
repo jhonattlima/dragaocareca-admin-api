@@ -97,13 +97,13 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
     geminiPromptVersion: env.YOUTUBE_HASHTAG_GEMINI_PROMPT_VERSION ?? "1",
     cacheSuccessTtlMs: boundedPositiveInteger(
       env.YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS,
-      24 * 60 * 60 * 1000,
+      60 * 60 * 1000,
       "YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS",
       7 * 24 * 60 * 60 * 1000
     ),
     cacheZeroResultTtlMs: boundedPositiveInteger(
       env.YOUTUBE_HASHTAG_CACHE_ZERO_RESULT_TTL_MS,
-      6 * 60 * 60 * 1000,
+      60 * 60 * 1000,
       "YOUTUBE_HASHTAG_CACHE_ZERO_RESULT_TTL_MS",
       7 * 24 * 60 * 60 * 1000
     ),
