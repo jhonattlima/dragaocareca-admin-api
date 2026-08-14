@@ -49,9 +49,9 @@ export const swaggerSpec = swaggerJsdoc({
             title: { type: "string", example: "Episode title" },
             summary: { type: "string", example: "Episode summary" },
             pubDate: { type: "string", format: "date-time" },
-            duration: { type: "string", example: "01:12:34" },
+            duration: { type: "string", pattern: "^\\d{2}:\\d{2}:\\d{2}$", example: "01:12:34", description: "Backend-confirmed episode-audio duration in HH:MM:SS format." },
             explicit: { type: "string", enum: ["yes", "no"] },
-            bytes: { type: "integer" },
+            bytes: { type: "integer", minimum: 0, description: "Backend-confirmed byte count for the episode audio file." },
             authors: { type: "array", items: { type: "string" } },
             guests: { type: "array", items: { type: "string" } },
             tags: { type: "array", items: { type: "string" } },
@@ -64,7 +64,7 @@ export const swaggerSpec = swaggerJsdoc({
             trailerVideoSyncStatus: { type: "string", enum: ["unpublished", "manual-sync-required", "synced"], description: "Publication state for the final trailer video. manual-sync-required means a local replacement needs an administrator-triggered YouTube re-sync." },
             youtube: { type: "string" },
             spotifyId: { type: "string" },
-            musicCredits: { type: "array", items: { type: "string" } },
+            musicCredits: { type: "array", minItems: 1, items: { type: "string" }, description: "At least one structured credit with a trimmed name and at least one trimmed reference URL is required for episode create/update." },
             coverCredits: { type: "array", items: { type: "string" } },
           },
         },
@@ -1071,6 +1071,7 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Upload episode audio file",
+          description: "The server probes the uploaded MP3 and returns a successful response only with backend-confirmed duration (HH:MM:SS) and nonnegative integer bytes. Probe failure rejects the upload and removes staged output; browser-supplied metadata is ignored.",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
           requestBody: {
@@ -1087,13 +1088,14 @@ export const swaggerSpec = swaggerJsdoc({
               },
             },
           },
-          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+          responses: { "200": { description: "Audio staged with backend-confirmed duration and bytes, plus transcription status." }, "400": { description: "Invalid file, missing/unusable server-side metadata, or failed metadata confirmation." }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
         },
       },
       "/v1/episodes/{episodeId}/trailer": {
         post: {
           tags: ["Episodes"],
           summary: "Upload episode trailer file",
+          description: "Trailer-audio upload preserves the existing filename/message response contract and does not require episode-audio duration or byte metadata.",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
           requestBody: {
