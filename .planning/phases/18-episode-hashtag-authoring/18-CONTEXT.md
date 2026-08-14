@@ -1,7 +1,7 @@
 # Phase 18: Episode Hashtag Authoring - Context
 
-**Gathered:** 2026-08-06
-**Status:** Ready for planning
+**Gathered:** 2026-08-06; reconciled 2026-08-13
+**Status:** Implemented and verified offline; frontend integration deferred to sibling admin-web milestone
 
 <domain>
 ## Phase Boundary
@@ -56,6 +56,11 @@ Deliver the API-owned, transcript-to-summary-to-hashtag authoring pipeline and a
 ### Integration Points
 - Transcript completion queues summary, then queues tag suggestion after a successful summary state write.
 - The protected summary/episode contract exposes sanitized `suggestedTags` state for future admin-web population.
+
+### Implementation Reconciliation
+- The API implementation and four Phase 18 plans are complete and verified through the repository-native offline suite.
+- The API exposes persisted suggestions and protected manual lookup; Gemini, YouTube search, OAuth, and network writes were replaced by fake-provider seams and live-boundary tripwires in automated verification.
+- Remaining work is frontend-only: consume `suggestedTags`, debounce manual lookup, display approximate counts, and integrate the existing YouTube job/publication and artifact contracts in `admin-web`.
 </code_context>
 
 <specifics>
