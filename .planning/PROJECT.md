@@ -48,6 +48,8 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Suggested summary drafts are persisted beside the episode files and kept separate from the final saved episode summary.
 - Protected backend APIs expose the summary suggestion and generation state.
 - Gemini summary output follows the production feed's editorial structure while using the current transcript as its only factual source.
+- Phase 18 hashtag authoring generates transcript/summary-grounded candidates, uses bounded approximate YouTube relevance lookup, and persists suggestions inside the shared episode state.
+- Summary and hashtag status contracts expose the provider actually used, including Gemini-to-Groq fallback, without exposing credentials or raw provider payloads.
 - Phase 14 reconciles v1.3 around the authoritative protected artifact-job routes, including evidence-validated archive reuse and compiled verification.
 - v1.4 is API-only: it owns local trailer storage, draft promotion, YouTube jobs, publication, and retention while retaining server-side media and feed ownership.
 
@@ -96,7 +98,7 @@ The backend already owns episode media layout, transcript generation, summary dr
 | Keep summary generation transcript-only and sequential | The 4 GB VPS target requires lightweight, backend-owned processing | ✓ Good |
 | Store suggested summaries as draft artifacts beside the episode files | This preserves operator review/editability before save | ✓ Good |
 | Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
-| Use Gemini for the current transcript and summary configuration, retaining local providers as fallbacks | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback | Under evaluation |
+| Use Gemini first for transcript-adjacent summary and hashtag authoring, with Groq fallback and local transcription options | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback; actual provider identity remains visible | ✓ Good |
 | Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
 | Preserve `/v1/episodes/:episodeId/artifacts/jobs` as the artifact lifecycle contract | The v1.3 audit found the checked-out implementation, OpenAPI, and verifier already converge on jobs routes | ✓ Good |
 | Keep trailer-video publishing backend-owned and manually triggered | It preserves the existing authenticated media workflow and avoids browser-side OAuth or scheduled publication rules | — Planned |

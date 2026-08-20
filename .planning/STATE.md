@@ -4,11 +4,11 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 current_phase: 18
 current_phase_name: Episode hashtag authoring
-status: planning
-stopped_at: Completed 17-05-PLAN.md
-last_updated: "2026-08-11T19:53:18.012Z"
-last_activity: 2026-08-11
-last_activity_desc: Phase 17 complete, transitioned to Phase 18
+status: verifying
+stopped_at: Phase 18 implementation and offline verification complete; live provider smoke test remains operational follow-up
+last_updated: "2026-08-20T19:30:00.000Z"
+last_activity: 2026-08-20
+last_activity_desc: Reconciled Phase 18 provider fallback and admin-web status contracts
 progress:
   total_phases: 4
   completed_phases: 4
@@ -24,14 +24,14 @@ current_plan: 4
 See: .planning/PROJECT.md (updated 2026-08-04)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** Phase 17 — trailer-metadata-publication-and-retention
+**Current focus:** v1.4 closeout validation: live OAuth/channel enablement and provider quota observation
 
 ## Current Position
 
 Phase: 18 — Episode hashtag authoring
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-11 — Phase 17 complete, transitioned to Phase 18
+Plan: 4 of 4
+Status: Implementation and offline verification complete
+Last activity: 2026-08-20 — provider fallback/status integration reconciled across API and admin-web
 
 ## Accumulated Context
 
@@ -107,10 +107,13 @@ Recent decisions affecting current work:
 - [Phase ?]: Update stale Phase 16 verifier boundaries to accept and assert the Phase 17 publication route while preserving draft and private-job safety checks.
 - [Phase ?]: Keep Phase 17 provider and retention failure evidence inside the existing offline verifier with no live YouTube or OAuth writes.
 - [Phase ?]: Enforce a maximum of three hashtags at the publication service boundary and reject invalid metadata before provider delegation.
+- [Phase 18]: Use Gemini as the primary summary and hashtag-authoring provider, with Groq as the automatic fallback; persist and expose the actual provider used for each step.
+- [Phase 18]: Keep hashtag authoring advisory: a failed or invalid provider response must not invalidate a completed summary, and its retry/error state stays in `suggestedTags`.
+- [Phase 18]: Keep provider status in the existing episode state and protected DTOs rather than creating parallel status files or UI-trigger endpoints.
 
 ### Pending Todos
 
-- Discuss and plan Phase 12 with `$gsd-discuss-phase 12` or `$gsd-plan-phase 12`.
+- Run a live provider smoke test after deployment/restart and observe Gemini quota, Groq fallback quality, and YouTube lookup quota. Offline verification is the release gate.
 
 ### Blockers/Concerns
 

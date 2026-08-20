@@ -10,13 +10,14 @@ This roadmap tracks active and future milestone planning only. Completed milesto
 - ✅ **v1.1 Public frontend API responses** - Phases 5-8, shipped 2026-07-23. Archive: [v1.1-ROADMAP.md](./milestones/v1.1-ROADMAP.md)
 - ✅ **v1.2 Episode AI authoring API** - Phases 9-11, shipped 2026-07-23; Gemini hardening completed 2026-07-28. Archive: [v1.2-ROADMAP.md](./milestones/v1.2-ROADMAP.md)
 - ✅ **v1.3 Episode Artifact Downloads** - Phases 12-14, shipped 2026-07-31. Archive: [v1.3-ROADMAP.md](./milestones/v1.3-ROADMAP.md)
-- 🚧 **v1.4 Trailer Video Publishing** - Phases 15-17, planned 2026-08-03; aligned with the sibling `admin-web` private-first workflow on 2026-08-04.
+- 🚧 **v1.4 Trailer Video Publishing** - Phases 15-18, implementation complete with one live OAuth enablement gate remaining; aligned with the sibling `admin-web` workflow on 2026-08-20.
 
 ## Phases
 
-- [ ] **Phase 15: Final Trailer Video Artifact** - Give each episode a protected final trailer-video artifact that is safely available in artifact ZIPs.
-- [ ] **Phase 16: Draft Staging and Private YouTube Job** - Let New Episode safely stage its MP4 before Save, then run one durable private-first YouTube job per finalized trailer source.
+- [x] **Phase 15: Final Trailer Video Artifact** - Give each episode a protected final trailer-video artifact that is safely available in artifact ZIPs. (completed 2026-08-03)
+- [ ] **Phase 16: Draft Staging and Private YouTube Job** - Let New Episode safely stage its MP4 before Save, then run one durable private-first YouTube job per finalized trailer source. (implementation complete; live OAuth/channel gate remains)
 - [x] **Phase 17: Trailer Metadata, Publication and Retention** - Validate title/hashtag metadata, explicitly publish private-ready videos, persist the URL, and prune local versions only after successful publication. (completed 2026-08-11)
+- [x] **Phase 18: Episode Hashtag Authoring** - Generate transcript/summary-grounded candidates, rank approximate YouTube relevance, expose suggestions and manual lookup, and preserve provider failures as advisory state. (completed 2026-08-20)
 
 ## Phase Details
 
@@ -105,10 +106,10 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 15. Final Trailer Video Artifact | 4/4 | Executed; frontend UAT deferred | 2026-08-03 |
-| 16. Draft Staging and Private YouTube Job | 5/6 | In Progress|  |
+| 15. Final Trailer Video Artifact | 4/4 | Complete; frontend UAT deferred | 2026-08-03 |
+| 16. Draft Staging and Private YouTube Job | 5/6 | Implementation complete; live OAuth gate open |  |
 | 17. Trailer Metadata, Publication and Retention | 6/6 | Complete    | 2026-08-11 |
-| 18. Episode Hashtag Authoring | 4/4 | In Progress|  |
+| 18. Episode Hashtag Authoring | 4/4 | Complete    | 2026-08-20 |
 
 ## Archive Index
 
@@ -119,7 +120,7 @@ Plans:
 
 **Goal:** Generate and expose advisory episode hashtags from the completed transcript and summary, with independent YouTube relevance lookup.
 **Requirements**: TRAILER-06
-**Depends on:** Phase 16
+**Depends on:** Phase 17
 **Plans:** 4/4 plans executed
 
 Plans:
@@ -130,4 +131,4 @@ Plans:
 - [x] 18-04-PLAN.md — Complete fake-provider lifecycle, route-redaction, and OpenAPI parity verification.
 
 ---
-*Last updated: 2026-08-04 after reconciling v1.4 with the sibling admin-web workflow*
+*Last updated: 2026-08-20 after reconciling provider fallback and sibling admin-web status integration*

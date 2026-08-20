@@ -103,3 +103,16 @@ No blocking gaps found. The Phase 18 goal and TRAILER-06 backend contract are ac
 
 _Verified: 2026-08-06T16:04:19Z_
 _Verifier: the agent (gsd-verifier)_
+
+## Post-Verification Amendment: Provider Fallback and Status Visibility
+
+**Updated:** 2026-08-20
+
+The implementation was subsequently extended without changing the Phase 18 state model or route boundary:
+
+- Gemini is attempted first for summary and hashtag authoring; Groq is attempted automatically when the primary provider fails.
+- The actual provider used is persisted in `aiSummary.provider` and `suggestedTags.provider`, and transcript provider is exposed in the transcription snapshot.
+- Hashtag provider failures remain advisory. A completed summary stays `done` while `suggestedTags` can become `unavailable` with retry/error metadata.
+- The sibling admin-web consumes these existing status responses and reports the actual provider in the existing progress messages; no manual trigger or new UI status model was introduced.
+
+API verification after the amendment: `npm run typecheck`, `npm run build`, and `npm run verify:episode-hashtag-authoring` passed. A live episode-356 observation also confirmed Gemini summary success, Gemini hashtag timeout, Groq fallback, and safe duplicate-candidate rejection as `suggestedTags` unavailable. Live external quota behavior remains an operational follow-up.

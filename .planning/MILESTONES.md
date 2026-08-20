@@ -1,5 +1,17 @@
 # Milestones
 
+## v1.4 Trailer Video Publishing (Implementation complete; live enablement pending)
+
+**Phases:** 15-18; Phase 18 completed 2026-08-20.
+
+**Delivered:** Final trailer-video artifacts, owner-bound draft staging, durable private-first YouTube jobs, explicit publication and retention, transcript/summary-grounded hashtag authoring, normalized approximate YouTube lookup, manual lookup, and provider-aware API status contracts.
+
+**Provider behavior:** Gemini is the primary provider for transcript-adjacent summary and hashtag authoring. Groq is the automatic fallback. The API persists the provider actually used, and hashtag failures remain advisory without invalidating a completed summary.
+
+**Verification:** API typecheck/build and the offline hashtag-authoring verifier pass. Live OAuth/channel enablement and external provider quota behavior remain operational follow-up, not automated verification gates.
+
+**Phase artifacts:** [phases/18-episode-hashtag-authoring/](./phases/18-episode-hashtag-authoring/)
+
 ## v1.3 v1.3 (Shipped: 2026-07-31)
 
 **Phases completed:** 3 phases, 11 plans, 19 tasks
