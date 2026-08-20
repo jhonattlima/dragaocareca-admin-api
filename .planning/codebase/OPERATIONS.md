@@ -14,7 +14,7 @@ Use `scripts/bootstrap-vps.sh` for the full bootstrap or `scripts/install-vps-de
 
 ## Episode AI configuration
 
-The current development configuration uses Gemini for both steps. Keep secrets outside version control.
+The current development configuration uses Gemini first and Groq as the automatic fallback for summary and hashtag authoring. Keep secrets outside version control.
 
 ```bash
 EPISODE_TRANSCRIPTION_ENABLED=true
@@ -24,7 +24,10 @@ EPISODE_TRANSCRIPTION_GEMINI_MAX_OUTPUT_TOKENS=32768
 EPISODE_TRANSCRIPTION_GEMINI_THINKING_LEVEL=minimal
 
 EPISODE_SUMMARY_ENABLED=true
-EPISODE_SUMMARY_PROVIDER=gemini
+EPISODE_SUMMARY_PRIMARY_PROVIDER=gemini
+EPISODE_SUMMARY_PROVIDER=groq
+YOUTUBE_HASHTAG_PRIMARY_PROVIDER=gemini
+YOUTUBE_HASHTAG_PROVIDER=groq
 EPISODE_SUMMARY_GEMINI_MODEL=gemini-3.6-flash
 EPISODE_SUMMARY_GEMINI_THINKING_LEVEL=low
 EPISODE_SUMMARY_PROMPT_VERSION=4
@@ -40,7 +43,7 @@ GEMINI_API_KEY=replace-with-secret
 3. Summary generation starts only after transcription and writes draft `summary.txt`.
 4. The final database summary remains operator-owned and is saved only through the episode form.
 
-Never run transcription and summary generation in parallel on the 4 GB VPS. The production RSS feed guides the summary prompt's style but is never fetched by a job and is not factual input.
+Never run transcription and summary generation in parallel on the 4 GB VPS. The production RSS feed guides the summary prompt's style but is never fetched by a job and is not factual input. Status snapshots expose the provider actually used for transcript, summary, and hashtag authoring; the UI must not infer it from configuration.
 
 ## Deployment verification
 

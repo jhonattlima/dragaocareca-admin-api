@@ -60,8 +60,9 @@
 2. `EPISODE_TRANSCRIPTION_PROVIDER` selects Gemini Files API transcription or the internal Whisper-family CLI
 3. The completed transcript is written to the episode folder as `transcript.txt`
 4. `episode.state.json` records the transcript state and queues the sequential summary job
-5. `EPISODE_SUMMARY_PROVIDER` selects Gemini or the local Llama fallback, writes draft `summary.txt`, and records `aiSummary` state
-6. The protected summary endpoint returns draft text and status; final `episodes.summary` changes only through the normal episode form save
+5. `EPISODE_SUMMARY_PRIMARY_PROVIDER` selects Gemini first and `EPISODE_SUMMARY_PROVIDER` supplies the fallback/configured provider, writes draft `summary.txt`, and records `aiSummary` state including the actual provider used
+6. After summary completion, hashtag authoring uses `YOUTUBE_HASHTAG_PRIMARY_PROVIDER` with `YOUTUBE_HASHTAG_PROVIDER` fallback and stores `suggestedTags` in the same episode state; hashtag failure is advisory and does not invalidate the summary
+7. Protected status endpoints return provider metadata so clients can report actual fallback behavior; final `episodes.summary` changes only through the normal episode form save
 
 **Other Worker Flow:**
 1. `src/server.ts` starts launch notification, transcription, Spotify, YouTube, Telegram bot, and cover mosaic tasks
