@@ -1,5 +1,5 @@
 ---
-status: partial
+status: complete
 phase: 15-final-trailer-video-artifact
 source: 15-01-SUMMARY.md, 15-02-SUMMARY.md, 15-03-SUMMARY.md, 15-04-SUMMARY.md
 started: 2026-08-03T20:19:28-03:00
@@ -9,13 +9,13 @@ updated: 2026-08-03T20:20:00-03:00
 ## Current Test
 <!-- OVERWRITE each test - shows where we are -->
 
-[testing paused — 1 item outstanding]
+[testing complete — one frontend scenario explicitly deferred to the sibling admin-web milestone]
 
 ## Tests
 
 ### 1. Upload de Trailer MP4 Protegido
 expected: Com a API em execucao e autenticacao administrativa valida, envie um MP4 pequeno para POST /v1/episodes/{episodeId}/trailer-video usando o campo multipart file. A resposta deve confirmar o trailer-video final no episodio, sem URL de YouTube nova e sem publicar nada no YouTube. O arquivo final deve ficar disponivel no seletor de artefato trailer-video.
-result: blocked
+result: deferred
 blocked_by: prior-phase
 reason: "User requested validation through the frontend, but Phase 15 is API-only and admin-web integration plus YouTube publication are outside this phase."
 
@@ -68,7 +68,8 @@ passed: 7
 issues: 0
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
+deferred: 1
 
 ## Gaps
 

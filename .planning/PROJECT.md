@@ -6,16 +6,29 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 ## Current State
 
-- Latest shipped milestone: **v1.3 Episode Artifact Downloads** on 2026-07-31
-- Current milestone: **v1.4 Trailer Video Publishing**
+- Latest shipped milestone: **v1.4 Trailer Video Publishing** on 2026-08-21
+- Current milestone: None — ready to plan the next cycle
 - Transcript and summary generation can use Gemini or local fallback providers, run sequentially for the 4 GB VPS target, and expose a protected read contract for future frontend reuse
-- Next planning step: plan the API-owned draft-staging and private YouTube job lifecycle for v1.4.
+- Next planning step: define the next milestone with `$gsd-new-milestone`.
 
 ## Core Value
 
 Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
 
-## Latest Milestone: v1.3 Episode Artifact Downloads
+## Latest Milestone: v1.4 Trailer Video Publishing
+
+**Goal:** Provide the backend-owned lifecycle for staging, privately transferring, explicitly publishing, and safely retaining trailer videos.
+
+**Delivered:**
+- Protected final trailer-video upload/replacement and artifact ZIP inclusion.
+- Owner-bound draft staging and atomic promotion before New Episode save.
+- Durable private-first YouTube jobs with recovery, retry, cancellation, and stale-source protection.
+- Explicit publication, editable metadata, canonical URL persistence, and success-gated local retention.
+- Transcript/summary-grounded hashtag authoring with cached approximate YouTube counts and protected manual lookup.
+
+**Operational follow-up:** Live OAuth/channel enablement and external provider quota observation remain deployment tasks; frontend controls belong to `admin-web`.
+
+## Previous Milestone: v1.3 Episode Artifact Downloads
 
 **Goal:** Allow administrators to download the final media artifacts for one episode as a controlled ZIP archive.
 
@@ -23,15 +36,6 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Protected artifact-download endpoint with all-artifact and selected-artifact modes.
 - English artifact selectors: `episode`, `trailer`, `transcript`, `image`, and `image-low`.
 - ZIP response that reports partially missing requested artifacts without exposing internal paths.
-
-## Current Milestone: v1.4 Trailer Video Publishing
-
-**Goal:** Provide the backend-owned lifecycle that lets administrators stage a final trailer video, upload it privately to YouTube, review it, publish it explicitly, and retain a reliable local/downloadable record.
-
-**Target features:**
-- Protected final trailer-video upload/replacement, including authenticated draft staging before a New Episode is saved.
-- Durable API-owned YouTube jobs with private-first transfer, progress, cancellation/retry/recovery boundaries, and stale-source protection.
-- Editable title/hashtag support, explicit public publishing, persisted URL, artifact downloads, and success-gated local-version retention.
 
 ## Requirements
 
@@ -52,10 +56,11 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Summary and hashtag status contracts expose the provider actually used, including Gemini-to-Groq fallback, without exposing credentials or raw provider payloads.
 - Phase 14 reconciles v1.3 around the authoritative protected artifact-job routes, including evidence-validated archive reuse and compiled verification.
 - v1.4 is API-only: it owns local trailer storage, draft promotion, YouTube jobs, publication, and retention while retaining server-side media and feed ownership.
+- v1.4 requirements TRAILER-01 through TRAILER-09 were validated and shipped.
 
 ### Active
 
-- Plan and deliver authenticated draft staging, a private-first YouTube job lifecycle, explicit publication, metadata support, and success-gated local retention.
+- None. Define the next milestone before adding new active requirements.
 
 ### Out of Scope
 
@@ -101,10 +106,10 @@ The backend already owns episode media layout, transcript generation, summary dr
 | Use Gemini first for transcript-adjacent summary and hashtag authoring, with Groq fallback and local transcription options | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback; actual provider identity remains visible | ✓ Good |
 | Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
 | Preserve `/v1/episodes/:episodeId/artifacts/jobs` as the artifact lifecycle contract | The v1.3 audit found the checked-out implementation, OpenAPI, and verifier already converge on jobs routes | ✓ Good |
-| Keep trailer-video publishing backend-owned and manually triggered | It preserves the existing authenticated media workflow and avoids browser-side OAuth or scheduled publication rules | — Planned |
-| Stage New Episode trailer uploads with owner-bound reservations | Immediate browser uploads must not let arbitrary episode IDs write media or expose a file as finalized before Save promotes it | — Planned |
-| Use a private-first durable YouTube job before explicit public publishing | Upload completion and provider processing are not a public release; persisted jobs make polling, retry, cancellation, and stale-source protection backend concerns | — Planned |
-| Retain local trailer-video versions only after confirmed public YouTube publication succeeds | A failed external publish must never cause the only local recovery copy to be removed | — Planned |
+| Keep trailer-video publishing backend-owned and manually triggered | It preserves the existing authenticated media workflow and avoids browser-side OAuth or scheduled publication rules | ✓ Good |
+| Stage New Episode trailer uploads with owner-bound reservations | Immediate browser uploads must not let arbitrary episode IDs write media or expose a file as finalized before Save promotes it | ✓ Good |
+| Use a private-first durable YouTube job before explicit public publishing | Upload completion and provider processing are not a public release; persisted jobs make polling, retry, cancellation, and stale-source protection backend concerns | ✓ Good |
+| Retain local trailer-video versions only after confirmed public YouTube publication succeeds | A failed external publish must never cause the only local recovery copy to be removed | ✓ Good |
 
 ## Archived Milestones
 
@@ -155,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-28 after starting milestone v1.3*
+*Last updated: 2026-08-21 after completing milestone v1.4*

@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Trailer Video Publishing
-current_phase: 18
-current_phase_name: Episode hashtag authoring
-status: verifying
-stopped_at: Phase 18 implementation and offline verification complete; live provider smoke test remains operational follow-up
-last_updated: "2026-08-20T19:30:00.000Z"
-last_activity: 2026-08-20
-last_activity_desc: Reconciled Phase 18 provider fallback and admin-web status contracts
+status: Awaiting next milestone
+stopped_at: Completed 17-05-PLAN.md
+last_updated: "2026-08-21T12:43:08.113Z"
+last_activity: 2026-08-21
+last_activity_desc: Milestone v1.4 completed and archived
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 20
   completed_plans: 20
+current_phase: 18
+current_phase_name: Episode hashtag authoring
 current_plan: 4
 ---
 
@@ -21,17 +21,17 @@ current_plan: 4
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-04)
+See: .planning/PROJECT.md (updated 2026-08-21)
 
 **Core value:** Serve the public frontend with stable backend-owned data contracts so page rendering no longer depends on legacy PHP responses or client-side reconstruction rules.
-**Current focus:** v1.4 closeout validation: live OAuth/channel enablement and provider quota observation
+**Current focus:** Planning the next milestone; live OAuth/channel enablement and provider quota observation remain operational follow-up
 
 ## Current Position
 
-Phase: 18 — Episode hashtag authoring
-Plan: 4 of 4
-Status: Implementation and offline verification complete
-Last activity: 2026-08-20 — provider fallback/status integration reconciled across API and admin-web
+Phase: Milestone v1.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-21 — Milestone v1.4 completed and archived
 
 ## Accumulated Context
 
@@ -181,4 +181,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Discuss and plan Phase 16 with `$gsd-discuss-phase 16` or `$gsd-plan-phase 16`.
+- Start the next milestone with `$gsd-new-milestone`
