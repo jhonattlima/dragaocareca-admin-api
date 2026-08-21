@@ -1,9 +1,9 @@
 ---
 phase: 16
 slug: draft-staging-and-private-youtube-job
-status: draft
-nyquist_compliant: false
-wave_1_verification_foundation: planned
+status: validated
+nyquist_compliant: true
+wave_1_verification_foundation: complete
 created: 2026-08-04
 ---
 

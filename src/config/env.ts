@@ -8,7 +8,7 @@ const envFile =
       ? ".env.dev"
       : ".env";
 
-dotenv.config({ path: envFile });
+dotenv.config({ path: envFile, quiet: true });
 
 const required = (value: string | undefined, name: string): string => {
   if (!value) throw new Error(`Missing required env var: ${name}`);
@@ -54,7 +54,10 @@ const boundedNonNegativeInteger = (value: string | undefined, defaultValue: numb
 
 export type HashtagAuthoringConfig = {
   enabled: boolean;
+  provider: "gemini" | "groq";
+  primaryProvider: "gemini" | "groq";
   geminiModel: string;
+  groqModel: string;
   geminiPromptVersion: string;
   cacheSuccessTtlMs: number;
   cacheZeroResultTtlMs: number;
@@ -93,7 +96,10 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
 
   return {
     enabled: (env.YOUTUBE_HASHTAG_AUTHORING_ENABLED ?? "false").toLowerCase() === "true",
+    provider: (env.YOUTUBE_HASHTAG_PROVIDER ?? env.EPISODE_SUMMARY_PROVIDER ?? "groq").toLowerCase() === "gemini" ? "gemini" : "groq",
+    primaryProvider: (env.YOUTUBE_HASHTAG_PRIMARY_PROVIDER ?? env.YOUTUBE_HASHTAG_PROVIDER ?? "gemini").toLowerCase() === "gemini" ? "gemini" : "groq",
     geminiModel: env.YOUTUBE_HASHTAG_GEMINI_MODEL ?? "gemini-3.6-flash",
+    groqModel: env.YOUTUBE_HASHTAG_GROQ_MODEL ?? env.EPISODE_SUMMARY_GROQ_MODEL ?? "openai/gpt-oss-120b",
     geminiPromptVersion: env.YOUTUBE_HASHTAG_GEMINI_PROMPT_VERSION ?? "1",
     cacheSuccessTtlMs: boundedPositiveInteger(
       env.YOUTUBE_HASHTAG_CACHE_SUCCESS_TTL_MS,
@@ -203,25 +209,36 @@ export const config = {
     command: process.env.EPISODE_TRANSCRIPTION_COMMAND ?? "whisper-cli",
     modelPath: process.env.EPISODE_TRANSCRIPTION_MODEL_PATH ?? "",
     language: process.env.EPISODE_TRANSCRIPTION_LANGUAGE ?? "pt",
+    whisperThreads: Number(process.env.EPISODE_TRANSCRIPTION_WHISPER_THREADS ?? 4),
+    fasterWhisperPython: process.env.EPISODE_TRANSCRIPTION_FASTER_WHISPER_PYTHON ?? "python3",
+    fasterWhisperScript: process.env.EPISODE_TRANSCRIPTION_FASTER_WHISPER_SCRIPT ?? path.resolve(process.cwd(), "scripts/faster_whisper_transcribe.py"),
+    fasterWhisperModel: process.env.EPISODE_TRANSCRIPTION_FASTER_WHISPER_MODEL ?? "small",
+    fasterWhisperDevice: process.env.EPISODE_TRANSCRIPTION_FASTER_WHISPER_DEVICE ?? "cpu",
+    fasterWhisperComputeType: process.env.EPISODE_TRANSCRIPTION_FASTER_WHISPER_COMPUTE_TYPE ?? "int8",
     timeoutMs: Number(process.env.EPISODE_TRANSCRIPTION_TIMEOUT_MS ?? 7200000),
     pollIntervalMs: Number(process.env.EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS ?? 300000),
     geminiModel: process.env.EPISODE_TRANSCRIPTION_GEMINI_MODEL ?? "gemini-3.6-flash",
     geminiMaxOutputTokens: Number(process.env.EPISODE_TRANSCRIPTION_GEMINI_MAX_OUTPUT_TOKENS ?? 32768),
     geminiThinkingLevel: process.env.EPISODE_TRANSCRIPTION_GEMINI_THINKING_LEVEL ?? "minimal",
+    groqModel: process.env.EPISODE_TRANSCRIPTION_GROQ_MODEL ?? "whisper-large-v3-turbo",
   },
   summary: {
     enabled: (process.env.EPISODE_SUMMARY_ENABLED ?? "false").toLowerCase() === "true",
-    provider: process.env.EPISODE_SUMMARY_PROVIDER ?? "llama",
+    provider: process.env.EPISODE_SUMMARY_PROVIDER ?? "groq",
+    primaryProvider: process.env.EPISODE_SUMMARY_PRIMARY_PROVIDER ?? process.env.EPISODE_SUMMARY_PROVIDER ?? "groq",
     command: process.env.EPISODE_SUMMARY_COMMAND ?? "llama-cli",
     modelPath: process.env.EPISODE_SUMMARY_MODEL_PATH ?? "",
     contextSize: Number(process.env.EPISODE_SUMMARY_CONTEXT_SIZE ?? 3072),
-    maxTokens: Number(process.env.EPISODE_SUMMARY_MAX_TOKENS ?? 360),
+    maxTokens: Number(process.env.EPISODE_SUMMARY_MAX_TOKENS ?? 700),
     timeoutMs: Number(process.env.EPISODE_SUMMARY_TIMEOUT_MS ?? 900000),
     promptVersion: process.env.EPISODE_SUMMARY_PROMPT_VERSION ?? "4",
     geminiApiKey: process.env.GEMINI_API_KEY ?? "",
     geminiModel: process.env.EPISODE_SUMMARY_GEMINI_MODEL ?? "gemini-3.6-flash",
     geminiApiBaseUrl: process.env.GEMINI_API_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta",
     geminiThinkingLevel: process.env.EPISODE_SUMMARY_GEMINI_THINKING_LEVEL ?? "low",
+    groqApiKey: process.env.GROQ_API_KEY ?? "",
+    groqModel: process.env.EPISODE_SUMMARY_GROQ_MODEL ?? "openai/gpt-oss-120b",
+    groqApiBaseUrl: process.env.GROQ_API_BASE_URL ?? "https://api.groq.com/openai/v1",
   },
   feed: {
     baseLink: required(process.env.FEED_BASE_LINK, "FEED_BASE_LINK"),

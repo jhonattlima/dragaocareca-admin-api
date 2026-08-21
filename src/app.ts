@@ -24,7 +24,7 @@ app.use(
     exposedHeaders: ["Content-Disposition", "X-Missing-Artifacts"],
   }),
 );
-app.use(morgan("dev"));
+app.use(morgan("[:date[iso]] :method :url :status :response-time ms - :res[content-length]"));
 app.use(express.json({ limit: "4mb" }));
 app.use(
   "/media",

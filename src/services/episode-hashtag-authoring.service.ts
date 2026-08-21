@@ -2,6 +2,7 @@ import { z } from "zod";
 import { config } from "../config/env";
 import { normalizeHashtagTag, type SuggestedTagCandidate, type SuggestedTagRetrieval, type SuggestedTagSuggestion } from "../schemas/episode-draft-state";
 import { createYouTubeHashtagSearchService, type HashtagLookupResult } from "./youtube-hashtag-search.service";
+import { GroqRateLimitError, groqRetryAfterMs, runGroqRateLimited } from "./groq-rate-limiter.service";
 
 const candidateSchema = z.object({
   tag: z.string().min(1).max(100),
@@ -15,6 +16,7 @@ export type GeminiTagResponse = z.infer<typeof responseSchema>;
 
 export type HashtagAuthoringOutcome = {
   status: "done" | "unavailable";
+  provider?: "gemini" | "groq" | null;
   errorCategory: "disabled" | "provider_unavailable" | "invalid_provider_response" | "quota_exhausted" | "rate_limited" | "unauthorized" | "missing_credentials" | null;
   retryAt: string | null;
   candidates: SuggestedTagCandidate[];
@@ -45,47 +47,121 @@ const geminiCandidateJsonSchema = {
   required: ["candidates"],
 };
 
+const sampleTranscriptForHashtags = (transcript: string): string => {
+  const normalized = transcript.trim();
+  const maxCharacters = 9_000;
+  if (normalized.length <= maxCharacters) return normalized;
+  const firstPart = Math.floor(maxCharacters * 0.65);
+  const lastPart = maxCharacters - firstPart;
+  return `${normalized.slice(0, firstPart)}\n\n[trecho intermediário omitido para limite de contexto]\n\n${normalized.slice(-lastPart)}`;
+};
+
 const buildPrompt = (transcript: string, summary: string): string => [
   "Você sugere hashtags para um vídeo do episódio do podcast.",
   "Responda somente com o objeto JSON solicitado. Gere exatamente 50 registros.",
   "Use apenas fatos sustentados pelo transcript e pelo summary abaixo. Não invente entidades, eventos ou temas.",
+  "Não sugira o nome do programa, da marca, do podcast, nomes recorrentes do canal ou termos que serviriam para qualquer episódio.",
+  "Não sugira números ou códigos de episódio, títulos de episódios anteriores, referências negadas, piadas isoladas, chamadas de abertura ou menções incidentais.",
+  "Uma palavra ou assunto mencionado uma única vez em uma piada não é tema central: marque relevant=false e não o priorize.",
+  "Priorize somente assuntos centrais desta conversa que tenham potencial de busca no YouTube; descarte tags genéricas ou sem relevância de pesquisa.",
   "Marque relevant=false para termos genéricos, desconectados ou não sustentados. Dê relevanceScore inteiro de 0 a 100.",
   "Cada tag deve ser um termo único, sem espaços, com no máximo um # inicial.",
-  "<TRANSCRIPT_UNTRUSTED>", transcript, "</TRANSCRIPT_UNTRUSTED>",
+  "<TRANSCRIPT_UNTRUSTED>", sampleTranscriptForHashtags(transcript), "</TRANSCRIPT_UNTRUSTED>",
   "<SUMMARY_UNTRUSTED>", summary, "</SUMMARY_UNTRUSTED>",
 ].join("\n");
 
-const defaultGenerateCandidates: GenerateCandidates = async ({ transcript, summary }) => {
-  if (!config.summary.geminiApiKey.trim()) throw Object.assign(new Error("Gemini credentials unavailable"), { code: "missing_credentials" });
-  const endpoint = `${config.summary.geminiApiBaseUrl}/models/${encodeURIComponent(config.youtube.hashtagAuthoring.geminiModel)}:generateContent?key=${encodeURIComponent(config.summary.geminiApiKey)}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: buildPrompt(transcript, summary) }] }],
-      generationConfig: { responseMimeType: "application/json", responseJsonSchema: geminiCandidateJsonSchema },
-    }),
-    signal: AbortSignal.timeout(config.youtube.hashtagAuthoring.requestTimeoutMs),
+const blockedGenericHashtags = new Set(["#dragaocareca", "#dragãocareca", "#podcast", "#episodio", "#episódio", "#programa", "#youtube"]);
+
+const isBlockedGenericHashtag = (normalizedTag: string): boolean =>
+  blockedGenericHashtags.has(normalizedTag) || /^#(?:dc|epis[oó]dio)\d+$/i.test(normalizedTag);
+
+const parseProviderCandidates = (text: string): unknown => {
+  let normalized = text.trim();
+  const fenced = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced?.[1]) normalized = fenced[1].trim();
+
+  const parsed = JSON.parse(normalized) as unknown;
+  return Array.isArray(parsed) ? { candidates: parsed } : parsed;
+};
+
+const generateCandidatesWithProvider = async (provider: "gemini" | "groq", prompt: string): Promise<unknown> => {
+  if (provider === "gemini") {
+    if (!config.summary.geminiApiKey.trim()) throw Object.assign(new Error("Gemini credentials unavailable"), { code: "missing_credentials" });
+    const endpoint = `${config.summary.geminiApiBaseUrl}/models/${encodeURIComponent(config.youtube.hashtagAuthoring.geminiModel)}:generateContent?key=${encodeURIComponent(config.summary.geminiApiKey)}`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", responseJsonSchema: geminiCandidateJsonSchema },
+      }),
+      signal: AbortSignal.timeout(config.youtube.hashtagAuthoring.requestTimeoutMs),
+    });
+    if (!response.ok) throw new Error("Gemini hashtag generation failed");
+    const payload = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
+    if (!text) throw new Error("Gemini returned no hashtag candidates");
+    return parseProviderCandidates(text);
+  }
+
+  if (!config.summary.groqApiKey.trim()) throw Object.assign(new Error("Groq credentials unavailable"), { code: "missing_credentials" });
+  const response = await runGroqRateLimited({
+    estimatedTokens: Math.ceil(prompt.length / 4) + 4000,
+    task: async () => {
+      const result = await fetch(`${config.summary.groqApiBaseUrl.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", authorization: `Bearer ${config.summary.groqApiKey.trim()}` },
+        body: JSON.stringify({
+          model: config.youtube.hashtagAuthoring.groqModel,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          reasoning_effort: "low",
+          include_reasoning: false,
+          max_tokens: 4000,
+        }),
+        signal: AbortSignal.timeout(config.youtube.hashtagAuthoring.requestTimeoutMs),
+      });
+      if (result.status === 429) throw new GroqRateLimitError(groqRetryAfterMs(result));
+      return result;
+    },
   });
-  if (!response.ok) throw new Error("Gemini hashtag generation failed");
-  const payload = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
-  if (!text) throw new Error("Gemini returned no hashtag candidates");
-  return JSON.parse(text) as unknown;
+  const payload = (await response.json().catch(() => ({}))) as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> };
+  if (!response.ok) throw new Error(`Groq hashtag generation failed: ${payload.error?.message ?? response.status}`);
+  const text = payload.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("Groq returned no hashtag candidates");
+  return parseProviderCandidates(text);
+};
+
+const createDefaultGenerateCandidates = (onProvider: (provider: "gemini" | "groq") => void): GenerateCandidates => async ({ transcript, summary }) => {
+  const prompt = buildPrompt(transcript, summary);
+  const primaryProvider = config.youtube.hashtagAuthoring.primaryProvider;
+  const fallbackProvider = config.youtube.hashtagAuthoring.provider;
+  try {
+    onProvider(primaryProvider);
+    return await generateCandidatesWithProvider(primaryProvider, prompt);
+  } catch (primaryError) {
+    if (fallbackProvider === primaryProvider) throw primaryError;
+    console.warn(
+      `[hashtags] provider=${primaryProvider} failed; fallback=${fallbackProvider} error=${primaryError instanceof Error ? primaryError.message : String(primaryError)}`
+    );
+    onProvider(fallbackProvider);
+    return generateCandidatesWithProvider(fallbackProvider, prompt);
+  }
 };
 
 export const validateGeminiTagCandidates = (value: unknown): SuggestedTagCandidate[] => {
   const parsed = responseSchema.parse(value);
-  if (parsed.candidates.length !== 50) throw new Error("Gemini must return exactly 50 hashtag candidates");
+  if (parsed.candidates.length < 50) throw new Error("AI must return at least 50 hashtag candidates");
   const byNormalized = new Map<string, SuggestedTagCandidate>();
   for (const candidate of parsed.candidates) {
     const normalized = normalizeHashtagTag(candidate.tag);
-    if (!normalized) throw new Error("Gemini returned an invalid hashtag candidate");
+    if (!normalized) continue;
+    if (isBlockedGenericHashtag(normalized.normalizedTag)) continue;
     if (byNormalized.has(normalized.normalizedTag)) throw new Error("Gemini returned duplicate hashtag candidates");
     byNormalized.set(normalized.normalizedTag, { ...normalized, relevant: candidate.relevant, relevanceScore: candidate.relevanceScore });
   }
-  if (byNormalized.size !== 50) throw new Error("Gemini must return 50 unique normalized hashtag candidates");
-  return [...byNormalized.values()];
+  if (byNormalized.size < 50) throw new Error("AI must return at least 50 unique normalized hashtag candidates");
+  return [...byNormalized.values()].slice(0, 50);
 };
 
 const lookupToRetrieval = (lookup: HashtagLookupResult): SuggestedTagRetrieval | null =>
@@ -110,7 +186,10 @@ const outcomeError = (error: unknown): HashtagAuthoringOutcome["errorCategory"] 
 };
 
 export const createEpisodeHashtagAuthoringService = (options: { generateCandidates?: GenerateCandidates; lookupService?: ReturnType<typeof createYouTubeHashtagSearchService> } = {}) => {
-  const generateCandidates = options.generateCandidates ?? defaultGenerateCandidates;
+  let providerUsed: HashtagAuthoringOutcome["provider"] = config.youtube.hashtagAuthoring.primaryProvider;
+  const generateCandidates = options.generateCandidates ?? createDefaultGenerateCandidates((provider) => {
+    providerUsed = provider;
+  });
   const lookupService = options.lookupService ?? createYouTubeHashtagSearchService();
 
   const author = async (transcript: string, summary: string): Promise<HashtagAuthoringOutcome> => {
@@ -130,7 +209,7 @@ export const createEpisodeHashtagAuthoringService = (options: { generateCandidat
         lookupResults.push({ candidate, retrieval });
       }
       if (failure) {
-        return { status: "unavailable", errorCategory: failure.errorCategory, retryAt: failure.retryAt, candidates, retrievals, suggestions: [] };
+        return { status: "unavailable", provider: providerUsed, errorCategory: failure.errorCategory, retryAt: failure.retryAt, candidates, retrievals, suggestions: [] };
       }
       const suggestions = lookupResults
         .filter(({ candidate }) => candidate.relevant)
@@ -139,9 +218,10 @@ export const createEpisodeHashtagAuthoringService = (options: { generateCandidat
         .sort((a, b) => b.candidate.relevanceScore - a.candidate.relevanceScore || a.candidate.normalizedTag.localeCompare(b.candidate.normalizedTag))
         .slice(0, 3)
         .map(({ candidate, retrieval }) => ({ ...retrieval, relevanceScore: candidate.relevanceScore }));
-      return { status: "done", errorCategory: null, retryAt: null, candidates, retrievals, suggestions };
+      return { status: "done", provider: providerUsed, errorCategory: null, retryAt: null, candidates, retrievals, suggestions };
     } catch (error) {
-      return { status: "unavailable", errorCategory: outcomeError(error), retryAt: new Date(Date.now() + config.youtube.hashtagAuthoring.retryDelaysMs[0]).toISOString(), candidates: [], retrievals: [], suggestions: [] };
+      console.warn(`[hashtags] authoring unavailable category=${outcomeError(error)} message=${error instanceof Error ? error.message : "unknown error"}`);
+      return { status: "unavailable", provider: providerUsed, errorCategory: outcomeError(error), retryAt: new Date(Date.now() + config.youtube.hashtagAuthoring.retryDelaysMs[0]).toISOString(), candidates: [], retrievals: [], suggestions: [] };
     }
   };
 

@@ -36,6 +36,7 @@ export type EpisodeDraftStepState = {
   promptVersion: string | null;
   fileName: string | null;
   error: string | null;
+  provider?: string | null;
 };
 
 export type TranscriptDraftState = EpisodeDraftStepState;
@@ -88,6 +89,7 @@ export type SuggestedTagsDraftState = {
   candidates: SuggestedTagCandidate[];
   retrievals: SuggestedTagRetrieval[];
   suggestions: SuggestedTagSuggestion[];
+  provider?: string | null;
 };
 
 export type EpisodeDraftState = {
@@ -190,6 +192,7 @@ const normalizeSuggestedTags = (value: unknown, version: number, updatedAt: stri
     candidates,
     retrievals,
     suggestions,
+    provider: toNullableString(record.provider),
   };
 };
 
@@ -207,6 +210,7 @@ export const createSuggestedTagsDraftState = (overrides: Partial<SuggestedTagsDr
   candidates: overrides.candidates ?? [],
   retrievals: overrides.retrievals ?? [],
   suggestions: overrides.suggestions ?? [],
+  provider: overrides.provider ?? null,
 });
 
 const normalizeStepState = (
@@ -221,6 +225,7 @@ const normalizeStepState = (
     promptVersion?: string | null;
     fileName?: string | null;
     error?: string | null;
+    provider?: string | null;
   } = {}
 ): EpisodeDraftStepState => {
   const now = new Date().toISOString();
@@ -235,6 +240,7 @@ const normalizeStepState = (
     promptVersion: toNullableString(record.promptVersion) ?? fallback.promptVersion ?? null,
     fileName: toNullableString(record.fileName) ?? fallback.fileName ?? null,
     error: toNullableString(record.error) ?? fallback.error ?? null,
+    provider: toNullableString(record.provider) ?? fallback.provider ?? null,
   };
 };
 
@@ -272,6 +278,7 @@ export const createTranscriptDraftState = (overrides: Partial<TranscriptDraftSta
   promptVersion: overrides.promptVersion ?? null,
   fileName: overrides.fileName ?? null,
   error: overrides.error ?? null,
+  provider: overrides.provider ?? null,
 });
 
 export const createAiSummaryDraftState = (overrides: Partial<AiSummaryDraftState> = {}): AiSummaryDraftState => ({
@@ -284,6 +291,7 @@ export const createAiSummaryDraftState = (overrides: Partial<AiSummaryDraftState
   promptVersion: overrides.promptVersion ?? null,
   fileName: overrides.fileName ?? null,
   error: overrides.error ?? null,
+  provider: overrides.provider ?? null,
   summaryFileName: overrides.summaryFileName ?? null,
 });
 

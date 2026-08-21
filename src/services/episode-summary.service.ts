@@ -25,10 +25,16 @@ import {
   type TranscriptDraftState,
 } from "../schemas/episode-draft-state";
 import { createEpisodeHashtagAuthoringService, type HashtagAuthoringOutcome } from "./episode-hashtag-authoring.service";
+import { GroqRateLimitError, groqRetryAfterMs, runGroqRateLimited } from "./groq-rate-limiter.service";
 
 const execFileAsync = promisify(execFile);
 
-type SummaryRuntimeConfig = typeof config.summary;
+type SummaryRuntimeConfig = Omit<typeof config.summary, "groqApiKey" | "groqModel" | "groqApiBaseUrl" | "primaryProvider"> & {
+  groqApiKey?: string;
+  groqModel?: string;
+  groqApiBaseUrl?: string;
+  primaryProvider?: string;
+};
 
 type SummaryRuntimeRequest = {
   command: string;
@@ -77,6 +83,7 @@ export type EpisodeDraftSummaryStatusSnapshot = {
   error: string | null;
   version: number | null;
   promptVersion: string | null;
+  provider: string | null;
   suggestedTags: SuggestedTagsSnapshot;
 };
 
@@ -93,6 +100,7 @@ export type SuggestedTagsSnapshot = {
   retryAt: string | null;
   errorCategory: EpisodeDraftState["suggestedTags"]["errorCategory"];
   promptVersion: string | null;
+  provider: string | null;
   suggestions: EpisodeDraftState["suggestedTags"]["suggestions"];
 };
 
@@ -279,9 +287,9 @@ const hasHighlightsSection = (summary: string): boolean =>
 
 const validateSummaryDraft = (summary: string): void => {
   const sentenceCount = countSentences(getEditorialSummaryBody(summary));
-  if (summary.length < 550 || summary.length > 1800) {
+  if (summary.length < 550 || summary.length > 1500) {
     throw createRuntimeError(
-      `summary draft must be between 550 and 1800 characters (received ${summary.length} characters across ${sentenceCount} sentences)`
+      `summary draft must be between 550 and 1500 characters (received ${summary.length} characters across ${sentenceCount} sentences)`
     );
   }
 
@@ -290,8 +298,8 @@ const validateSummaryDraft = (summary: string): void => {
   }
 
   const highlightItems = countHighlightItems(summary);
-  if (!hasHighlightsSection(summary) || highlightItems < 3 || highlightItems > 6) {
-    throw createRuntimeError(`summary draft must contain a Destaques section with 3-6 items (received ${highlightItems})`);
+  if (!hasHighlightsSection(summary) || highlightItems < 3 || highlightItems > 5) {
+    throw createRuntimeError(`summary draft must contain a Destaques section with 3-5 items (received ${highlightItems})`);
   }
 };
 
@@ -348,13 +356,17 @@ const buildSummaryPromptText = (input: {
   return [
     "SYSTEM: Responda apenas com JSON no formato {\"summary\": string}.",
     "SYSTEM: Escreva uma descrição editorial publicável em pt-BR no estilo do feed do Dragão Careca, não um resumo de falas ou uma ata.",
-    "SYSTEM: A descrição deve ter entre 550 e 1800 caracteres, 3 a 8 frases completas antes dos destaques e uma seção final `Destaques do episódio:` com 3 a 6 itens iniciados por `• `.",
-    "SYSTEM: Use a forma recorrente do feed: uma abertura curta com emoji e 'No episódio de hoje do Dragão Careca:', um gancho temático isolado, 2 ou 3 parágrafos que apresentam o assunto, destaques, uma recomendação para o público e, se couber, uma pergunta final à comunidade.",
-    "SYSTEM: Abra explicando o assunto e o formato do episódio. Depois agrupe os 2 a 4 temas centrais em linguagem natural e descobrível.",
+    "SYSTEM: A descrição deve ter entre 550 e 1500 caracteres, 3 a 6 frases completas antes dos destaques e uma seção final `Destaques do episódio:` com 3 a 5 itens iniciados por `• `.",
+    "SYSTEM: Escreva como a descrição oficial do próprio Dragão Careca: prefira 'o grupo', 'os aventureiros', 'a guilda' e verbos como 'conversamos' ou 'relembramos'. Não use a expressão 'a gente'. Nunca narre o programa de fora usando apenas 'os participantes', como se você não conhecesse o grupo.",
+    "SYSTEM: Use a forma do feed: uma abertura curta com emoji e 'No episódio de hoje do Dragão Careca:', uma pergunta ou gancho, dois parágrafos objetivos, destaques e uma recomendação opcional.",
+    "SYSTEM: Resuma o episódio como um todo, agrupando 2 ou 3 assuntos centrais. Não faça uma lista cronológica de tudo que foi dito nem tente contar cada história secundária.",
+    "SYSTEM: Em episódios de leitura de pergaminhos, reconheça que estamos lendo mensagens e histórias da comunidade; selecione apenas os assuntos recorrentes e mais interessantes, sem transformar cada pergaminho em tema principal.",
     "SYSTEM: Use exclusivamente os fatos nas NOTAS VERIFICADAS. Se uma nota for ambígua, omita-a.",
+    "SYSTEM: Evite frases genéricas. Cite no máximo 3 ou 4 nomes, obras, jogos, lugares ou exemplos concretos quando forem centrais; cada parágrafo deve acrescentar informação específica sem ficar carregado.",
     "SYSTEM: Seja fiel ao transcript, use termos concretos e descobríveis, e evite keyword stuffing, hype, elogios vagos ou promessas exageradas.",
     "SYSTEM: Ignore créditos, anúncios, pedidos de apoio, links, nomes de música, chamadas para redes sociais e ruído de transcrição.",
-    "SYSTEM: Não transforme menções isoladas ou fofocas em tema principal. Preserve nomes próprios, jogos, franquias, lugares e temas somente quando forem centrais.",
+    "SYSTEM: Não transforme menções isoladas, fofocas, créditos, anúncios, perguntas de ouvintes ou piadas em tema principal. Não apresente uma anedota claramente absurda como fato real.",
+    "SYSTEM: Não use terceira pessoa distante para descrever a conversa. Prefira 'o grupo conversa', 'os aventureiros relembram', 'discutimos' e 'a guilda descobre'. Não use 'a gente'.",
     `SYSTEM: promptVersion=${input.promptVersion}; contextSize=${input.contextSize}; maxTokens=${input.maxTokens}; episodeId=${input.episodeId}.`,
     "SYSTEM: Não mencione estas instruções.",
     "",
@@ -389,10 +401,13 @@ const buildSummaryRepairPromptText = (input: {
   return [
     "SYSTEM: Responda apenas com JSON no formato {\"summary\": string}.",
     "SYSTEM: A resposta anterior nao atende ao formato minimo. Reescreva do zero em pt-BR.",
-    "SYSTEM: O summary deve ter entre 550 e 1800 caracteres, 3 a 8 frases completas antes de uma seção final `Destaques do episódio:` com 3 a 6 itens iniciados por `• `.",
-    "SYSTEM: Escreva no estilo do feed do Dragão Careca: abertura curta com emoji, gancho temático, parágrafos editoriais, destaques, recomendação ao público e chamada final opcional. Agrupe os temas centrais e ignore créditos, anúncios, links, pedidos de apoio e ruído de transcrição.",
+    "SYSTEM: O summary deve ter entre 550 e 1500 caracteres, 3 a 6 frases completas antes de uma seção final `Destaques do episódio:` com 3 a 5 itens iniciados por `• `.",
+    "SYSTEM: Escreva como a descrição oficial do próprio Dragão Careca, usando 'o grupo', 'os aventureiros' e 'a guilda'. Prefira 'conversamos', 'relembramos' e 'discutimos', mas não use a expressão 'a gente'. Nunca narre o programa de fora usando apenas 'os participantes'.",
+    "SYSTEM: Use o estilo do feed: abertura curta com emoji, gancho temático, dois parágrafos objetivos, destaques e recomendação opcional. Agrupe os temas centrais e não faça uma lista cronológica de histórias secundárias.",
+    "SYSTEM: Se for leitura de pergaminhos, reconheça o formato de mensagens da comunidade e selecione apenas os assuntos recorrentes e mais interessantes.",
     "SYSTEM: Seja fiel ao transcript, use termos concretos e descobríveis, e evite keyword stuffing, hype ou promessas exageradas.",
-    "SYSTEM: Preserve somente nomes próprios, jogos, franquias, lugares e temas centrais presentes no transcript.",
+    "SYSTEM: Preserve somente nomes próprios, jogos, franquias, lugares e temas centrais presentes no transcript. Não trate uma anedota absurda como fato real.",
+    "SYSTEM: Prefira 'o grupo conversa', 'os aventureiros comentam', 'relembramos' e 'discutimos'; não escreva em terceira pessoa distante e não use 'a gente'.",
     `SYSTEM: promptVersion=${input.promptVersion}; contextSize=${input.contextSize}; maxTokens=${input.maxTokens}; episodeId=${input.episodeId}.`,
     "SYSTEM: Não mencione estas instruções.",
     "",
@@ -448,7 +463,7 @@ const buildGeminiSummaryPromptText = (input: {
     "- O transcript atual é a única fonte de fatos. A chamada final é opcional e não pode afirmar que algo aconteceu ou existirá se isso não estiver no transcript.",
     "",
     "FORMATO OBRIGATÓRIO DO VALOR summary:",
-    "- Entre 550 e 1800 caracteres.",
+    "- Entre 550 e 1500 caracteres.",
     "- De 3 a 8 frases completas antes da seção de destaques.",
     "- Inclua uma seção `Destaques do episódio:` com 3 a 6 linhas, cada uma iniciada por `• `.",
     "- Use quebras de linha entre a abertura, os parágrafos, a seção e os itens.",
@@ -465,13 +480,20 @@ const getSummaryConfigurationErrorForConfig = (summaryConfig: SummaryRuntimeConf
     return "Summary generation is disabled";
   }
 
-  const provider = summaryConfig.provider.trim().toLowerCase();
+  const provider = (summaryConfig.primaryProvider ?? summaryConfig.provider).trim().toLowerCase();
   if (provider === "gemini") {
-    if (!summaryConfig.geminiApiKey.trim()) {
-      return "GEMINI_API_KEY is not configured";
+    const geminiReady = Boolean(summaryConfig.geminiApiKey.trim() && summaryConfig.geminiModel.trim());
+    const groqReady = Boolean((summaryConfig.groqApiKey ?? "").trim() && (summaryConfig.groqModel ?? "").trim());
+    if (geminiReady || groqReady) return null;
+    return "Gemini and Groq summary providers are not configured";
+  }
+
+  if (provider === "groq") {
+    if (!(summaryConfig.groqApiKey ?? "").trim()) {
+      return "GROQ_API_KEY is not configured";
     }
-    if (!summaryConfig.geminiModel.trim()) {
-      return "EPISODE_SUMMARY_GEMINI_MODEL is not configured";
+    if (!(summaryConfig.groqModel ?? "").trim()) {
+      return "EPISODE_SUMMARY_GROQ_MODEL is not configured";
     }
     return null;
   }
@@ -547,6 +569,7 @@ const toSuggestedTagsSnapshot = (state: EpisodeDraftState): SuggestedTagsSnapsho
   retryAt: state.suggestedTags.retryAt,
   errorCategory: state.suggestedTags.errorCategory,
   promptVersion: state.suggestedTags.promptVersion,
+  provider: state.suggestedTags.provider ?? null,
   suggestions: state.suggestedTags.suggestions.slice(0, 3),
 });
 
@@ -610,6 +633,7 @@ const buildDraftStateForSummary = (
       finishedAt: status === "done" || status === "error" ? now : status === "processing" ? null : currentState?.aiSummary?.finishedAt ?? null,
       progress: status === "done" ? 100 : status === "processing" ? 0 : null,
       promptVersion: summaryConfig.promptVersion,
+      provider: (summaryConfig.primaryProvider ?? summaryConfig.provider).trim().toLowerCase(),
       fileName: buildSummaryFileName(episodeId),
       summaryFileName: buildSummaryFileName(episodeId),
       error: error ?? null,
@@ -746,6 +770,74 @@ const runGeminiSummary = async (summaryConfig: SummaryRuntimeConfig, prompt: str
   return text;
 };
 
+const runGroqSummary = async (summaryConfig: SummaryRuntimeConfig, prompt: string): Promise<string> => {
+  const baseUrl = (summaryConfig.groqApiBaseUrl ?? "https://api.groq.com/openai/v1").replace(/\/+$/, "");
+  const model = (summaryConfig.groqModel ?? "").trim();
+  // Keep a safety margin below Groq's 8k TPM free-tier limit. The prompt token
+  // count can be higher than the simple character estimate, especially with
+  // Portuguese transcripts and JSON-oriented instructions.
+  const maxCompletionTokens = Math.min(summaryConfig.maxTokens, 1_600);
+  const response = await runGroqRateLimited({
+    estimatedTokens: Math.ceil(prompt.length / 4) + maxCompletionTokens,
+    task: async () => {
+      const result = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${(summaryConfig.groqApiKey ?? "").trim()}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          reasoning_effort: "low",
+          include_reasoning: false,
+          max_tokens: maxCompletionTokens,
+        }),
+        signal: AbortSignal.timeout(summaryConfig.timeoutMs),
+      });
+      if (result.status === 429) throw new GroqRateLimitError(groqRetryAfterMs(result));
+      return result;
+    },
+  });
+  const body = (await response.json().catch(() => ({}))) as { error?: { message?: string; failed_generation?: string }; choices?: Array<{ message?: { content?: string } }> };
+  if (!response.ok) {
+    const failedGeneration = body.error?.failed_generation ? ` failed_generation=${JSON.stringify(body.error.failed_generation.slice(0, 240))}` : "";
+    throw createRuntimeError(`Groq request failed (${response.status}): ${body.error?.message ?? "unknown error"}${failedGeneration}`);
+  }
+  const text = body.choices?.[0]?.message?.content?.trim();
+  if (!text) throw createRuntimeError("Groq returned no summary");
+  console.info(`[summary] groq response model=${model} textChars=${text.length}`);
+  return text;
+};
+
+const runGeminiThenGroqSummary = async (
+  summaryConfig: SummaryRuntimeConfig,
+  prompts: { gemini: string; groq: string },
+  episodeId: number,
+  version: number,
+  purpose: "initial" | "repair"
+): Promise<{ output: string; provider: "gemini" | "groq" }> => {
+  try {
+    if (!summaryConfig.geminiApiKey.trim()) {
+      throw createRuntimeError("GEMINI_API_KEY is not configured");
+    }
+    const output = await runGeminiSummary(summaryConfig, prompts.gemini);
+    return { output, provider: "gemini" };
+  } catch (geminiError) {
+    console.warn(
+      `[summary] provider=gemini failed episode=${episodeId} version=${version} purpose=${purpose} error=${geminiError instanceof Error ? geminiError.message : String(geminiError)}; fallback=groq`
+    );
+  }
+
+  if (!(summaryConfig.groqApiKey ?? "").trim()) {
+    throw createRuntimeError("Gemini failed and GROQ_API_KEY is not configured");
+  }
+  const output = await runGroqSummary(summaryConfig, prompts.groq);
+  console.info(`[summary] provider=groq fallback episode=${episodeId} version=${version} purpose=${purpose}`);
+  return { output, provider: "groq" };
+};
+
 const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
   const summaryConfig = deps.summaryConfig ?? config.summary;
   const runtime = deps.runtime ?? defaultSummaryRuntime;
@@ -782,6 +874,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         error: null,
         version: null,
         promptVersion: null,
+        provider: null,
         suggestedTags: toSuggestedTagsSnapshot(createEpisodeDraftState(episodeId)),
       };
     }
@@ -795,6 +888,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       error: state.aiSummary.error ?? null,
       version: state.version,
       promptVersion: state.aiSummary.promptVersion ?? summaryConfig.promptVersion,
+      provider: state.aiSummary.provider ?? null,
       suggestedTags: toSuggestedTagsSnapshot(state),
     };
   };
@@ -813,6 +907,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       retryAt: outcome.status === "unavailable" ? outcome.retryAt ?? new Date(Date.parse(timestamp) + tagRetryDelay(attemptCount)).toISOString() : null,
       errorCategory: outcome.status === "unavailable" ? outcome.errorCategory : null,
       promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
+      provider: outcome.provider ?? current.suggestedTags.provider ?? config.youtube.hashtagAuthoring.primaryProvider,
       attemptCount,
       candidates: outcome.candidates,
       retrievals: outcome.retrievals,
@@ -840,6 +935,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       retryAt: null,
       errorCategory: null,
       promptVersion: config.youtube.hashtagAuthoring.geminiPromptVersion,
+      provider: config.youtube.hashtagAuthoring.primaryProvider,
     } });
     if (!config.youtube.hashtagAuthoring.enabled) {
       await persistTagOutcome(episodeId, version, summaryDigest, { status: "unavailable", errorCategory: "disabled", retryAt: null, candidates: [], retrievals: [], suggestions: [] });
@@ -934,6 +1030,7 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         error: state.aiSummary.error ?? null,
         version: state.version,
         promptVersion: state.aiSummary.promptVersion ?? summaryConfig.promptVersion,
+        provider: state.aiSummary.provider ?? null,
         suggestedTags: toSuggestedTagsSnapshot(state),
       };
     }
@@ -992,18 +1089,42 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
       console.info(`[summary] started episode=${episodeId} version=${version} at=${new Date().toISOString()}`);
 
       try {
-        const provider = summaryConfig.provider.trim().toLowerCase();
+        let provider = (summaryConfig.primaryProvider ?? summaryConfig.provider).trim().toLowerCase();
         let rawOutput: string;
         if (provider === "gemini") {
           console.info(`[summary] provider=gemini episode=${episodeId} version=${version} transcriptChars=${transcript.transcriptText.length}`);
-          rawOutput = await runGeminiSummary(
+          const generated = await runGeminiThenGroqSummary(
             summaryConfig,
-            buildGeminiSummaryPromptText({
+            {
+              gemini: buildGeminiSummaryPromptText({
+                episodeId,
+                transcript: transcript.transcriptText,
+                promptVersion: summaryConfig.promptVersion,
+              }),
+              groq: buildSummaryPromptText({
+                episodeId,
+                transcript: transcript.transcriptText,
+                promptVersion: summaryConfig.promptVersion,
+                contextSize: Math.min(summaryConfig.contextSize, 6_400),
+                maxTokens: Math.min(summaryConfig.maxTokens, 1_600),
+                evidence: undefined,
+              }),
+            },
+            episodeId,
+            version,
+            "initial"
+          );
+          rawOutput = generated.output;
+          provider = generated.provider;
+        } else if (provider === "groq") {
+            rawOutput = await runGroqSummary(summaryConfig, buildSummaryPromptText({
               episodeId,
               transcript: transcript.transcriptText,
               promptVersion: summaryConfig.promptVersion,
-            })
-          );
+              contextSize: Math.min(summaryConfig.contextSize, 6_400),
+            maxTokens: Math.min(summaryConfig.maxTokens, 1_600),
+              evidence: undefined,
+            }));
         } else {
           const evidencePrompt = buildEvidencePromptText({
             episodeId,
@@ -1046,6 +1167,8 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         if (!currentAfterRuntime || currentAfterRuntime.version !== version) {
           return;
         }
+        currentAfterRuntime.aiSummary.provider = provider;
+        await writeDraftState(episodeId, currentAfterRuntime);
 
         let normalizedSummary = normalizeSummaryDraftText(rawOutput);
         logSummaryCandidate(episodeId, version, "initial", rawOutput, normalizedSummary);
@@ -1060,27 +1183,40 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
             transcript: transcript.transcriptText,
             previousSummary: normalizedSummary,
             promptVersion: summaryConfig.promptVersion,
-            contextSize: summaryConfig.contextSize,
-            maxTokens: summaryConfig.maxTokens,
+            contextSize: Math.min(summaryConfig.contextSize, 6_400),
+            maxTokens: Math.min(summaryConfig.maxTokens, 1_600),
           });
-          const repairedOutput = provider === "gemini"
-            ? await runGeminiSummary(
-                summaryConfig,
-                buildGeminiSummaryPromptText({
+          let repairedOutput: string;
+          if (provider === "gemini") {
+            const repaired = await runGeminiThenGroqSummary(
+              summaryConfig,
+              {
+                gemini: buildGeminiSummaryPromptText({
                   episodeId,
                   transcript: transcript.transcriptText,
                   promptVersion: summaryConfig.promptVersion,
                   previousSummary: normalizedSummary,
-                })
-              )
-            : await runSummaryRuntime(summaryConfig, runtime, {
-                episodeId,
-                promptVersion: summaryConfig.promptVersion,
-                contextSize: summaryConfig.contextSize,
-                maxTokens: summaryConfig.maxTokens,
-                prompt: repairPrompt,
-                transcript: transcript.transcriptText,
-              });
+                }),
+                groq: repairPrompt,
+              },
+              episodeId,
+              version,
+              "repair"
+            );
+            repairedOutput = repaired.output;
+            provider = repaired.provider;
+          } else if (provider === "groq") {
+            repairedOutput = await runGroqSummary(summaryConfig, repairPrompt);
+          } else {
+            repairedOutput = await runSummaryRuntime(summaryConfig, runtime, {
+              episodeId,
+              promptVersion: summaryConfig.promptVersion,
+              contextSize: summaryConfig.contextSize,
+              maxTokens: summaryConfig.maxTokens,
+              prompt: repairPrompt,
+              transcript: transcript.transcriptText,
+            });
+          }
           normalizedSummary = normalizeSummaryDraftText(repairedOutput);
           logSummaryCandidate(episodeId, version, "repair", repairedOutput, normalizedSummary);
           validateSummaryDraft(normalizedSummary);

@@ -60,6 +60,7 @@ export type EpisodeTranscriptionStatusSnapshot = {
   transcriptStartedAt: string | null;
   progress: number | null;
   transcriptError: string | null;
+  provider: string | null;
 };
 
 const ensureTempRoot = (): void => {
@@ -170,12 +171,18 @@ const isDraftStateCurrent = (episodeId: number, version: number): boolean => {
   return Boolean(current && current.version === version);
 };
 
-const getTranscriptionConfigurationError = (): string | null => {
+type TranscriptionProvider = "gemini" | "groq" | "internal" | "faster-whisper";
+
+const getConfiguredTranscriptionProvider = (): TranscriptionProvider => {
+  const provider = config.transcription.provider.trim().toLowerCase();
+  return provider === "gemini" || provider === "groq" || provider === "faster-whisper" ? provider : "internal";
+};
+
+const getTranscriptionConfigurationError = (provider: TranscriptionProvider = getConfiguredTranscriptionProvider()): string | null => {
   if (!config.transcription.enabled) {
     return "Transcription is disabled";
   }
 
-  const provider = config.transcription.provider.trim().toLowerCase();
   if (provider === "gemini") {
     if (!config.summary.geminiApiKey.trim()) {
       return "GEMINI_API_KEY is not configured";
@@ -186,8 +193,28 @@ const getTranscriptionConfigurationError = (): string | null => {
     return null;
   }
 
+  if (provider === "groq") {
+    if (!config.summary.groqApiKey.trim()) return "GROQ_API_KEY is not configured";
+    if (!config.transcription.groqModel.trim()) return "EPISODE_TRANSCRIPTION_GROQ_MODEL is not configured";
+    return null;
+  }
+
+  if (provider === "faster-whisper") {
+    if (!config.transcription.fasterWhisperPython.trim()) {
+      return "EPISODE_TRANSCRIPTION_FASTER_WHISPER_PYTHON is not configured";
+    }
+    if (!fs.existsSync(config.transcription.fasterWhisperScript.trim())) {
+      return `faster-whisper script not found: ${config.transcription.fasterWhisperScript.trim()}`;
+    }
+    const pythonCheck = spawnSync(config.transcription.fasterWhisperPython.trim(), ["--version"], { stdio: "ignore" });
+    if (pythonCheck.error && (pythonCheck.error as NodeJS.ErrnoException).code === "ENOENT") {
+      return `Python command not found: ${config.transcription.fasterWhisperPython.trim()}`;
+    }
+    return null;
+  }
+
   if (provider !== "internal") {
-    return `Unsupported EPISODE_TRANSCRIPTION_PROVIDER: ${config.transcription.provider}`;
+    return `Unsupported EPISODE_TRANSCRIPTION_PROVIDER: ${provider}`;
   }
 
   if (!config.transcription.command.trim()) {
@@ -431,7 +458,44 @@ const getAudioDurationSeconds = async (wavPath: string): Promise<number> => {
   return Number.isFinite(duration) && duration > 0 ? duration : 0;
 };
 
-const runTranscriptionCommand = async (wavPath: string, outputBase: string): Promise<string> => {
+const runTranscriptionCommand = async (wavPath: string, outputBase: string, provider: TranscriptionProvider): Promise<string> => {
+  if (provider === "groq") {
+    const audioBytes = await fs.promises.readFile(wavPath);
+    const form = new FormData();
+    form.append("file", new Blob([audioBytes], { type: "audio/wav" }), path.basename(wavPath));
+    form.append("model", config.transcription.groqModel);
+    form.append("language", config.transcription.language);
+    form.append("response_format", "json");
+    form.append("temperature", "0");
+    const response = await fetch(`${config.summary.groqApiBaseUrl.replace(/\/+$/, "")}/audio/transcriptions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.summary.groqApiKey.trim()}` },
+      body: form,
+      signal: AbortSignal.timeout(config.transcription.timeoutMs),
+    });
+    const body = (await response.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
+    if (!response.ok) throw new Error(`Groq transcription failed (${response.status}): ${body.error?.message ?? "unknown error"}`);
+    console.info(`[transcription] provider=groq chunk=${path.basename(wavPath)} chars=${body.text?.length ?? 0}`);
+    return body.text ?? "";
+  }
+
+  if (provider === "faster-whisper") {
+    const { stdout } = await execFileAsync(
+      config.transcription.fasterWhisperPython,
+      [
+        config.transcription.fasterWhisperScript,
+        "--audio", wavPath,
+        "--model", config.transcription.fasterWhisperModel,
+        "--language", config.transcription.language,
+        "--device", config.transcription.fasterWhisperDevice,
+        "--compute-type", config.transcription.fasterWhisperComputeType,
+        "--cpu-threads", String(Math.max(1, Math.floor(config.transcription.whisperThreads))),
+      ],
+      { maxBuffer: 20 * 1024 * 1024, timeout: config.transcription.timeoutMs }
+    );
+    return stdout.toString();
+  }
+
   const transcriptPath = `${outputBase}.txt`;
   const { stdout } = await execFileAsync(
     config.transcription.command,
@@ -442,6 +506,8 @@ const runTranscriptionCommand = async (wavPath: string, outputBase: string): Pro
       wavPath,
       "-l",
       config.transcription.language,
+      "-t",
+      String(Math.max(1, Math.floor(config.transcription.whisperThreads))),
       "-otxt",
       "-of",
       outputBase,
@@ -463,7 +529,8 @@ const runTranscriptionCommand = async (wavPath: string, outputBase: string): Pro
 
 const transcribeAudioInChunks = async (
   audioPath: string,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  provider: TranscriptionProvider = "internal"
 ): Promise<string> => {
   ensureTempRoot();
   const workingDir = fs.mkdtempSync(path.join(tempRoot, "episode-"));
@@ -515,7 +582,7 @@ const transcribeAudioInChunks = async (
         { maxBuffer: 20 * 1024 * 1024 }
       );
 
-      const rawTranscript = await runTranscriptionCommand(chunkPath, chunkBase);
+      const rawTranscript = await runTranscriptionCommand(chunkPath, chunkBase, provider);
       const transcript = normalizeTranscriptText(rawTranscript);
       if (transcript) {
         chunkTexts.push(transcript);
@@ -536,13 +603,50 @@ const transcribeAudioInChunks = async (
   }
 };
 
-const transcribeAudio = async (audioPath: string, onProgress?: (progress: number) => void): Promise<string> => {
-  const provider = config.transcription.provider.trim().toLowerCase();
+const transcribeAudioWithGroq = async (audioPath: string, onProgress?: (progress: number) => void): Promise<string> => {
+  ensureTempRoot();
+  const workingDir = fs.mkdtempSync(path.join(tempRoot, "groq-episode-"));
+  const durationSeconds = await getAudioDurationSeconds(audioPath).catch(() => 0);
+  const groqChunkDurationSeconds = 300;
+  const totalChunks = Math.max(1, Math.ceil((durationSeconds || groqChunkDurationSeconds) / groqChunkDurationSeconds));
+  const chunkTexts: string[] = [];
+
+  try {
+    for (let index = 0; index < totalChunks; index += 1) {
+      const chunkPath = path.join(workingDir, `chunk_${String(index + 1).padStart(4, "0")}.wav`);
+      const chunkStart = index * groqChunkDurationSeconds;
+      const remainingSeconds = durationSeconds > 0 ? Math.max(durationSeconds - chunkStart, 0) : groqChunkDurationSeconds;
+      await execFileAsync("ffmpeg", [
+        "-y", "-ss", String(chunkStart), "-i", audioPath, "-t", String(Math.max(1, Math.min(groqChunkDurationSeconds, remainingSeconds))),
+        "-ac", "1", "-ar", "16000", "-vn", "-f", "wav", chunkPath,
+      ], { maxBuffer: 20 * 1024 * 1024 });
+
+      const text = normalizeTranscriptText(await runTranscriptionCommand(chunkPath, chunkPath, "groq"));
+      if (text) chunkTexts.push(text);
+      onProgress?.(clampProgress(((index + 1) / totalChunks) * 100));
+    }
+    const transcript = normalizeTranscriptText(chunkTexts.join("\n\n"));
+    if (!transcript) throw new Error("Groq transcription completed without output");
+    return transcript;
+  } finally {
+    await fs.promises.rm(workingDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+const transcribeAudio = async (
+  audioPath: string,
+  onProgress?: (progress: number) => void,
+  provider: TranscriptionProvider = getConfiguredTranscriptionProvider()
+): Promise<string> => {
   if (provider === "gemini") {
     return transcribeAudioWithGemini(audioPath, onProgress);
   }
 
-  return transcribeAudioInChunks(audioPath, onProgress);
+  if (provider === "groq") {
+    return transcribeAudioWithGroq(audioPath, onProgress);
+  }
+
+  return transcribeAudioInChunks(audioPath, onProgress, provider);
 };
 
 const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
@@ -554,7 +658,7 @@ const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
   return transcriptPath;
 };
 
-const transcribeDraftEpisode = async (episodeId: number, version: number): Promise<void> => {
+const transcribeDraftEpisode = async (episodeId: number, version: number, provider: TranscriptionProvider): Promise<void> => {
   const stagedAudioPath = getEpisodeMediaStagingPath(episodeId, "audio");
   const audioPath = fs.existsSync(stagedAudioPath)
     ? stagedAudioPath
@@ -572,7 +676,9 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
   const startedAt = Date.now();
   console.info(`[transcription] started episode=${episodeId} version=${version} at=${new Date().toISOString()}`);
 
-  writeDraftState(episodeId, nextDraftState(episodeId, "processing", version));
+  const processingState = nextDraftState(episodeId, "processing", version);
+  processingState.transcript.provider = provider;
+  writeDraftState(episodeId, processingState);
 
   try {
     const transcript = await transcribeAudio(audioPath, (progress) => {
@@ -580,14 +686,16 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
         return;
       }
 
+      const progressState = nextDraftState(episodeId, "processing", version);
+      progressState.transcript.provider = provider;
       writeDraftState(episodeId, {
-        ...nextDraftState(episodeId, "processing", version),
+        ...progressState,
         transcript: {
-          ...nextDraftState(episodeId, "processing", version).transcript,
+          ...progressState.transcript,
           progress,
         },
       });
-    });
+    }, provider);
 
     if (!isDraftStateCurrent(episodeId, version)) {
       return;
@@ -598,10 +706,12 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
     fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
 
+    const doneState = nextDraftState(episodeId, "done", version);
+    doneState.transcript.provider = provider;
     await writeDraftStateAsync(episodeId, {
-      ...nextDraftState(episodeId, "done", version),
+      ...doneState,
       transcript: {
-        ...nextDraftState(episodeId, "done", version).transcript,
+        ...doneState.transcript,
         progress: 100,
       },
     });
@@ -616,15 +726,21 @@ const transcribeDraftEpisode = async (episodeId: number, version: number): Promi
     await queueDraftEpisodeSummary(episodeId);
   } catch (error) {
     if (isDraftStateCurrent(episodeId, version)) {
+      const message = error instanceof Error ? error.message : "Unknown transcription error";
+      const errorState = nextDraftState(episodeId, "error", version, message);
+      errorState.transcript.provider = provider;
       await writeDraftStateAsync(episodeId, {
-        ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error"),
+        ...errorState,
         transcript: {
-          ...nextDraftState(episodeId, "error", version, error instanceof Error ? error.message : "Unknown transcription error").transcript,
+          ...errorState.transcript,
           progress: null,
         },
       });
+      if (episodeRepository.findByEpisodeId(episodeId)) {
+        episodeRepository.markTranscriptionError(episodeId, message);
+      }
       console.warn(
-        `[transcription] failed episode=${episodeId} version=${version} durationMs=${Date.now() - startedAt} at=${new Date().toISOString()} error=${error instanceof Error ? error.message : String(error)}`
+        `[transcription] failed episode=${episodeId} version=${version} durationMs=${Date.now() - startedAt} at=${new Date().toISOString()} error=${message}`
       );
     }
   }
@@ -653,9 +769,10 @@ export const queueEpisodeTranscription = async (
 };
 
 export const queueDraftEpisodeTranscription = async (
-  episodeId: number
+  episodeId: number,
+  provider: TranscriptionProvider = getConfiguredTranscriptionProvider()
 ): Promise<{ queued: boolean; version: number; status: DraftTranscriptionStatus; progress: number | null; error?: string | null }> => {
-  const configurationError = getTranscriptionConfigurationError();
+  const configurationError = getTranscriptionConfigurationError(provider);
   if (configurationError) {
     const current = getCurrentDraftState(episodeId);
     const next = nextDraftState(episodeId, "error", (current?.version ?? 0) + 1, configurationError);
@@ -671,10 +788,11 @@ export const queueDraftEpisodeTranscription = async (
 
   const current = getCurrentDraftState(episodeId);
   const next = nextDraftState(episodeId, "pending", (current?.version ?? 0) + 1);
+  next.transcript.provider = provider;
   writeDraftState(episodeId, next);
   console.info(`[transcription] queued episode=${episodeId} version=${next.version} at=${new Date().toISOString()}`);
 
-  void transcribeDraftEpisode(episodeId, next.version);
+  void transcribeDraftEpisode(episodeId, next.version, provider);
 
   return {
     queued: true,
@@ -731,6 +849,20 @@ export const syncDraftEpisodeTranscription = async (episodeId: number): Promise<
 
 export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscriptionStatusSnapshot => {
   const episode = episodeRepository.findByEpisodeId(episodeId);
+  const draft = getCurrentDraftState(episodeId);
+
+  if (draft && draft.transcript.status !== "idle") {
+    return {
+      status: draft.transcript.status,
+      transcriptFileName: draft.transcript.status === "done" ? getEpisodeMediaRelativePath(episodeId, "transcript") : null,
+      transcriptUpdatedAt: draft.transcript.updatedAt,
+      transcriptStartedAt: draft.transcript.startedAt ?? null,
+      progress: draft.transcript.progress ?? (draft.transcript.status === "done" ? 100 : null),
+      transcriptError: draft.transcript.error ?? null,
+      provider: draft.transcript.provider ?? null,
+    };
+  }
+
   if (episode) {
     return {
       status: episode.transcriptStatus ?? "idle",
@@ -739,10 +871,10 @@ export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscr
       transcriptStartedAt: null,
       progress: episode.transcriptStatus === "done" ? 100 : null,
       transcriptError: episode.transcriptError ?? null,
+      provider: draft?.transcript.provider ?? null,
     };
   }
 
-  const draft = getCurrentDraftState(episodeId);
   if (!draft) {
     return {
       status: "idle",
@@ -751,6 +883,7 @@ export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscr
       transcriptStartedAt: null,
       progress: null,
       transcriptError: null,
+      provider: null,
     };
   }
 
@@ -761,6 +894,7 @@ export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscr
     transcriptStartedAt: draft.transcript.startedAt ?? null,
     progress: draft.transcript.progress ?? (draft.transcript.status === "done" ? 100 : null),
     transcriptError: draft.transcript.error ?? null,
+    provider: draft.transcript.provider ?? null,
   };
 };
 

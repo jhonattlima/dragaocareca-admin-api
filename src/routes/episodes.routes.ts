@@ -641,6 +641,40 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
   }
 });
 
+episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, async (req, res, next) => {
+  try {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+
+    const audioPath = getEpisodeMediaStagingPath(episodeId, "audio");
+    const finalizedAudioPath = getEpisodeMediaFinalPath(episodeId, "audio");
+    if (!fs.existsSync(audioPath) && !fs.existsSync(finalizedAudioPath)) {
+      res.status(404).json({ message: "Episode audio is not available for Whisper transcription" });
+      return;
+    }
+
+    await abortDraftEpisodeTranscription(episodeId);
+    const draftState = await queueDraftEpisodeTranscription(episodeId, "faster-whisper");
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      episodeId,
+      queued: draftState.queued,
+      version: draftState.version,
+      status: draftState.status,
+      progress: draftState.progress,
+      transcriptError: draftState.error ?? null,
+      message: draftState.status === "error"
+        ? `Whisper transcription could not start: ${draftState.error ?? "unknown error"}`
+        : "Whisper transcription started.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 episodesRouter.get("/:episodeId/episodes-generated-summary", noStoreHashtagAuthoring, requireAuth, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);

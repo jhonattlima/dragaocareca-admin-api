@@ -12,6 +12,7 @@ import {
   queueDraftEpisodeSummary,
   syncDraftEpisodeSummary,
 } from "../services/episode-summary.service";
+import { config } from "../config/env";
 import {
   getEpisodeMediaDraftStatePath,
   getEpisodeMediaDraftSummaryPath,
@@ -245,6 +246,7 @@ const runGeminiSuccessCase = async (): Promise<void> => {
   const transcript = makeTranscriptFixture(episodeId);
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
+  let summaryRequestCount = 0;
   const summary = [
     "🎧 No episódio de hoje do Dragão Careca:",
     "",
@@ -267,6 +269,7 @@ const runGeminiSuccessCase = async (): Promise<void> => {
     assert(String(input).endsWith("/models/gemini-3.6-flash:generateContent"), "Gemini endpoint was not used");
     const requestHeaders = new Headers(init?.headers);
     assert(requestHeaders.get("x-goog-api-key") === "test-gemini-key", "Gemini API key header missing");
+    summaryRequestCount += 1;
     const body = JSON.parse(String(init?.body)) as {
       contents?: Array<{ parts?: Array<{ text?: string }> }>;
       generationConfig?: {
@@ -314,7 +317,7 @@ const runGeminiSuccessCase = async (): Promise<void> => {
     await waitForStatus(service, episodeId, ["done", "error"]);
     const snapshot = service.getEpisodeDraftSummaryStatus(episodeId);
     assert(snapshot.status === "done", `expected Gemini done status, got ${snapshot.status}`);
-    assert(requestCount === 1, `expected one Gemini request, got ${requestCount}`);
+    assert(summaryRequestCount === 1, `expected one Gemini summary request, got ${summaryRequestCount} (total Gemini requests: ${requestCount})`);
   } finally {
     globalThis.fetch = originalFetch;
     await cleanupEpisodeWorkspace(episodeId);
@@ -377,6 +380,9 @@ const parseArgs = (): RuntimeMode => {
 };
 
 const main = async (): Promise<void> => {
+  const originalHashtagAuthoringEnabled = config.youtube.hashtagAuthoring.enabled;
+  config.youtube.hashtagAuthoring.enabled = false;
+  try {
   const mode = parseArgs();
 
   if (mode === "missingTranscript") {
@@ -394,6 +400,9 @@ const main = async (): Promise<void> => {
   await runSuccessCase();
   await runGeminiSuccessCase();
   console.log("verified summary runtime contract");
+  } finally {
+    config.youtube.hashtagAuthoring.enabled = originalHashtagAuthoringEnabled;
+  }
 };
 
 main().catch((error: unknown) => {

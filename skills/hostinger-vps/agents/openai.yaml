@@ -1,0 +1,4 @@
+interface:
+  display_name: Hostinger VPS
+  short_description: Safely connect to the Hostinger VPS over SSH
+  default_prompt: Check the configured Hostinger VPS connection or inspect the deployed service without exposing credentials.

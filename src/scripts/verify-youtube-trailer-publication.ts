@@ -306,7 +306,8 @@ const verifyDraftPromotionAndRollback = async (modules: RuntimeModules, fixture:
   // reservation is restored so the operator can retry the same draft safely.
   modules.restoreTrailerVideoDraftForRetry(reservation.draftId, draftEpisodeId, owner);
   await fs.promises.rm(stagingPath, { force: true });
-  assert.equal(modules.episodeRepository.findByEpisodeId(draftEpisodeId), null);
+  const restoredDraftEpisode = modules.episodeRepository.findByEpisodeId(draftEpisodeId);
+  assert.ok(restoredDraftEpisode?.isDraft, "failed create compensation may retain the server-owned draft row");
   assert.equal(await fs.promises.stat(modules.getEpisodeMediaFinalPath(draftEpisodeId, "trailerVideo")).then(() => true).catch(() => false), false);
   assert.equal(modules.episodeRepository.findTrailerVideoDraft(reservation.draftId)?.state, "reserved");
 

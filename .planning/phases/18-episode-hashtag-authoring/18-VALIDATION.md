@@ -1,9 +1,9 @@
 ---
 phase: 18
 slug: episode-hashtag-authoring
-status: planned
+status: validated
 nyquist_compliant: true
-wave_1_verification_foundation: planned
+wave_1_verification_foundation: complete
 created: 2026-08-06
 ---
 

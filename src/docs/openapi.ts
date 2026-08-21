@@ -1067,6 +1067,21 @@ export const swaggerSpec = swaggerJsdoc({
           },
         },
       },
+      "/v1/episodes/{episodeId}/transcription/whisper": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Retry episode transcription with faster-whisper",
+          description: "Queues the available staged or finalized episode audio with the server-configured faster-whisper worker. This endpoint is intended as an explicit fallback after a Gemini transcription failure; provider credentials and filesystem paths remain server-owned.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          responses: {
+            "200": { description: "faster-whisper transcription queued or already processing." },
+            "400": { description: "Invalid episodeId." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "404": { description: "Episode audio is not available." },
+          },
+        },
+      },
       "/v1/episodes/{episodeId}/audio": {
         post: {
           tags: ["Episodes"],
@@ -1119,7 +1134,7 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Upload or replace the final trailer video",
-          description: "Authenticated administrators upload one MP4 through multipart field file. New drafts remain staged until Save, while persisted replacements are promoted atomically. A staged upload can begin a private YouTube job; replacement cleanup deletes superseded provider videos through the server-owned provider boundary.",
+          description: "Authenticated administrators upload one MP4 through multipart field file, subject to the default 524288000-byte server limit; the operation never accepts client paths. New drafts remain staged until Save, while persisted replacements are promoted atomically. A staged upload can begin a private YouTube job; replacement cleanup deletes superseded provider videos through the server-owned provider boundary.",
           security: [{ bearerAuth: [] }],
           parameters: [
             { name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 }, description: "Positive episode identifier." },

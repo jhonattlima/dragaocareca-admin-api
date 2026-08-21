@@ -225,8 +225,8 @@ const collectSummaryViolations = (summaryText: string, transcriptText: string): 
   const normalizedAscii = stripDiacritics(normalized).toLowerCase();
   const englishSignals = [" the ", " and ", " with ", " this ", " that ", " episode ", " summary ", " is ", " are ", " for "];
 
-  if (normalized.length < 550 || normalized.length > 1800) {
-    violations.push("summary length must stay between 550 and 1800 characters");
+  if (normalized.length < 550 || normalized.length > 1500) {
+    violations.push("summary length must stay between 550 and 1500 characters");
   }
 
   const sentenceCount = countSentences(normalized);
@@ -235,8 +235,8 @@ const collectSummaryViolations = (summaryText: string, transcriptText: string): 
   }
 
   const highlightItems = countHighlightItems(normalized);
-  if (!hasHighlightsSection(normalized) || highlightItems < 3 || highlightItems > 6) {
-    violations.push("summary must contain a Destaques section with 3-6 items");
+  if (!hasHighlightsSection(normalized) || highlightItems < 3 || highlightItems > 5) {
+    violations.push("summary must contain a Destaques section with 3-5 items");
   }
 
   if (englishSignals.some((signal) => normalizedAscii.includes(signal))) {
@@ -372,13 +372,13 @@ const main = async (): Promise<void> => {
     {
       name: "too-short-summary",
       summaryText: "Resumo curto demais para passar no contrato.",
-      expectViolation: "between 550 and 1800 characters",
+      expectViolation: "between 550 and 1500 characters",
     },
     {
       name: "too-long-summary",
       summaryText:
         "Este resumo foi inflado de proposito para ultrapassar o limite e provar que o contrato encerra drafts excessivamente longos. Ele continua a repetir a mesma ideia sem necessidade, adicionando mais contexto, mais redundancia e mais palavras do que uma descrição editorial deveria conter. Isso nao deveria ser aceito porque o texto perde foco, fica cansativo e deixa de ser útil para descoberta. A mesma mensagem aparece outra vez apenas para empurrar o tamanho total acima do limite permitido. A repeticao continua de forma calculada para exceder o teto de caracteres. Cada frase extra reforca que o contrato precisa bloquear esse tipo de saida. O objetivo aqui e provar o erro de tamanho com folga suficiente. ".repeat(3),
-      expectViolation: "between 550 and 1800 characters",
+      expectViolation: "between 550 and 1500 characters",
     },
     {
       name: "wrong-sentence-count",

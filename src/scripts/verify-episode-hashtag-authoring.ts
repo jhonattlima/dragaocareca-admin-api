@@ -72,8 +72,9 @@ const verifyFoundationFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(schema.normalizeEpisodeDraftState({ episodeId: 18, version: 4, status: "done" })?.suggestedTags.status, "idle");
 
   assert.deepEqual(authoringModule.validateGeminiTagCandidates({ candidates: createCandidates() }).slice(0, 2).map((candidate) => candidate.displayTag), ["#tag0", "#tag1"]);
-  assert.throws(() => authoringModule.validateGeminiTagCandidates({ candidates: [] }), /exactly 50/);
-  assert.throws(() => authoringModule.validateGeminiTagCandidates({ candidates: [...createCandidates().slice(0, 49), { ...createCandidates()[0], tag: "tag0" }] }), /exactly 50|duplicate/);
+  assert.throws(() => authoringModule.validateGeminiTagCandidates({ candidates: [] }), /at least 50/);
+  assert.throws(() => authoringModule.validateGeminiTagCandidates({ candidates: [...createCandidates().slice(0, 49), { ...createCandidates()[0], tag: "tag0" }] }), /at least 50|duplicate/);
+  assert.equal(authoringModule.validateGeminiTagCandidates({ candidates: [...createCandidates(), { tag: "tag-extra", relevant: false, relevanceScore: 0 }] }).length, 50);
   assert.equal(globalThis.fetch !== undefined, true, "the verifier does not replace the runtime network primitive");
 };
 

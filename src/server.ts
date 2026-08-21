@@ -12,6 +12,14 @@ import { startYoutubeTrailerJobWorker } from "./workers/youtube-trailer-job.work
 import { startTelegramBotWorker } from "./services/telegram-bot.worker";
 import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-authoring.worker";
 
+type ConsoleMethod = (...args: unknown[]) => void;
+
+const timestampedConsole = console as unknown as Record<"log" | "info" | "warn" | "error", ConsoleMethod>;
+for (const level of ["log", "info", "warn", "error"] as const) {
+  const original = timestampedConsole[level].bind(console);
+  timestampedConsole[level] = (...args: unknown[]) => original(`[${new Date().toISOString()}]`, ...args);
+}
+
 const backgroundWorkersDisabled =
   (process.env.DISABLE_BACKGROUND_WORKERS ?? "false").toLowerCase() === "true";
 const metricsWorkersEnabled =

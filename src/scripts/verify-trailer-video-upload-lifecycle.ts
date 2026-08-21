@@ -106,7 +106,7 @@ const episodeCreateBody = (episodeId: number, draftId?: string): Record<string, 
   guests: [],
   tags: [],
   citations: [],
-  musicCredits: [],
+  musicCredits: [JSON.stringify({ name: "Offline fixture music", links: [{ url: "https://example.test/music" }] })],
   coverCredits: [],
 });
 
@@ -161,18 +161,29 @@ const main = async (): Promise<void> => {
 
     const staged = await invoke(router, "/:episodeId/trailer-video", new MultipartRequest(fixtureEpisodeId, Buffer.from("draft-bytes"), "x.mp4", "video/mp4", reservation.draftId));
     assert.equal(staged.response.statusCode, 200);
-    assert.deepEqual(staged.response.jsonBody, {
+    const stagedBody = staged.response.jsonBody as Record<string, unknown>;
+    assert.deepEqual({
+      episodeId: stagedBody.episodeId,
+      draftId: stagedBody.draftId,
+      state: stagedBody.state,
+      trailerVideoFileName: stagedBody.trailerVideoFileName,
+      message: stagedBody.message,
+    }, {
       episodeId: fixtureEpisodeId,
       draftId: reservation.draftId,
       state: "staged",
       trailerVideoFileName: null,
       message: "Trailer video staged; save the episode to finalize it.",
     });
+    if (config.youtube.trailerJob.enabled) {
+      assert.equal(typeof stagedBody.youtubeJob, "object");
+    }
     assert.equal(await fs.promises.readFile(getEpisodeMediaStagingPath(fixtureEpisodeId, "trailerVideo"), "utf8"), "draft-bytes");
 
     const noVideoEpisodeId = fixtureEpisodeId + 2;
+    episodeRepository.delete(noVideoEpisodeId);
     const noVideo = await invoke(router, "/", { body: { ...episodeCreateBody(noVideoEpisodeId), title: "Created without trailer video" }, headers: {}, params: {} });
-    assert.equal(noVideo.response.statusCode, 201);
+    assert.equal(noVideo.response.statusCode, 201, noVideo.error instanceof Error ? noVideo.error.message : String(noVideo.error ?? noVideo.response.jsonBody));
     assert.equal((noVideo.response.jsonBody as any).episodeId, noVideoEpisodeId);
     assert.equal((noVideo.response.jsonBody as any).trailerVideoFileName, undefined);
     episodeRepository.delete(noVideoEpisodeId);
