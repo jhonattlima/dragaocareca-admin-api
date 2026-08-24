@@ -14,6 +14,7 @@ import { metricsRouter } from "./routes/metrics.routes";
 import { publicEpisodesRouter } from "./routes/public-episodes.routes";
 import { publicSiteRouter } from "./routes/public-site.routes";
 import { publicSupportersRouter } from "./routes/public-supporters.routes";
+import { internalPromotionMediaRouter } from "./routes/internal-promotion-media.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
 
 export const app = express();
@@ -26,12 +27,17 @@ app.use(
 );
 app.use(morgan("[:date[iso]] :method :url :status :response-time ms - :res[content-length]"));
 app.use(express.json({ limit: "4mb" }));
+app.use("/media/episodes/:episodeId/trailer.mp4", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(404).json({ message: "Media resource is unavailable." });
+});
 app.use(
   "/media",
   express.static(config.media.storageRoot, {
     setHeaders: (res) => res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"),
   }),
 );
+app.use("/internal/promotion-media", internalPromotionMediaRouter);
 
 app.get("/health", async (_req, res, next) => {
   try {

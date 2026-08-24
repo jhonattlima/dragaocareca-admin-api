@@ -12,6 +12,7 @@ import {
   getPromotionRequestFingerprint,
   type PromotionTransport,
 } from "./episode-promotion.service";
+import { postEpisodePromotion } from "./episode-promotion-client.service";
 import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath } from "./episode-media-layout.service";
 
 export type EpisodePromotionSaveInput = {
@@ -51,27 +52,8 @@ const publicDownloadUrlFor = (episodeId: number): string =>
   `${config.feed.baseLink.replace(/\/+$/, "")}/${episodeId}`;
 
 const configuredPromotionTransport = (): PromotionTransport => ({
-  async sendPromotion(request, _effects): Promise<unknown> {
-    if (!config.promotion.sharedSecretConfigured) {
-      throw new Error("Promotion service authentication is not configured");
-    }
-    const response = await fetch(config.promotion.botUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${config.promotion.sharedSecret}`,
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(config.promotion.requestTimeoutMs),
-    });
-    if (!response.ok) {
-      throw new Error(`Promotion transport returned HTTP ${response.status}`);
-    }
-    try {
-      return await response.json();
-    } catch {
-      throw new Error("Promotion transport returned a malformed acknowledgement");
-    }
+  async sendPromotion(request, effects): Promise<unknown> {
+    return postEpisodePromotion(request, effects);
   },
 });
 
