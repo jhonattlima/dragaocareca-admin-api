@@ -200,6 +200,70 @@ const withImmediateTransaction = <T>(callback: () => T): T => {
 const effectKeyFor = (notificationId: string, destination: PromotionDestination, sourceRevision: string): string =>
   `${notificationId}:${destination}:${sourceRevision}`;
 
+type ClaimPromotionEffectsMode = "due" | "unknown";
+
+const claimPromotionEffects = (
+  input: ClaimDuePromotionEffectsInput = {},
+  mode: ClaimPromotionEffectsMode = "due",
+): PromotionEffectRow[] => {
+  const now = input.now ?? nowIso();
+  const leaseDurationMs = input.leaseDurationMs ?? 60_000;
+  const limit = Math.max(1, Math.min(20, Math.trunc(input.limit ?? 2)));
+  const claimed: PromotionEffectRow[] = [];
+  withImmediateTransaction(() => {
+    const conditions = [
+      mode === "unknown"
+        ? "e.status = 'unknown'"
+        : "e.status IN ('pending', 'temporary_failure', 'unknown')",
+      "e.source_revision = n.source_revision",
+    ];
+    const parameters: Array<string | number> = [];
+    if (mode === "due") {
+      conditions.push("(e.next_attempt_at IS NULL OR datetime(e.next_attempt_at) <= datetime(?))");
+      parameters.push(now);
+    }
+    if (input.notificationId) {
+      conditions.push("e.notification_id = ?");
+      parameters.push(input.notificationId);
+    }
+    const candidates = getDb().prepare(`
+      SELECT e.* FROM promotion_effects e
+      JOIN promotion_notifications n ON n.notification_id = e.notification_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY datetime(e.created_at) ASC, e.effect_key ASC
+      LIMIT ${limit}
+    `).all(...parameters) as SqlitePromotionEffectRow[];
+    for (const candidate of candidates) {
+      const leaseId = randomUUID();
+      const claimedAt = now;
+      const result = getDb().prepare(`
+        UPDATE promotion_effects
+        SET status = 'in_progress', lease_id = ?, lease_claimed_at = ?, last_attempt_at = ?,
+            next_attempt_at = ?, attempt_count = attempt_count + 1, revision = revision + 1, updated_at = ?
+        WHERE effect_key = ? AND notification_id = ? AND source_revision = ? AND revision = ?
+          AND status ${mode === "unknown" ? "= 'unknown'" : "IN ('pending', 'temporary_failure', 'unknown')"}
+          ${mode === "due" ? "AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))" : ""}
+      `).run(
+        leaseId,
+        claimedAt,
+        claimedAt,
+        new Date(Date.parse(claimedAt) + leaseDurationMs).toISOString(),
+        claimedAt,
+        candidate.effect_key,
+        candidate.notification_id,
+        candidate.source_revision,
+        candidate.revision,
+        ...(mode === "due" ? [now] : []),
+      );
+      if (result.changes === 1) {
+        const row = mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(candidate.effect_key) as SqlitePromotionEffectRow);
+        if (row) claimed.push(row);
+      }
+    }
+  });
+  return claimed;
+};
+
 export const episodePromotionRepository = {
   upsertPromotionIntent(input: UpsertPromotionIntentInput): PromotionIntent {
     const request = promotionRequestSchema.parse(input.request);
@@ -262,44 +326,11 @@ export const episodePromotionRepository = {
   },
 
   claimDuePromotionEffects(input: ClaimDuePromotionEffectsInput = {}): PromotionEffectRow[] {
-    const now = input.now ?? nowIso();
-    const leaseDurationMs = input.leaseDurationMs ?? 60_000;
-    const limit = Math.max(1, Math.min(20, Math.trunc(input.limit ?? 2)));
-    const claimed: PromotionEffectRow[] = [];
-    withImmediateTransaction(() => {
-      const conditions = [
-        "e.status IN ('pending', 'temporary_failure', 'unknown')",
-        "(e.next_attempt_at IS NULL OR datetime(e.next_attempt_at) <= datetime(?))",
-        "e.source_revision = n.source_revision",
-      ];
-      const parameters: Array<string | number> = [now];
-      if (input.notificationId) {
-        conditions.push("e.notification_id = ?");
-        parameters.push(input.notificationId);
-      }
-      const candidates = getDb().prepare(`
-        SELECT e.* FROM promotion_effects e
-        JOIN promotion_notifications n ON n.notification_id = e.notification_id
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY datetime(e.created_at) ASC, e.effect_key ASC
-        LIMIT ${limit}
-      `).all(...parameters) as SqlitePromotionEffectRow[];
-      for (const candidate of candidates) {
-        const leaseId = randomUUID();
-        const claimedAt = nowIso();
-        const result = getDb().prepare(`
-          UPDATE promotion_effects
-          SET status = 'in_progress', lease_id = ?, lease_claimed_at = ?, last_attempt_at = ?,
-              next_attempt_at = ?, attempt_count = attempt_count + 1, revision = revision + 1, updated_at = ?
-          WHERE effect_key = ? AND revision = ? AND status IN ('pending', 'temporary_failure', 'unknown')
-        `).run(leaseId, claimedAt, claimedAt, new Date(Date.parse(claimedAt) + leaseDurationMs).toISOString(), claimedAt, candidate.effect_key, candidate.revision);
-        if (result.changes === 1) {
-          const row = mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(candidate.effect_key) as SqlitePromotionEffectRow);
-          if (row) claimed.push(row);
-        }
-      }
-    });
-    return claimed;
+    return claimPromotionEffects(input);
+  },
+
+  claimUnknownPromotionEffects(input: ClaimDuePromotionEffectsInput = {}): PromotionEffectRow[] {
+    return claimPromotionEffects(input, "unknown");
   },
 
   recordPromotionAcknowledgement(input: RecordPromotionAcknowledgementInput): PromotionEffectRow | null {
@@ -319,7 +350,7 @@ export const episodePromotionRepository = {
         topic_id = COALESCE(?, topic_id), message_thread_id = COALESCE(?, message_thread_id),
         error_category = ?, error_description = ?, lease_id = NULL, lease_claimed_at = NULL,
         next_attempt_at = ?, revision = revision + 1, updated_at = ?
-      WHERE ${conditions.join(" AND ")}
+      WHERE ${conditions.join(" AND ")} AND status NOT IN ('complete', 'replayed')
     `).run(
       status,
       acknowledgedAt,
@@ -333,7 +364,10 @@ export const episodePromotionRepository = {
       updatedAt,
       ...parameters,
     );
-    if (result.changes !== 1) return null;
+    if (result.changes !== 1) {
+      const current = mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(effectKey) as SqlitePromotionEffectRow | undefined);
+      return current?.status === "complete" || current?.status === "replayed" ? current : null;
+    }
     const row = mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(effectKey) as SqlitePromotionEffectRow);
     if (row) refreshNotificationStatus(input.notificationId, input.sourceRevision);
     return row;
@@ -347,12 +381,23 @@ export const episodePromotionRepository = {
       WHERE status = 'in_progress' AND lease_claimed_at IS NOT NULL AND datetime(lease_claimed_at) <= datetime(?)
     `).all(cutoff) as SqlitePromotionEffectRow[];
     if (rows.length === 0) return [];
-    getDb().prepare(`
-      UPDATE promotion_effects SET status = 'unknown', lease_id = NULL, lease_claimed_at = NULL,
-        next_attempt_at = ?, revision = revision + 1, updated_at = ?
-      WHERE status = 'in_progress' AND lease_claimed_at IS NOT NULL AND datetime(lease_claimed_at) <= datetime(?)
-    `).run(now, now, cutoff);
-    return rows.map((row) => mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(row.effect_key) as SqlitePromotionEffectRow) as PromotionEffectRow);
+    const recovered: PromotionEffectRow[] = [];
+    withImmediateTransaction(() => {
+      for (const row of rows) {
+        const result = getDb().prepare(`
+          UPDATE promotion_effects SET status = 'unknown', lease_id = NULL, lease_claimed_at = NULL,
+            next_attempt_at = ?, revision = revision + 1, updated_at = ?
+          WHERE effect_key = ? AND notification_id = ? AND source_revision = ? AND revision = ?
+            AND lease_id = ? AND status = 'in_progress'
+            AND datetime(lease_claimed_at) <= datetime(?)
+        `).run(now, now, row.effect_key, row.notification_id, row.source_revision, row.revision, row.lease_id, cutoff);
+        if (result.changes === 1) {
+          const recoveredRow = mapEffect(getDb().prepare("SELECT * FROM promotion_effects WHERE effect_key = ?").get(row.effect_key) as SqlitePromotionEffectRow);
+          if (recoveredRow) recovered.push(recoveredRow);
+        }
+      }
+    });
+    return recovered;
   },
 
   listIncompletePromotionEffects(notificationId?: string): PromotionEffectRow[] {

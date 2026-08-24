@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { EpisodePromotionInput } from "../services/episode-promotion.service";
+import type { PromotionEffectRow } from "../database/repositories/episode-promotion.repository";
 import type { PromotionRequest } from "../schemas/episode-promotion";
 
 type Scenario = "contract-outbox-tracer" | "state-replay";
@@ -50,6 +51,7 @@ const run = async (): Promise<void> => {
 
   class FakeTransport {
     readonly requests: Array<{ request: unknown; destinations: string[] }> = [];
+    readonly reconciliations: string[] = [];
     async sendPromotion(request: PromotionRequest, effects: Array<{ destination: string }>): Promise<unknown> {
       this.requests.push({ request, destinations: effects.map((effect) => effect.destination) });
       if (scenarioArg === "state-replay" && this.requests.length === 1) {
@@ -76,6 +78,20 @@ const run = async (): Promise<void> => {
         })),
       };
     }
+
+    async reconcilePromotion(request: PromotionRequest, effect: PromotionEffectRow): Promise<unknown> {
+      this.reconciliations.push(effect.destination);
+      if (scenarioArg === "state-replay" && effect.destination === "advance_access") {
+        return {
+          destination: effect.destination,
+          status: "complete",
+          message_id: "fake-reconciled-message",
+          topic_id: "fake-topic",
+          message_thread_id: "fake-thread",
+        };
+      }
+      return null;
+    }
   }
 
   try {
@@ -98,6 +114,18 @@ const run = async (): Promise<void> => {
     assert.equal(request.destinations.length, 2);
     assert.equal(/\/(?:home|tmp)\//.test(JSON.stringify(request)), false);
     assert.equal(/(?:credential|authorization|token|password)/i.test(JSON.stringify(request)), false);
+    for (const [message, category] of [
+      ["malformed payload", "malformed_payload"],
+      ["authentication rejected", "authentication"],
+      ["permission denied", "permission"],
+      ["missing trailer media", "missing_media"],
+      ["digest mismatch", "digest_mismatch"],
+      ["request timeout", "timeout"],
+      ["transport unavailable", "transport"],
+      ["Telegram service unavailable", "telegram_service"],
+    ] as const) {
+      assert.equal(service.classifyPromotionError(new Error(message)).category, category);
+    }
 
     const transport = new FakeTransport();
     const first = await service.createOrReusePromotionIntent(requestInput, transport);
@@ -119,13 +147,33 @@ const run = async (): Promise<void> => {
 
     assert.equal(first.effects.find((effect) => effect.destination === "guild_trailer")?.status, "complete");
     assert.equal(first.effects.find((effect) => effect.destination === "advance_access")?.status, "unknown");
+    assert.equal(episodePromotionRepository.claimDuePromotionEffects({ notificationId: request.notification_id }).length, 0, "future retry state must not be claimed as due");
+    const preservedGuild = episodePromotionRepository.recordPromotionAcknowledgement({
+      notificationId: request.notification_id,
+      destination: "guild_trailer",
+      sourceRevision: first.notification.sourceRevision,
+      acknowledgement: {
+        destination: "guild_trailer",
+        status: "temporary_failure",
+        error: { category: "transport", description: "stale failure must not overwrite success", retryable: true },
+      },
+    });
+    assert.equal(preservedGuild?.status, "complete", "a late failure must not overwrite a completed sibling");
+    const leasedUnknown = episodePromotionRepository.claimUnknownPromotionEffects({ notificationId: request.notification_id });
+    assert.equal(leasedUnknown.length, 1);
+    const recovered = episodePromotionRepository.recoverExpiredPromotionLeases(new Date(Date.now() + 120_000));
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0]?.status, "unknown");
+    assert.equal(recovered[0]?.leaseId, null);
     const replay = await service.createOrReusePromotionIntent(requestInput, transport);
-    assert.equal(transport.requests.length, 2);
-    assert.deepEqual(transport.requests[1]?.destinations, ["advance_access"]);
+    assert.equal(transport.requests.length, 1, "ambiguous effects must reconcile before another send");
+    assert.deepEqual(transport.reconciliations, ["advance_access"]);
     assert.equal(replay.effects.find((effect) => effect.destination === "guild_trailer")?.attemptCount, 1);
     assert.equal(replay.effects.find((effect) => effect.destination === "advance_access")?.status, "complete");
+    assert.equal(replay.effects.find((effect) => effect.destination === "advance_access")?.topicId, "fake-topic");
+    assert.equal(replay.effects.find((effect) => effect.destination === "advance_access")?.messageThreadId, "fake-thread");
 
-    assert.throws(() => service.createOrReusePromotionIntent({ ...requestInput, title: "Different title" }), /Conflicting promotion payload fingerprint/);
+    await assert.rejects(() => service.createOrReusePromotionIntent({ ...requestInput, title: "Different title" }), /Conflicting promotion payload fingerprint/);
     const incomplete = episodePromotionRepository.listIncompletePromotionEffects(request.notification_id);
     assert.equal(incomplete.length, 0);
     console.log("episode promotion state/replay verifier passed with fake acknowledgement loss and no duplicate send");
