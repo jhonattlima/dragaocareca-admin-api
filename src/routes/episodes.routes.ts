@@ -7,6 +7,7 @@ import { config } from "../config/env";
 import { episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
+import { saveEpisodeAndQueuePromotion } from "../services/episode-promotion-save.service";
 import { refreshCoverMosaicBackground } from "../services/cover-mosaic.service";
 import { episodeRepository } from "../database/repositories/episode.repository";
 import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
@@ -1158,10 +1159,16 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       episodeRepository.markTranscriptionError(created.episodeId, "Draft transcription failed");
     }
 
-    await queueLaunchNotification(created.episodeId);
-    const finalDoc = Object.keys(mediaUpdates).length === 0
-      ? episodeRepository.findByEpisodeId(created.episodeId)
-      : episodeRepository.updateMedia(created.episodeId, mediaUpdates);
+    const finalDoc = config.promotion.enabled
+      ? (await saveEpisodeAndQueuePromotion({
+          episodeId: created.episodeId,
+          payload,
+          mediaUpdates,
+        })).episode
+      : (config.promotion.legacyLaunchEnabled ? await queueLaunchNotification(created.episodeId) : undefined,
+        Object.keys(mediaUpdates).length === 0
+          ? episodeRepository.findByEpisodeId(created.episodeId)
+          : episodeRepository.updateMedia(created.episodeId, mediaUpdates));
     if (!finalDoc) {
       throw new Error("Episode could not be finalized");
     }

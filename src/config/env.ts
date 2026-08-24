@@ -52,6 +52,16 @@ const boundedNonNegativeInteger = (value: string | undefined, defaultValue: numb
   return parsed;
 };
 
+const parseBoolean = (value: string | undefined, defaultValue = false): boolean =>
+  value === undefined ? defaultValue : value.toLowerCase() === "true";
+
+const parsePromotionRetryDelays = (env: Record<string, string | undefined>): [number, number, number, number] => [
+  boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_1_MS, 1_000, "PROMOTION_RETRY_DELAY_1_MS", 3_600_000),
+  boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_2_MS, 5_000, "PROMOTION_RETRY_DELAY_2_MS", 3_600_000),
+  boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_3_MS, 30_000, "PROMOTION_RETRY_DELAY_3_MS", 3_600_000),
+  boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_4_MS, 300_000, "PROMOTION_RETRY_DELAY_4_MS", 3_600_000),
+];
+
 export type HashtagAuthoringConfig = {
   enabled: boolean;
   provider: "gemini" | "groq";
@@ -154,6 +164,17 @@ export const config = {
     apiBaseUrl: process.env.TELEGRAM_API_BASE_URL ?? "https://api.telegram.org",
     pollIntervalMs: Number(process.env.TELEGRAM_POLL_INTERVAL_MS ?? 60000),
     ytDlpCommand: process.env.TELEGRAM_YTDLP_COMMAND ?? "yt-dlp",
+  },
+  promotion: {
+    enabled: parseBoolean(process.env.PROMOTION_ENABLED),
+    botUrl: process.env.PROMOTION_BOT_URL ?? "http://bot:8080/internal/promotions",
+    sharedSecret: process.env.PROMOTION_SHARED_SECRET ?? "",
+    sharedSecretConfigured: Boolean(process.env.PROMOTION_SHARED_SECRET),
+    requestTimeoutMs: boundedPositiveInteger(process.env.PROMOTION_REQUEST_TIMEOUT_MS, 10_000, "PROMOTION_REQUEST_TIMEOUT_MS", 120_000),
+    retryAttempts: boundedPositiveInteger(process.env.PROMOTION_RETRY_ATTEMPTS, 5, "PROMOTION_RETRY_ATTEMPTS", 20),
+    retryBackoffMs: parsePromotionRetryDelays(process.env),
+    pollIntervalMs: boundedPositiveInteger(process.env.PROMOTION_POLL_INTERVAL_MS, 30_000, "PROMOTION_POLL_INTERVAL_MS", 3_600_000),
+    legacyLaunchEnabled: parseBoolean(process.env.PROMOTION_LEGACY_LAUNCH_ENABLED, true),
   },
   spotify: {
     enabled: (process.env.SPOTIFY_METRICS_ENABLED ?? "false").toLowerCase() === "true",

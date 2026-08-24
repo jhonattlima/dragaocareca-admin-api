@@ -6,14 +6,14 @@ import type { EpisodePromotionInput } from "../services/episode-promotion.servic
 import type { PromotionEffectRow } from "../database/repositories/episode-promotion.repository";
 import type { PromotionRequest } from "../schemas/episode-promotion";
 
-type Scenario = "contract-outbox-tracer" | "state-replay";
+type Scenario = "contract-outbox-tracer" | "state-replay" | "post-save-isolation";
 
 const scenarioArg = process.argv.find((argument) => argument.startsWith("--scenario="))?.split("=", 2)[1] as Scenario | undefined;
 const fakeOnly = process.argv.includes("--fake-only");
 
 if (!fakeOnly) throw new Error("This verifier requires --fake-only and never contacts a real transport.");
-if (scenarioArg !== "contract-outbox-tracer" && scenarioArg !== "state-replay") {
-  throw new Error("Use --scenario=contract-outbox-tracer or --scenario=state-replay.");
+if (scenarioArg !== "contract-outbox-tracer" && scenarioArg !== "state-replay" && scenarioArg !== "post-save-isolation") {
+  throw new Error("Use --scenario=contract-outbox-tracer, --scenario=state-replay, or --scenario=post-save-isolation.");
 }
 
 type Fixture = { root: string; database: string; media: string };
@@ -32,6 +32,9 @@ const createFixture = async (): Promise<Fixture> => {
   process.env.MEDIA_BACKUP_ROOT = path.join(media, "backups");
   process.env.MEDIA_BACKUP_EPISODES_DIR = path.join(media, "backups", "episodes");
   process.env.FEED_BASE_LINK = "https://podcast.example/episode/";
+  process.env.PROMOTION_ENABLED = "true";
+  process.env.PROMOTION_BOT_URL = "http://fake.invalid/promotions";
+  process.env.PROMOTION_SHARED_SECRET = "fake-only-secret";
   process.env.FEED_AUDIO_BASE = "https://media.example/audio/";
   process.env.FEED_IMAGE_BASE = "https://media.example/images/";
   process.env.FEED_TITLE = "Fake Podcast";
@@ -42,10 +45,12 @@ const createFixture = async (): Promise<Fixture> => {
 
 const run = async (): Promise<void> => {
   const fixture = await createFixture();
-  const [{ getDb }, { episodePromotionRepository }, service, contract] = await Promise.all([
+  const [{ getDb }, { episodePromotionRepository }, { episodeRepository }, service, saveService, contract] = await Promise.all([
     import("../database/sqlite.js"),
     import("../database/repositories/episode-promotion.repository.js"),
+    import("../database/repositories/episode.repository.js"),
     import("../services/episode-promotion.service.js"),
+    import("../services/episode-promotion-save.service.js"),
     import("../schemas/episode-promotion.js"),
   ]);
 
@@ -54,6 +59,9 @@ const run = async (): Promise<void> => {
     readonly reconciliations: string[] = [];
     async sendPromotion(request: PromotionRequest, effects: Array<{ destination: string }>): Promise<unknown> {
       this.requests.push({ request, destinations: effects.map((effect) => effect.destination) });
+      if (scenarioArg === "post-save-isolation") {
+        throw new Error("request timeout");
+      }
       if (scenarioArg === "state-replay" && this.requests.length === 1) {
         return {
           contract_version: contract.PROMOTION_CONTRACT_VERSION,
@@ -128,6 +136,40 @@ const run = async (): Promise<void> => {
     }
 
     const transport = new FakeTransport();
+    if (scenarioArg === "post-save-isolation") {
+      const episodeId = 50502;
+      const trailerPath = path.join(fixture.media, "episodes", String(episodeId), "trailer.mp4");
+      await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+      await fs.promises.writeFile(trailerPath, Buffer.from("canonical trailer"));
+      getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(episodeId, "Before save", "2026-08-24T00:00:00.000Z");
+      const payload = {
+        episodeId,
+        title: "Saved episode #offline",
+        summary: "Saved without Telegram",
+        pubDate: new Date("2026-08-24T00:00:00.000Z"),
+        explicit: "no" as const,
+        authors: [],
+        guests: [],
+        tags: [],
+        citations: [],
+        musicCredits: [JSON.stringify({ name: "Offline", links: [{ url: "https://example.com" }] })],
+        coverCredits: [],
+      };
+      const saved = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });
+      assert.equal(saved.episode.episodeId, episodeId);
+      assert.equal(saved.intent.notification.notificationId, `episode:${episodeId}`);
+      assert.equal(saved.acknowledgement?.status, "unknown");
+      assert.equal(transport.requests.length, 1);
+      assert.equal(episodeRepository.findByEpisodeId(episodeId)?.title, "Saved episode #offline");
+      assert.equal(fs.existsSync(trailerPath), true);
+      const failedEffect = saved.intent.effects.find((effect) => effect.destination === "guild_trailer");
+      assert.equal(failedEffect?.status, "pending");
+      const persisted = episodePromotionRepository.findPromotionIntent(`episode:${episodeId}`);
+      assert.equal(persisted?.effects.every((effect) => effect.status === "unknown"), true);
+      assert.equal(persisted?.effects.every((effect) => effect.errorCategory === "timeout"), true);
+      console.log("episode post-save isolation passed with fake timeout and committed trailer");
+      return;
+    }
     const first = await service.createOrReusePromotionIntent(requestInput, transport);
     assert.equal(first.effects.length, 2);
     assert.equal(transport.requests.length, 1);

@@ -1,0 +1,125 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+
+import { config } from "../config/env";
+import { episodePromotionRepository, type PromotionIntent } from "../database/repositories/episode-promotion.repository";
+import { episodeRepository, withImmediateTransaction, type EpisodeRow } from "../database/repositories/episode.repository";
+import { episodeSchema, type EpisodeInput } from "../schemas/episode";
+import type { PromotionAcknowledgement } from "../schemas/episode-promotion";
+import {
+  buildEpisodePromotionRequest,
+  dispatchPromotionIntent,
+  getPromotionRequestFingerprint,
+  type PromotionTransport,
+} from "./episode-promotion.service";
+import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath } from "./episode-media-layout.service";
+
+export type EpisodePromotionSaveInput = {
+  episodeId: number;
+  payload: EpisodeInput;
+  mediaUpdates?: Parameters<typeof episodeRepository.updateMedia>[1];
+  transport?: PromotionTransport;
+};
+
+export type EpisodePromotionSaveResult = {
+  episode: EpisodeRow;
+  intent: PromotionIntent;
+  acknowledgement?: PromotionAcknowledgement;
+};
+
+type TrailerFingerprint = {
+  sha256: string;
+  byteCount: number;
+};
+
+const readCanonicalTrailerFingerprint = async (episodeId: number): Promise<TrailerFingerprint> => {
+  const trailerPath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
+  const stats = await fs.promises.stat(trailerPath).catch(() => null);
+  if (!stats?.isFile() || stats.size <= 0) {
+    throw new Error("Canonical trailer media is missing or inaccessible");
+  }
+
+  const hash = createHash("sha256");
+  for await (const chunk of fs.createReadStream(trailerPath)) {
+    hash.update(chunk);
+  }
+  return { sha256: hash.digest("hex"), byteCount: stats.size };
+};
+
+const publicDownloadUrlFor = (episodeId: number): string =>
+  `${config.feed.baseLink.replace(/\/+$/, "")}/${episodeId}`;
+
+const configuredPromotionTransport = (): PromotionTransport => ({
+  async sendPromotion(request, _effects): Promise<unknown> {
+    if (!config.promotion.sharedSecretConfigured) {
+      throw new Error("Promotion service authentication is not configured");
+    }
+    const response = await fetch(config.promotion.botUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${config.promotion.sharedSecret}`,
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(config.promotion.requestTimeoutMs),
+    });
+    if (!response.ok) {
+      throw new Error(`Promotion transport returned HTTP ${response.status}`);
+    }
+    try {
+      return await response.json();
+    } catch {
+      throw new Error("Promotion transport returned a malformed acknowledgement");
+    }
+  },
+});
+
+export const dispatchPromotionAfterCommit = async (
+  notificationId: string,
+  transport?: PromotionTransport,
+): Promise<PromotionAcknowledgement | null> => {
+  if (!config.promotion.enabled && !transport) return null;
+  try {
+    return await dispatchPromotionIntent(notificationId, transport ?? configuredPromotionTransport());
+  } catch (error) {
+    console.warn(
+      "Post-commit episode promotion dispatch failed",
+      error instanceof Error ? error.message.slice(0, 500) : "Unknown promotion dispatch error",
+    );
+    return null;
+  }
+};
+
+export const saveEpisodeAndQueuePromotion = async (
+  input: EpisodePromotionSaveInput,
+): Promise<EpisodePromotionSaveResult> => {
+  const payload = episodeSchema.parse(input.payload);
+  const trailer = await readCanonicalTrailerFingerprint(input.episodeId);
+  const request = buildEpisodePromotionRequest({
+    episodeId: input.episodeId,
+    title: payload.title,
+    episodeNumber: payload.episodeNumber,
+    publicDownloadUrl: publicDownloadUrlFor(input.episodeId),
+    trailerMediaReference: getEpisodeMediaRelativePath(input.episodeId, "trailerVideo"),
+    trailerSha256: trailer.sha256,
+    trailerByteCount: trailer.byteCount,
+  });
+
+  const committed = withImmediateTransaction(() => {
+    const saved = episodeRepository.update(input.episodeId, payload);
+    if (!saved) throw new Error("Episode could not be finalized");
+    const finalEpisode = episodeRepository.updateMedia(input.episodeId, input.mediaUpdates ?? {}) ?? saved;
+    const intent = episodePromotionRepository.upsertPromotionIntent({
+      request,
+      requestFingerprint: getPromotionRequestFingerprint(request),
+      withinTransaction: true,
+    });
+    return { episode: finalEpisode, intent };
+  });
+
+  const acknowledgement = await dispatchPromotionAfterCommit(
+    committed.intent.notification.notificationId,
+    input.transport,
+  );
+  return { ...committed, acknowledgement: acknowledgement ?? undefined };
+};

@@ -61,6 +61,7 @@ export type PromotionIntent = {
 export type UpsertPromotionIntentInput = {
   request: PromotionRequest;
   requestFingerprint: string;
+  withinTransaction?: boolean;
 };
 
 export type ClaimDuePromotionEffectsInput = {
@@ -273,7 +274,7 @@ export const episodePromotionRepository = {
       throw new Error(`Conflicting promotion payload fingerprint for ${request.notification_id}.`);
     }
 
-    withImmediateTransaction(() => {
+    const persist = (): void => {
       getDb().prepare(`
         INSERT INTO promotion_notifications (
           notification_id, episode_id, contract_version, source_revision, request_json,
@@ -311,7 +312,12 @@ export const episodePromotionRepository = {
           ON CONFLICT(notification_id, destination, source_revision) DO NOTHING
         `).run(effectKey, request.notification_id, request.episode_id, destination, request.source_revision, input.requestFingerprint, now, now);
       }
-    });
+    };
+    if (input.withinTransaction) {
+      persist();
+    } else {
+      withImmediateTransaction(persist);
+    }
 
     const notification = selectNotification(request.notification_id);
     if (!notification) throw new Error("Promotion notification was not persisted.");

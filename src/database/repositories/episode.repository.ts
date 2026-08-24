@@ -430,6 +430,19 @@ const fetchOne = (episodeId: number): EpisodeRow | null => {
   return row ? mapRow(row) : null;
 };
 
+export const withImmediateTransaction = <T>(callback: () => T): T => {
+  const database = getDb();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const result = callback();
+    database.exec("COMMIT");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+};
+
 const baseInsert = `
 INSERT INTO episodes (
   episode_id, is_draft, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
