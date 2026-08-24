@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,20 +14,24 @@ type Scenario =
   | "post-save-isolation"
   | "scheduled-update-replay"
   | "private-media-handoff"
-  | "restart-recovery";
+  | "restart-recovery"
+  | "failure-matrix";
 
 const scenarioArg = process.argv.find((argument) => argument.startsWith("--scenario="))?.split("=", 2)[1] as Scenario | undefined;
+const allArg = process.argv.includes("--all");
 const fakeOnly = process.argv.includes("--fake-only");
 
 if (!fakeOnly) throw new Error("This verifier requires --fake-only and never contacts a real transport.");
-if (!scenarioArg || ![
+const scenarios: Scenario[] = [
   "contract-outbox-tracer",
   "state-replay",
   "post-save-isolation",
   "scheduled-update-replay",
   "private-media-handoff",
   "restart-recovery",
-].includes(scenarioArg)) {
+  "failure-matrix",
+];
+if ((!scenarioArg && !allArg) || (scenarioArg && !scenarios.includes(scenarioArg)) || (scenarioArg && allArg)) {
   throw new Error("Use a supported fake-only episode promotion scenario.");
 }
 
@@ -56,8 +62,13 @@ const createFixture = async (): Promise<Fixture> => {
   return { root, database, media };
 };
 
-const run = async (): Promise<void> => {
+const runScenario = async (scenario: Scenario): Promise<void> => {
   const fixture = await createFixture();
+  const originalFetch = globalThis.fetch;
+  let realFetchCalls = 0;
+  globalThis.fetch = (async () => {
+    throw new Error("real fetch is prohibited in fake-only verification");
+  }) as typeof fetch;
   const [{ getDb }, { episodePromotionRepository }, { episodeRepository }, service, saveService, contract] = await Promise.all([
     import("../database/sqlite.js"),
     import("../database/repositories/episode-promotion.repository.js"),
@@ -72,10 +83,10 @@ const run = async (): Promise<void> => {
     readonly reconciliations: string[] = [];
     async sendPromotion(request: PromotionRequest, effects: Array<{ destination: string }>): Promise<unknown> {
       this.requests.push({ request, destinations: effects.map((effect) => effect.destination) });
-      if (scenarioArg === "post-save-isolation") {
+      if (scenario === "post-save-isolation") {
         throw new Error("request timeout");
       }
-      if (scenarioArg === "state-replay" && this.requests.length === 1) {
+      if (scenario === "state-replay" && this.requests.length === 1) {
         return {
           contract_version: contract.PROMOTION_CONTRACT_VERSION,
           notification_id: request.notification_id,
@@ -86,6 +97,7 @@ const run = async (): Promise<void> => {
           ],
         };
       }
+      if (scenario === "failure-matrix") return { malformed: true };
       return {
         contract_version: contract.PROMOTION_CONTRACT_VERSION,
         notification_id: request.notification_id,
@@ -102,7 +114,7 @@ const run = async (): Promise<void> => {
 
     async reconcilePromotion(request: PromotionRequest, effect: PromotionEffectRow): Promise<unknown> {
       this.reconciliations.push(effect.destination);
-      if (scenarioArg === "state-replay" && effect.destination === "advance_access") {
+      if (scenario === "state-replay" && effect.destination === "advance_access") {
         return {
           destination: effect.destination,
           status: "complete",
@@ -149,7 +161,7 @@ const run = async (): Promise<void> => {
     }
 
     const transport = new FakeTransport();
-    if (scenarioArg === "post-save-isolation") {
+    if (scenario === "post-save-isolation") {
       const episodeId = 50502;
       const trailerPath = path.join(fixture.media, "episodes", String(episodeId), "trailer.mp4");
       await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
@@ -181,11 +193,14 @@ const run = async (): Promise<void> => {
       const persisted = episodePromotionRepository.findPromotionIntent(`episode:${episodeId}`);
       assert.equal(persisted?.effects.every((effect) => effect.status === "unknown"), true);
       assert.equal(persisted?.effects.every((effect) => effect.errorCategory === "timeout"), true);
+      assert.ok(persisted?.effects.every((effect) => effect.lastAttemptAt && !Number.isNaN(Date.parse(effect.lastAttemptAt))));
+      assert.equal(JSON.stringify(persisted).includes(fixture.root), false);
+      assert.equal(JSON.stringify(persisted).includes("fake-only-secret"), false);
       console.log("episode post-save isolation passed with fake timeout and committed trailer");
       return;
     }
 
-    if (scenarioArg === "scheduled-update-replay") {
+    if (scenario === "scheduled-update-replay") {
       const { config } = await import("../config/env.js");
       const episodeId = 50503;
       const trailerPath = path.join(fixture.media, "episodes", String(episodeId), "trailer.mp4");
@@ -255,12 +270,7 @@ const run = async (): Promise<void> => {
       return;
     }
 
-    if (scenarioArg === "private-media-handoff") {
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
-        throw new Error("real fetch is prohibited in fake-only verification");
-      }) as typeof fetch;
-      try {
+    if (scenario === "private-media-handoff") {
         const request = service.buildEpisodePromotionRequest({
           episodeId: 50505,
           title: "Private handoff #offline",
@@ -273,23 +283,23 @@ const run = async (): Promise<void> => {
           assert.equal(reference.includes("/tmp/") || reference.includes("/home/"), false);
           return Buffer.from("fake private trailer");
         };
-        const media = await resolvePrivateTrailer(request.trailer.media_reference);
-        assert.equal(media.length > 0, true);
+        const canonicalPath = path.join(fixture.media, "episodes", "50505", "trailer.mp4");
+        await fs.promises.mkdir(path.dirname(canonicalPath), { recursive: true });
+        await fs.promises.writeFile(canonicalPath, Buffer.from("fake private trailer"));
+        const mediaService = await import("../services/episode-promotion-media.service.js");
+        const media = await mediaService.getEpisodePromotionMedia(50505);
+        const resolvedMedia = await resolvePrivateTrailer(request.trailer.media_reference);
+        assert.equal(media.byteCount > 0, true);
+        assert.equal(resolvedMedia.length, media.byteCount);
+        assert.equal(media.sha256, createHash("sha256").update("fake private trailer").digest("hex"));
+        assert.equal(media.filePath.includes(fixture.root), true);
         assert.equal(/(?:credential|authorization|token|password)/i.test(JSON.stringify(request)), false);
         await assert.rejects(() => globalThis.fetch("http://real.invalid"), /prohibited/);
         console.log("private media handoff passed with logical reference and real fetch guard");
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
       return;
     }
 
-    if (scenarioArg === "restart-recovery") {
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
-        throw new Error("real fetch is prohibited in fake-only verification");
-      }) as typeof fetch;
-      try {
+    if (scenario === "restart-recovery") {
         const intent = episodePromotionRepository.upsertPromotionIntent({
           request,
           requestFingerprint: service.getPromotionRequestFingerprint(request),
@@ -323,11 +333,55 @@ const run = async (): Promise<void> => {
         assert.equal(episodePromotionRepository.listIncompletePromotionEffects(request.notification_id).length, 0);
         await assert.rejects(() => globalThis.fetch("http://real.invalid"), /prohibited/);
         console.log("restart recovery passed with stale-lease reconciliation and no real transport");
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
       return;
     }
+
+    if (scenario === "failure-matrix") {
+      const malformedAcknowledgement = await service.createOrReusePromotionIntent(requestInput, transport);
+      assert.equal(malformedAcknowledgement.effects.every((effect) => effect.status === "permanent_failure"), true);
+      assert.equal(malformedAcknowledgement.effects.every((effect) => effect.errorCategory === "malformed_payload"), true);
+      assert.equal(malformedAcknowledgement.effects.every((effect) => effect.lastAttemptAt && !Number.isNaN(Date.parse(effect.lastAttemptAt))), true);
+
+      const { postEpisodePromotion } = await import("../services/episode-promotion-client.service.js");
+      const fakeResponse = (status: number, body: unknown): Response => new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+      const fetchFor = (status: number, body: unknown) => async (): Promise<Response> => fakeResponse(status, body);
+      await assert.rejects(() => postEpisodePromotion(request, [], {
+        fetchImplementation: fetchFor(401, { message: "unauthorized" }),
+        endpoint: "http://fake.invalid/internal/promotions",
+        sharedSecret: "fake-only-secret",
+      }), /authentication or permission/);
+      await assert.rejects(() => postEpisodePromotion(request, [], {
+        fetchImplementation: fetchFor(503, { message: "provider unavailable" }),
+        endpoint: "http://fake.invalid/internal/promotions",
+        sharedSecret: "fake-only-secret",
+      }), /Telegram service unavailable/);
+      await assert.rejects(() => postEpisodePromotion(request, [], {
+        fetchImplementation: fetchFor(200, { malformed: true }),
+        endpoint: "http://fake.invalid/internal/promotions",
+        sharedSecret: "fake-only-secret",
+      }), /malformed payload acknowledgement/);
+      await assert.rejects(() => postEpisodePromotion(request, [], {
+        fetchImplementation: async (_endpoint: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+        endpoint: "http://fake.invalid/internal/promotions",
+        sharedSecret: "fake-only-secret",
+        timeoutMs: 1,
+      }), /timed out/);
+      await assert.rejects(() => postEpisodePromotion({ ...request, title: "#invalid" } as PromotionRequest, [], {
+        fetchImplementation: fetchFor(200, {}),
+        endpoint: "http://fake.invalid/internal/promotions",
+        sharedSecret: "fake-only-secret",
+      }));
+      assert.equal(JSON.stringify(malformedAcknowledgement).includes("fake-only-secret"), false);
+      assert.equal(JSON.stringify(malformedAcknowledgement).includes(fixture.root), false);
+      console.log("promotion failure matrix passed with malformed acknowledgement, auth, permission-style, timeout, service failure, and safe error guards");
+      return;
+    }
+
     const first = await service.createOrReusePromotionIntent(requestInput, transport);
     assert.equal(first.effects.length, 2);
     assert.equal(transport.requests.length, 1);
@@ -336,7 +390,7 @@ const run = async (): Promise<void> => {
     assert.equal((getDb().prepare("SELECT COUNT(*) AS count FROM promotion_notifications WHERE notification_id = ?").get(request.notification_id) as { count: number }).count, 1);
     assert.equal((getDb().prepare("SELECT COUNT(*) AS count FROM promotion_effects WHERE notification_id = ?").get(request.notification_id) as { count: number }).count, 2);
 
-    if (scenarioArg === "contract-outbox-tracer") {
+    if (scenario === "contract-outbox-tracer") {
       assert.ok(first.effects.every((effect) => effect.status === "complete"));
       const replay = await service.createOrReusePromotionIntent(requestInput, transport);
       assert.equal(replay.effects.filter((effect) => effect.status === "complete").length, 2);
@@ -378,9 +432,26 @@ const run = async (): Promise<void> => {
     assert.equal(incomplete.length, 0);
     console.log("episode promotion state/replay verifier passed with fake acknowledgement loss and no duplicate send");
   } finally {
+    assert.equal(realFetchCalls, 0, "fake-only verifier must not call the real fetch implementation");
+    globalThis.fetch = originalFetch;
     getDb().close();
     await fs.promises.rm(fixture.root, { recursive: true, force: true });
   }
+};
+
+const run = async (): Promise<void> => {
+  if (allArg) {
+    for (const scenario of scenarios) {
+      const result = spawnSync(process.execPath, [process.argv[1]!, `--scenario=${scenario}`, "--fake-only"], {
+        stdio: "inherit",
+        env: process.env,
+      });
+      if (result.status !== 0) throw new Error(`Fake-only scenario failed: ${scenario}`);
+    }
+    console.log(`all ${scenarios.length} episode promotion scenarios passed with fake transport/media only`);
+    return;
+  }
+  await runScenario(scenarioArg!);
 };
 
 run().catch((error: unknown) => {
