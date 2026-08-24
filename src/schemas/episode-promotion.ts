@@ -79,29 +79,109 @@ export const promotionAcknowledgementSchema = z.object({
 export type PromotionAcknowledgement = z.infer<typeof promotionAcknowledgementSchema>;
 
 export type PromotionContractProjection = {
+  apiSourceRevision: typeof PROMOTION_CONTRACT_SOURCE_REVISION;
   contractVersion: typeof PROMOTION_CONTRACT_VERSION;
-  sourceRevision: typeof PROMOTION_CONTRACT_SOURCE_REVISION;
-  destinations: PromotionDestination[];
-  acknowledgementStatuses: Array<PromotionAcknowledgement["status"]>;
-  errorCategories: Array<PromotionError["category"]>;
+  request: {
+    method: "POST";
+    path: "/internal/promotions";
+    requiredFields: string[];
+    destinationKeys: PromotionDestination[];
+    effectKeys: string[];
+  };
+  acknowledgement: {
+    statusValues: Array<PromotionAcknowledgement["status"]>;
+    effectKeys: string[];
+    errorCategories: Array<PromotionError["category"]>;
+  };
+  authentication: {
+    scheme: "bearer";
+    audience: "promotion-bot-service";
+    userJwtAllowed: false;
+    authBypassAllowed: false;
+  };
+  timeout: {
+    httpStatuses: [408, 504];
+    classes: ["timeout", "transport", "telegram_service"];
+    acknowledgementRequired: true;
+  };
+  unknownEffect: {
+    status: "unknown";
+    reconcileBeforeRetry: true;
+    blindResend: false;
+  };
+  media: {
+    method: "GET";
+    path: "/internal/promotion-media/{episodeId}/trailer-video";
+    requestHeaders: ["authorization"];
+    responseHeaders: ["cache-control", "x-content-type-options", "content-type", "content-length", "x-content-sha256", "digest"];
+    contentType: "video/mp4";
+    logicalReferencePattern: "^episodes/[1-9][0-9]*/trailer\\.mp4$";
+    publicExposure: false;
+    hostPathExposure: false;
+  };
 };
 
 export const getPromotionContractProjection = (): PromotionContractProjection => ({
+  apiSourceRevision: PROMOTION_CONTRACT_SOURCE_REVISION,
   contractVersion: PROMOTION_CONTRACT_VERSION,
-  sourceRevision: PROMOTION_CONTRACT_SOURCE_REVISION,
-  destinations: ["guild_trailer", "advance_access"],
-  acknowledgementStatuses: ["complete", "replayed", "temporary_failure", "permanent_failure", "unknown"],
-  errorCategories: [
-    "malformed_payload",
-    "authentication",
-    "permission",
-    "missing_media",
-    "digest_mismatch",
-    "timeout",
-    "transport",
-    "telegram_service",
-    "unknown",
-  ],
+  request: {
+    method: "POST",
+    path: "/internal/promotions",
+    requiredFields: [
+      "contract_version",
+      "source_revision",
+      "notification_id",
+      "episode_id",
+      "episode_number",
+      "title",
+      "public_download_url",
+      "trailer",
+      "destinations",
+    ],
+    destinationKeys: ["guild_trailer", "advance_access"],
+    effectKeys: ["destination", "status", "message_id", "file_id", "topic_id", "message_thread_id", "acknowledged_at", "error"],
+  },
+  acknowledgement: {
+    statusValues: ["complete", "replayed", "temporary_failure", "permanent_failure", "unknown"],
+    effectKeys: ["destination", "status", "message_id", "file_id", "topic_id", "message_thread_id", "acknowledged_at", "error"],
+    errorCategories: [
+      "malformed_payload",
+      "authentication",
+      "permission",
+      "missing_media",
+      "digest_mismatch",
+      "timeout",
+      "transport",
+      "telegram_service",
+      "unknown",
+    ],
+  },
+  authentication: {
+    scheme: "bearer",
+    audience: "promotion-bot-service",
+    userJwtAllowed: false,
+    authBypassAllowed: false,
+  },
+  timeout: {
+    httpStatuses: [408, 504],
+    classes: ["timeout", "transport", "telegram_service"],
+    acknowledgementRequired: true,
+  },
+  unknownEffect: {
+    status: "unknown",
+    reconcileBeforeRetry: true,
+    blindResend: false,
+  },
+  media: {
+    method: "GET",
+    path: "/internal/promotion-media/{episodeId}/trailer-video",
+    requestHeaders: ["authorization"],
+    responseHeaders: ["cache-control", "x-content-type-options", "content-type", "content-length", "x-content-sha256", "digest"],
+    contentType: "video/mp4",
+    logicalReferencePattern: "^episodes/[1-9][0-9]*/trailer\\.mp4$",
+    publicExposure: false,
+    hostPathExposure: false,
+  },
 });
 
 export const fingerprintPromotionRequest = (request: PromotionRequest): string =>

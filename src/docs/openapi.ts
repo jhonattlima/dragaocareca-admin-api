@@ -1,4 +1,10 @@
 import swaggerJsdoc from "swagger-jsdoc";
+import {
+  getPromotionContractProjection,
+  PROMOTION_CONTRACT_SOURCE_REVISION,
+  PROMOTION_CONTRACT_VERSION,
+  type PromotionContractProjection,
+} from "../schemas/episode-promotion";
 
 export const swaggerSpec = swaggerJsdoc({
   definition: {
@@ -18,8 +24,79 @@ export const swaggerSpec = swaggerJsdoc({
           scheme: "bearer",
           bearerFormat: "JWT",
         },
+        promotionServiceAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "service-token",
+          description: "Dedicated private API-to-bot service credential. User JWT and AUTH_BYPASS are not valid for this boundary.",
+        },
       },
       schemas: {
+        PromotionError: {
+          type: "object",
+          additionalProperties: false,
+          required: ["category", "description", "retryable"],
+          properties: {
+            category: {
+              type: "string",
+              enum: ["malformed_payload", "authentication", "permission", "missing_media", "digest_mismatch", "timeout", "transport", "telegram_service", "unknown"],
+            },
+            description: { type: "string", minLength: 1, maxLength: 500, description: "Safe bounded description; credentials, paths, raw provider responses, and chat identifiers are excluded." },
+            retryable: { type: "boolean" },
+          },
+        },
+        PromotionDestinationAcknowledgement: {
+          type: "object",
+          additionalProperties: false,
+          required: ["destination", "status"],
+          properties: {
+            destination: { type: "string", enum: ["guild_trailer", "advance_access"] },
+            status: { type: "string", enum: ["complete", "replayed", "temporary_failure", "permanent_failure", "unknown"] },
+            message_id: { type: "string", nullable: true, maxLength: 128 },
+            file_id: { type: "string", nullable: true, maxLength: 256 },
+            topic_id: { type: "string", nullable: true, maxLength: 128 },
+            message_thread_id: { type: "string", nullable: true, maxLength: 128 },
+            acknowledged_at: { type: "string", format: "date-time", nullable: true },
+            error: { allOf: [{ $ref: "#/components/schemas/PromotionError" }], nullable: true },
+          },
+        },
+        PromotionAcknowledgement: {
+          type: "object",
+          additionalProperties: false,
+          required: ["contract_version", "notification_id", "status", "effects"],
+          properties: {
+            contract_version: { type: "string", enum: [PROMOTION_CONTRACT_VERSION] },
+            notification_id: { type: "string", pattern: "^episode:[1-9][0-9]*$" },
+            status: { type: "string", enum: ["complete", "replayed", "temporary_failure", "permanent_failure", "unknown"] },
+            effects: { type: "array", minItems: 1, maxItems: 2, items: { $ref: "#/components/schemas/PromotionDestinationAcknowledgement" } },
+          },
+        },
+        PromotionRequest: {
+          type: "object",
+          additionalProperties: false,
+          required: ["contract_version", "source_revision", "notification_id", "episode_id", "episode_number", "title", "public_download_url", "trailer", "destinations"],
+          properties: {
+            contract_version: { type: "string", enum: [PROMOTION_CONTRACT_VERSION] },
+            source_revision: { type: "string", pattern: `^${PROMOTION_CONTRACT_SOURCE_REVISION}:[a-f0-9]{64}$` },
+            notification_id: { type: "string", pattern: "^episode:[1-9][0-9]*$" },
+            episode_id: { type: "integer", minimum: 1 },
+            episode_number: { type: "integer", minimum: 1 },
+            title: { type: "string", minLength: 1, maxLength: 300, description: "Hashtag-free API-prepared title." },
+            public_download_url: { type: "string", format: "uri" },
+            trailer: {
+              type: "object",
+              additionalProperties: false,
+              required: ["media_reference", "sha256", "byte_count", "mime_type"],
+              properties: {
+                media_reference: { type: "string", pattern: "^episodes/[1-9][0-9]*/trailer\\.mp4$", description: "Logical reference only; never a host path or public/static media URL." },
+                sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                byte_count: { type: "integer", minimum: 1 },
+                mime_type: { type: "string", enum: ["video/mp4"] },
+              },
+            },
+            destinations: { type: "array", minItems: 2, maxItems: 2, uniqueItems: true, items: { type: "string", enum: ["guild_trailer", "advance_access"] } },
+          },
+        },
         GoogleLoginRequest: {
           type: "object",
           required: ["idToken"],
@@ -543,6 +620,94 @@ export const swaggerSpec = swaggerJsdoc({
       },
     },
     paths: {
+      "/internal/promotions": {
+        post: {
+          tags: ["Internal Promotion"],
+          summary: "Accept one prepared episode promotion",
+          description: "Private API-to-bot contract. The API prepares episode identity, title, public URL, canonical trailer digest, destination policy, retry identity, and scheduling eligibility. The bot only performs Telegram side effects and returns per-destination acknowledgement state.",
+          security: [{ promotionServiceAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/PromotionRequest" },
+                examples: {
+                  redactionSafe: {
+                    value: {
+                      contract_version: PROMOTION_CONTRACT_VERSION,
+                      source_revision: `${PROMOTION_CONTRACT_SOURCE_REVISION}:${"0".repeat(64)}`,
+                      notification_id: "episode:42",
+                      episode_id: 42,
+                      episode_number: 42,
+                      title: "DC 42 - Example episode",
+                      public_download_url: "https://example.invalid/episode/42",
+                      trailer: { media_reference: "episodes/42/trailer.mp4", sha256: "0".repeat(64), byte_count: 1024, mime_type: "video/mp4" },
+                      destinations: ["guild_trailer", "advance_access"],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Per-destination acknowledgement. Unknown effects require reconciliation before retry and never imply blind re-send.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/PromotionAcknowledgement" },
+                  examples: {
+                    redactionSafe: {
+                      value: {
+                        contract_version: PROMOTION_CONTRACT_VERSION,
+                        notification_id: "episode:42",
+                        status: "complete",
+                        effects: [
+                          { destination: "guild_trailer", status: "complete", message_id: "example-message-id", file_id: "example-file-id", acknowledged_at: "2026-01-01T00:00:00.000Z" },
+                          { destination: "advance_access", status: "replayed", message_id: "example-topic-message-id", topic_id: "example-topic-id", message_thread_id: "example-thread-id", acknowledged_at: "2026-01-01T00:00:00.000Z" },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Malformed payload; no Telegram side effect is implied." },
+            "401": { description: "Dedicated service authentication missing or invalid; user JWT and AUTH_BYPASS are not accepted." },
+            "403": { description: "Service credential lacks the private contract permission." },
+            "408": { description: "Bounded request timeout; the effect may be unknown and must be reconciled by stable identity." },
+            "422": { description: "Acknowledgement or request semantics rejected safely." },
+            "500": { description: "Telegram service failure; API retains durable per-destination retry evidence." },
+            "504": { description: "Transport timeout after possible side effect; API marks the effect unknown until reconciliation." },
+          },
+        },
+      },
+      "/internal/promotion-media/{episodeId}/trailer-video": {
+        get: {
+          tags: ["Internal Promotion"],
+          summary: "Stream one canonical trailer video to the promotion consumer",
+          description: "Private service-authenticated logical media handoff. The route accepts a positive episode ID only, resolves the API-owned canonical artifact, and never accepts or returns a host path or public/static media URL.",
+          security: [{ promotionServiceAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          responses: {
+            "200": {
+              description: "Canonical MP4 trailer bytes.",
+              headers: {
+                "Cache-Control": { schema: { type: "string", example: "no-store" } },
+                "X-Content-Type-Options": { schema: { type: "string", example: "nosniff" } },
+                "Content-Type": { schema: { type: "string", example: "video/mp4" } },
+                "Content-Length": { schema: { type: "integer", minimum: 1 } },
+                "X-Content-SHA256": { schema: { type: "string", pattern: "^[a-f0-9]{64}$" } },
+                Digest: { schema: { type: "string", example: "sha-256=base64-digest" } },
+              },
+              content: { "video/mp4": { schema: { type: "string", format: "binary" } } },
+            },
+            "400": { description: "Invalid positive episode ID." },
+            "401": { description: "Dedicated service authentication missing or invalid; AUTH_BYPASS cannot satisfy this route." },
+            "404": { description: "Canonical trailer media is unavailable." },
+            "503": { description: "Private promotion media service is not configured." },
+          },
+        },
+      },
       "/health": {
         get: {
           tags: ["System"],
@@ -1219,3 +1384,73 @@ export const swaggerSpec = swaggerJsdoc({
   },
   apis: [],
 });
+
+type OpenApiSchema = {
+  required?: string[];
+  properties?: Record<string, OpenApiSchema>;
+  enum?: string[];
+  items?: OpenApiSchema;
+};
+
+type OpenApiDocument = {
+  components?: {
+    schemas?: Record<string, OpenApiSchema>;
+    securitySchemes?: Record<string, { scheme?: string }>;
+  };
+  paths?: Record<string, {
+    post?: { responses?: Record<string, unknown>; security?: Array<Record<string, unknown>> };
+    get?: { responses?: Record<string, unknown>; security?: Array<Record<string, unknown>> };
+  }>;
+};
+
+export const getPromotionOpenApiProjection = (spec: unknown = swaggerSpec): PromotionContractProjection => {
+  const document = spec as OpenApiDocument;
+  const schemas = document.components?.schemas ?? {};
+  const requestSchema = schemas.PromotionRequest;
+  const acknowledgementSchema = schemas.PromotionAcknowledgement;
+  const destinationAcknowledgementSchema = schemas.PromotionDestinationAcknowledgement;
+  const errorSchema = schemas.PromotionError;
+  const requestPath = document.paths?.["/internal/promotions"]?.post;
+  const mediaPath = document.paths?.["/internal/promotion-media/{episodeId}/trailer-video"]?.get;
+  const serviceAuth = document.components?.securitySchemes?.promotionServiceAuth;
+  if (!requestSchema || !acknowledgementSchema || !destinationAcknowledgementSchema || !errorSchema || !requestPath || !mediaPath || !serviceAuth) {
+    throw new Error("Promotion OpenAPI projection is incomplete.");
+  }
+
+  const base = getPromotionContractProjection();
+  const requestDestinations = (requestSchema.properties?.destinations?.items?.enum ?? []) as PromotionContractProjection["request"]["destinationKeys"];
+  const acknowledgementStatuses = (acknowledgementSchema.properties?.status?.enum ?? []) as PromotionContractProjection["acknowledgement"]["statusValues"];
+  const errorCategories = (errorSchema.properties?.category?.enum ?? []) as PromotionContractProjection["acknowledgement"]["errorCategories"];
+  const mediaResponseHeaders = ["cache-control", "x-content-type-options", "content-type", "content-length", "x-content-sha256", "digest"] as PromotionContractProjection["media"]["responseHeaders"];
+  const documentedResponseStatuses = Object.keys(requestPath.responses ?? {});
+  if (!documentedResponseStatuses.includes("408") || !documentedResponseStatuses.includes("504")) {
+    throw new Error("Promotion OpenAPI projection is missing bounded timeout responses.");
+  }
+  if (serviceAuth.scheme !== base.authentication.scheme) {
+    throw new Error("Promotion OpenAPI projection has the wrong authentication scheme.");
+  }
+
+  return {
+    ...base,
+    request: {
+      ...base.request,
+      method: "POST",
+      path: "/internal/promotions",
+      requiredFields: [...(requestSchema.required ?? [])],
+      destinationKeys: [...requestDestinations],
+      effectKeys: [...(Object.keys(destinationAcknowledgementSchema.properties ?? {}))],
+    },
+    acknowledgement: {
+      ...base.acknowledgement,
+      statusValues: [...acknowledgementStatuses],
+      effectKeys: [...(Object.keys(destinationAcknowledgementSchema.properties ?? {}))],
+      errorCategories: [...errorCategories],
+    },
+    media: {
+      ...base.media,
+      method: "GET",
+      path: "/internal/promotion-media/{episodeId}/trailer-video",
+      responseHeaders: mediaResponseHeaders,
+    },
+  };
+};

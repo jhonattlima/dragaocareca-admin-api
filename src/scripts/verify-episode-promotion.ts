@@ -17,9 +17,12 @@ type Scenario =
   | "restart-recovery"
   | "failure-matrix";
 
-const scenarioArg = process.argv.find((argument) => argument.startsWith("--scenario="))?.split("=", 2)[1] as Scenario | undefined;
+type NamedScenario = Scenario | "contract-parity";
+
+const scenarioArg = process.argv.find((argument) => argument.startsWith("--scenario="))?.split("=", 2)[1] as NamedScenario | undefined;
 const allArg = process.argv.includes("--all");
 const fakeOnly = process.argv.includes("--fake-only");
+const fixtureArg = process.argv.find((argument) => argument.startsWith("--fixture="))?.split("=", 2)[1];
 
 if (!fakeOnly) throw new Error("This verifier requires --fake-only and never contacts a real transport.");
 const scenarios: Scenario[] = [
@@ -31,9 +34,70 @@ const scenarios: Scenario[] = [
   "restart-recovery",
   "failure-matrix",
 ];
-if ((!scenarioArg && !allArg) || (scenarioArg && !scenarios.includes(scenarioArg)) || (scenarioArg && allArg)) {
+if ((!scenarioArg && !allArg) || (scenarioArg && scenarioArg !== "contract-parity" && !scenarios.includes(scenarioArg)) || (scenarioArg && allArg)) {
   throw new Error("Use a supported fake-only episode promotion scenario.");
 }
+
+const canonicalize = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, canonicalize(entry)]));
+  }
+  return value;
+};
+
+const projectionDiff = (left: unknown, right: unknown, prefix = "$"): string[] => {
+  if (JSON.stringify(left) === JSON.stringify(right)) return [];
+  if (Array.isArray(left) && Array.isArray(right)) return [`${prefix}: ${JSON.stringify(left)} !== ${JSON.stringify(right)}`];
+  if (left && typeof left === "object" && right && typeof right === "object") {
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const keys = [...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])].sort();
+    return keys.flatMap((key) => projectionDiff(leftRecord[key], rightRecord[key], `${prefix}.${key}`));
+  }
+  return [`${prefix}: ${JSON.stringify(left)} !== ${JSON.stringify(right)}`];
+};
+
+export const verifyEpisodePromotionParity = async (fixturePath: string): Promise<void> => {
+  const [{ getPromotionContractProjection, promotionAcknowledgementSchema, promotionRequestSchema, PROMOTION_CONTRACT_SOURCE_REVISION, PROMOTION_CONTRACT_VERSION }, { swaggerSpec, getPromotionOpenApiProjection }] = await Promise.all([
+    import("../schemas/episode-promotion.js"),
+    import("../docs/openapi.js"),
+  ]);
+  const fixtureText = await fs.promises.readFile(fixturePath, "utf8");
+  const fixture = JSON.parse(fixtureText) as {
+    api_source_revision?: unknown;
+    contract_version?: unknown;
+    projection?: unknown;
+    wire_contract?: { request_example?: unknown; acknowledgement_example?: unknown };
+  };
+  assert.equal(fixture.api_source_revision, PROMOTION_CONTRACT_SOURCE_REVISION);
+  assert.equal(fixture.contract_version, PROMOTION_CONTRACT_VERSION);
+  assert.ok(fixture.projection, "central fixture must contain a contract projection");
+  const zodProjection = getPromotionContractProjection();
+  const openApiProjection = getPromotionOpenApiProjection(swaggerSpec);
+  const canonicalZod = canonicalize(zodProjection);
+  const parityTargets: Array<[string, unknown]> = [
+    ["OpenAPI", openApiProjection],
+    ["central fixture", fixture.projection],
+  ];
+  for (const [label, target] of parityTargets) {
+    const differences = projectionDiff(canonicalZod, canonicalize(target));
+    if (differences.length > 0) throw new Error(`${label} promotion contract parity mismatch:\n${differences.join("\n")}`);
+  }
+
+  const requestExample = promotionRequestSchema.parse(fixture.wire_contract?.request_example);
+  const acknowledgementExample = promotionAcknowledgementSchema.parse(fixture.wire_contract?.acknowledgement_example);
+  assert.equal(requestExample.contract_version, PROMOTION_CONTRACT_VERSION);
+  assert.equal(acknowledgementExample.contract_version, PROMOTION_CONTRACT_VERSION);
+  assert.equal(requestExample.trailer.media_reference.startsWith("episodes/"), true);
+  assert.equal(/(^|\s)#\S+/.test(requestExample.title), false);
+  assert.equal(acknowledgementExample.effects.length, 2);
+  assert.equal(new Set(acknowledgementExample.effects.map((effect) => effect.destination)).size, 2);
+  assert.equal(/(?:\/home\/|\/tmp\/|fake-only-secret|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|BEGIN [A-Z ]+ KEY)/i.test(fixtureText), false);
+  console.log(`promotion contract parity passed for ${PROMOTION_CONTRACT_VERSION} at ${PROMOTION_CONTRACT_SOURCE_REVISION}`);
+};
 
 type Fixture = { root: string; database: string; media: string };
 
@@ -449,6 +513,11 @@ const run = async (): Promise<void> => {
       if (result.status !== 0) throw new Error(`Fake-only scenario failed: ${scenario}`);
     }
     console.log(`all ${scenarios.length} episode promotion scenarios passed with fake transport/media only`);
+    return;
+  }
+  if (scenarioArg === "contract-parity") {
+    if (!fixtureArg) throw new Error("The contract-parity scenario requires --fixture=/path/to/05-promotion-contract.json.");
+    await verifyEpisodePromotionParity(path.resolve(fixtureArg));
     return;
   }
   await runScenario(scenarioArg!);
