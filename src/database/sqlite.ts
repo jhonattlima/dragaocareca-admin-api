@@ -134,6 +134,53 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes(pub_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_launch_state ON episodes(launch_notification_state, pub_date);
 
+CREATE TABLE IF NOT EXISTS promotion_notifications (
+  notification_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  contract_version TEXT NOT NULL,
+  source_revision TEXT NOT NULL,
+  request_json TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  source_bytes INTEGER NOT NULL CHECK (source_bytes > 0),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'partial', 'complete')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (notification_id, source_revision)
+);
+
+CREATE TABLE IF NOT EXISTS promotion_effects (
+  effect_key TEXT PRIMARY KEY,
+  notification_id TEXT NOT NULL REFERENCES promotion_notifications(notification_id) ON DELETE CASCADE,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  destination TEXT NOT NULL CHECK (destination IN ('guild_trailer', 'advance_access')),
+  source_revision TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'complete', 'replayed', 'temporary_failure', 'permanent_failure', 'unknown')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  lease_id TEXT,
+  lease_claimed_at TEXT,
+  last_attempt_at TEXT,
+  next_attempt_at TEXT,
+  acknowledged_at TEXT,
+  message_id TEXT,
+  file_id TEXT,
+  topic_id TEXT,
+  message_thread_id TEXT,
+  error_category TEXT,
+  error_description TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (notification_id, destination, source_revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotion_effects_due
+  ON promotion_effects(status, next_attempt_at, created_at, effect_key);
+CREATE INDEX IF NOT EXISTS idx_promotion_effects_notification
+  ON promotion_effects(notification_id, source_revision, destination);
+
 -- D-12/D-13/D-14: durable opaque artifact-job state, bounded public progress,
 -- and selector-only source evidence for cache revalidation.
 CREATE TABLE IF NOT EXISTS artifact_jobs (
@@ -402,8 +449,60 @@ export const getDb = (): DatabaseSync => {
     ensureEpisodeTrailerVideoDraftTable(db);
     ensureYoutubeTrailerJobColumns(db);
     ensureYoutubeHashtagCacheTables(db);
+    ensureEpisodePromotionTables(db);
   }
   return db;
+};
+
+const ensureEpisodePromotionTables = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS promotion_notifications (
+      notification_id TEXT PRIMARY KEY,
+      episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+      contract_version TEXT NOT NULL,
+      source_revision TEXT NOT NULL,
+      request_json TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      source_sha256 TEXT NOT NULL,
+      source_bytes INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS promotion_effects (
+      effect_key TEXT PRIMARY KEY,
+      notification_id TEXT NOT NULL REFERENCES promotion_notifications(notification_id) ON DELETE CASCADE,
+      episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+      destination TEXT NOT NULL,
+      source_revision TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 0,
+      lease_id TEXT,
+      lease_claimed_at TEXT,
+      last_attempt_at TEXT,
+      next_attempt_at TEXT,
+      acknowledged_at TEXT,
+      message_id TEXT,
+      file_id TEXT,
+      topic_id TEXT,
+      message_thread_id TEXT,
+      error_category TEXT,
+      error_description TEXT,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promotion_notifications_source
+      ON promotion_notifications(notification_id, source_revision);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promotion_effects_identity
+      ON promotion_effects(notification_id, destination, source_revision);
+    CREATE INDEX IF NOT EXISTS idx_promotion_effects_due
+      ON promotion_effects(status, next_attempt_at, created_at, effect_key);
+    CREATE INDEX IF NOT EXISTS idx_promotion_effects_notification
+      ON promotion_effects(notification_id, source_revision, destination);
+  `);
 };
 
 const ensureYoutubeHashtagCacheTables = (database: DatabaseSync): void => {
