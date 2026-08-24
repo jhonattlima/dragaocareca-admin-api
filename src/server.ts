@@ -11,6 +11,7 @@ import { startYouTubeMetricsWorker } from "./workers/youtube-metrics.worker";
 import { startYoutubeTrailerJobWorker } from "./workers/youtube-trailer-job.worker";
 import { startTelegramBotWorker } from "./services/telegram-bot.worker";
 import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-authoring.worker";
+import { startEpisodePromotionWorker } from "./workers/episode-promotion.worker";
 
 type ConsoleMethod = (...args: unknown[]) => void;
 
@@ -49,6 +50,10 @@ const bootstrap = async (): Promise<void> => {
     await startYoutubeTrailerJobWorker();
   } else if (config.youtube.trailerJob.enabled) {
     console.info("YouTube trailer job worker disabled by DISABLE_BACKGROUND_WORKERS=true");
+  }
+
+  if (config.promotion.activeOwner === "promotion" && !backgroundWorkersDisabled) {
+    await startEpisodePromotionWorker();
   }
 
   if (backgroundWorkersDisabled) {
