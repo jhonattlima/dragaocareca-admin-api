@@ -62,6 +62,9 @@ const parsePromotionRetryDelays = (env: Record<string, string | undefined>): [nu
   boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_4_MS, 300_000, "PROMOTION_RETRY_DELAY_4_MS", 3_600_000),
 ];
 
+const promotionEnabled = parseBoolean(process.env.PROMOTION_ENABLED);
+const legacyLaunchEnabled = parseBoolean(process.env.PROMOTION_LEGACY_LAUNCH_ENABLED, true);
+
 export type HashtagAuthoringConfig = {
   enabled: boolean;
   provider: "gemini" | "groq";
@@ -166,7 +169,7 @@ export const config = {
     ytDlpCommand: process.env.TELEGRAM_YTDLP_COMMAND ?? "yt-dlp",
   },
   promotion: {
-    enabled: parseBoolean(process.env.PROMOTION_ENABLED),
+    enabled: promotionEnabled,
     botUrl: process.env.PROMOTION_BOT_URL ?? "http://bot:8080/internal/promotions",
     sharedSecret: process.env.PROMOTION_SHARED_SECRET ?? "",
     sharedSecretConfigured: Boolean(process.env.PROMOTION_SHARED_SECRET),
@@ -174,7 +177,8 @@ export const config = {
     retryAttempts: boundedPositiveInteger(process.env.PROMOTION_RETRY_ATTEMPTS, 5, "PROMOTION_RETRY_ATTEMPTS", 20),
     retryBackoffMs: parsePromotionRetryDelays(process.env),
     pollIntervalMs: boundedPositiveInteger(process.env.PROMOTION_POLL_INTERVAL_MS, 30_000, "PROMOTION_POLL_INTERVAL_MS", 3_600_000),
-    legacyLaunchEnabled: parseBoolean(process.env.PROMOTION_LEGACY_LAUNCH_ENABLED, true),
+    legacyLaunchEnabled,
+    activeOwner: promotionEnabled ? "promotion" as const : legacyLaunchEnabled ? "legacy-launch" as const : "none" as const,
   },
   spotify: {
     enabled: (process.env.SPOTIFY_METRICS_ENABLED ?? "false").toLowerCase() === "true",

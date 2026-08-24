@@ -5,7 +5,7 @@ import { config } from "../config/env";
 import { episodePromotionRepository, type PromotionIntent } from "../database/repositories/episode-promotion.repository";
 import { episodeRepository, withImmediateTransaction, type EpisodeRow } from "../database/repositories/episode.repository";
 import { episodeSchema, type EpisodeInput } from "../schemas/episode";
-import type { PromotionAcknowledgement } from "../schemas/episode-promotion";
+import type { PromotionAcknowledgement, PromotionError } from "../schemas/episode-promotion";
 import {
   buildEpisodePromotionRequest,
   dispatchPromotionIntent,
@@ -23,8 +23,9 @@ export type EpisodePromotionSaveInput = {
 
 export type EpisodePromotionSaveResult = {
   episode: EpisodeRow;
-  intent: PromotionIntent;
+  intent: PromotionIntent | null;
   acknowledgement?: PromotionAcknowledgement;
+  promotionError?: PromotionError;
 };
 
 type TrailerFingerprint = {
@@ -32,11 +33,11 @@ type TrailerFingerprint = {
   byteCount: number;
 };
 
-const readCanonicalTrailerFingerprint = async (episodeId: number): Promise<TrailerFingerprint> => {
+const readCanonicalTrailerFingerprint = async (episodeId: number): Promise<TrailerFingerprint | null> => {
   const trailerPath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
   const stats = await fs.promises.stat(trailerPath).catch(() => null);
   if (!stats?.isFile() || stats.size <= 0) {
-    throw new Error("Canonical trailer media is missing or inaccessible");
+    return null;
   }
 
   const hash = createHash("sha256");
@@ -95,31 +96,49 @@ export const saveEpisodeAndQueuePromotion = async (
 ): Promise<EpisodePromotionSaveResult> => {
   const payload = episodeSchema.parse(input.payload);
   const trailer = await readCanonicalTrailerFingerprint(input.episodeId);
-  const request = buildEpisodePromotionRequest({
-    episodeId: input.episodeId,
-    title: payload.title,
-    episodeNumber: payload.episodeNumber,
-    publicDownloadUrl: publicDownloadUrlFor(input.episodeId),
-    trailerMediaReference: getEpisodeMediaRelativePath(input.episodeId, "trailerVideo"),
-    trailerSha256: trailer.sha256,
-    trailerByteCount: trailer.byteCount,
-  });
+  const request = trailer
+    ? buildEpisodePromotionRequest({
+        episodeId: input.episodeId,
+        title: payload.title,
+        episodeNumber: payload.episodeNumber,
+        publicDownloadUrl: publicDownloadUrlFor(input.episodeId),
+        trailerMediaReference: getEpisodeMediaRelativePath(input.episodeId, "trailerVideo"),
+        trailerSha256: trailer.sha256,
+        trailerByteCount: trailer.byteCount,
+      })
+    : null;
 
   const committed = withImmediateTransaction(() => {
     const saved = episodeRepository.update(input.episodeId, payload);
     if (!saved) throw new Error("Episode could not be finalized");
-    const finalEpisode = episodeRepository.updateMedia(input.episodeId, input.mediaUpdates ?? {}) ?? saved;
-    const intent = episodePromotionRepository.upsertPromotionIntent({
-      request,
-      requestFingerprint: getPromotionRequestFingerprint(request),
-      withinTransaction: true,
-    });
+    let finalEpisode = episodeRepository.updateMedia(input.episodeId, input.mediaUpdates ?? {}) ?? saved;
+    const intent = request
+      ? episodePromotionRepository.upsertPromotionIntent({
+          request,
+          requestFingerprint: getPromotionRequestFingerprint(request),
+          withinTransaction: true,
+        })
+      : null;
+    if (!intent) {
+      // Keep the independently persisted save while projecting a bounded promotion
+      // failure through the existing episode error field; no legacy delivery is queued.
+      episodeRepository.markLaunchError(input.episodeId, "Promotion failed: canonical trailer media is missing or inaccessible.");
+      finalEpisode = episodeRepository.findByEpisodeId(input.episodeId) ?? finalEpisode;
+    }
     return { episode: finalEpisode, intent };
   });
 
-  const acknowledgement = await dispatchPromotionAfterCommit(
-    committed.intent.notification.notificationId,
-    input.transport,
-  );
+  if (!committed.intent) {
+    return {
+      ...committed,
+      promotionError: {
+        category: "missing_media",
+        description: "Canonical trailer media is missing or inaccessible.",
+        retryable: false,
+      },
+    };
+  }
+
+  const acknowledgement = await dispatchPromotionAfterCommit(committed.intent.notification.notificationId, input.transport);
   return { ...committed, acknowledgement: acknowledgement ?? undefined };
 };

@@ -24,6 +24,10 @@ const runOnce = async (): Promise<void> => {
 };
 
 export const startLaunchNotificationWorker = async (): Promise<() => void> => {
+  if (config.promotion.activeOwner !== "legacy-launch") {
+    console.log("Launch notification worker disabled because promotion owns episode delivery");
+    return () => undefined;
+  }
   if (config.telegram.pollIntervalMs <= 0) {
     console.log("Launch notification worker disabled by TELEGRAM_POLL_INTERVAL_MS");
     return () => undefined;

@@ -1159,16 +1159,17 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       episodeRepository.markTranscriptionError(created.episodeId, "Draft transcription failed");
     }
 
-    const finalDoc = config.promotion.enabled
-      ? (await saveEpisodeAndQueuePromotion({
-          episodeId: created.episodeId,
-          payload,
-          mediaUpdates,
-        })).episode
-      : (config.promotion.legacyLaunchEnabled ? await queueLaunchNotification(created.episodeId) : undefined,
-        Object.keys(mediaUpdates).length === 0
-          ? episodeRepository.findByEpisodeId(created.episodeId)
-          : episodeRepository.updateMedia(created.episodeId, mediaUpdates));
+    const promotionResult = config.promotion.enabled
+      ? await saveEpisodeAndQueuePromotion({ episodeId: created.episodeId, payload, mediaUpdates })
+      : null;
+    if (!promotionResult && config.promotion.legacyLaunchEnabled) {
+      await queueLaunchNotification(created.episodeId);
+    }
+    const finalDoc = promotionResult?.episode ?? (
+      Object.keys(mediaUpdates).length === 0
+        ? episodeRepository.findByEpisodeId(created.episodeId)
+        : episodeRepository.updateMedia(created.episodeId, mediaUpdates)
+    );
     if (!finalDoc) {
       throw new Error("Episode could not be finalized");
     }
@@ -1180,7 +1181,11 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       draftForRetry = null;
     }
     queueCoverMosaicRefresh();
-    res.status(201).json({ ...finalDoc, ...(trailerVideoFinalized ?? {}) });
+    res.status(201).json({
+      ...finalDoc,
+      ...(promotionResult?.promotionError ? { promotion: { status: "failed", error: promotionResult.promotionError } } : {}),
+      ...(trailerVideoFinalized ?? {}),
+    });
   } catch (error) {
     if (createdEpisodeId !== null) {
       // A failed create must not leave a partially persisted row. The reservation
@@ -1200,24 +1205,36 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const routeId = Number(req.params.episodeId);
     const payload = episodeSchema.parse({ ...req.body, episodeId: routeId });
-    const updated = episodeRepository.update(routeId, payload);
-
-    if (!updated) {
+    const existing = episodeRepository.findByEpisodeId(routeId);
+    if (!existing) {
       res.status(404).json({ message: "Episode not found" });
       return;
     }
 
     const mediaUpdates = await promoteStagedMedia(routeId);
-    await queueLaunchNotification(routeId);
     if (mediaUpdates.fileName) {
       await clearEpisodeTranscription(routeId);
       await queueEpisodeTranscription(routeId);
     }
-    const finalDoc = Object.keys(mediaUpdates).length === 0
-      ? episodeRepository.findByEpisodeId(routeId)
-      : episodeRepository.updateMedia(routeId, mediaUpdates);
+    const promotionResult = config.promotion.enabled
+      ? await saveEpisodeAndQueuePromotion({ episodeId: routeId, payload, mediaUpdates })
+      : null;
+    if (!promotionResult) {
+      episodeRepository.update(routeId, payload);
+      if (config.promotion.legacyLaunchEnabled) {
+        await queueLaunchNotification(routeId);
+      }
+    }
+    const finalDoc = promotionResult?.episode ?? (
+      Object.keys(mediaUpdates).length === 0
+        ? episodeRepository.findByEpisodeId(routeId)
+        : episodeRepository.updateMedia(routeId, mediaUpdates)
+    );
     queueCoverMosaicRefresh();
-    res.json(finalDoc ?? updated);
+    res.json({
+      ...(finalDoc ?? existing),
+      ...(promotionResult?.promotionError ? { promotion: { status: "failed", error: promotionResult.promotionError } } : {}),
+    });
   } catch (error) {
     next(error);
   }

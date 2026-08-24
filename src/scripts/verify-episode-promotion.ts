@@ -6,14 +6,27 @@ import type { EpisodePromotionInput } from "../services/episode-promotion.servic
 import type { PromotionEffectRow } from "../database/repositories/episode-promotion.repository";
 import type { PromotionRequest } from "../schemas/episode-promotion";
 
-type Scenario = "contract-outbox-tracer" | "state-replay" | "post-save-isolation";
+type Scenario =
+  | "contract-outbox-tracer"
+  | "state-replay"
+  | "post-save-isolation"
+  | "scheduled-update-replay"
+  | "private-media-handoff"
+  | "restart-recovery";
 
 const scenarioArg = process.argv.find((argument) => argument.startsWith("--scenario="))?.split("=", 2)[1] as Scenario | undefined;
 const fakeOnly = process.argv.includes("--fake-only");
 
 if (!fakeOnly) throw new Error("This verifier requires --fake-only and never contacts a real transport.");
-if (scenarioArg !== "contract-outbox-tracer" && scenarioArg !== "state-replay" && scenarioArg !== "post-save-isolation") {
-  throw new Error("Use --scenario=contract-outbox-tracer, --scenario=state-replay, or --scenario=post-save-isolation.");
+if (!scenarioArg || ![
+  "contract-outbox-tracer",
+  "state-replay",
+  "post-save-isolation",
+  "scheduled-update-replay",
+  "private-media-handoff",
+  "restart-recovery",
+].includes(scenarioArg)) {
+  throw new Error("Use a supported fake-only episode promotion scenario.");
 }
 
 type Fixture = { root: string; database: string; media: string };
@@ -156,6 +169,7 @@ const run = async (): Promise<void> => {
         coverCredits: [],
       };
       const saved = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });
+      if (!saved.intent) throw new Error("post-save fixture did not create a promotion intent");
       assert.equal(saved.episode.episodeId, episodeId);
       assert.equal(saved.intent.notification.notificationId, `episode:${episodeId}`);
       assert.equal(saved.acknowledgement?.status, "unknown");
@@ -168,6 +182,150 @@ const run = async (): Promise<void> => {
       assert.equal(persisted?.effects.every((effect) => effect.status === "unknown"), true);
       assert.equal(persisted?.effects.every((effect) => effect.errorCategory === "timeout"), true);
       console.log("episode post-save isolation passed with fake timeout and committed trailer");
+      return;
+    }
+
+    if (scenarioArg === "scheduled-update-replay") {
+      const { config } = await import("../config/env.js");
+      const episodeId = 50503;
+      const trailerPath = path.join(fixture.media, "episodes", String(episodeId), "trailer.mp4");
+      await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+      await fs.promises.writeFile(trailerPath, Buffer.from("scheduled trailer v1"));
+      getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(
+        episodeId,
+        "Scheduled before update",
+        "2099-01-01T00:00:00.000Z",
+      );
+      const payload = {
+        episodeId,
+        title: "Scheduled episode #future",
+        summary: "Immediate promotion despite a future publication date",
+        pubDate: new Date("2099-01-01T00:00:00.000Z"),
+        explicit: "no" as const,
+        authors: [],
+        guests: [],
+        tags: [],
+        citations: [],
+        musicCredits: [JSON.stringify({ name: "Offline", links: [{ url: "https://example.com" }] })],
+        coverCredits: [],
+      };
+      const first = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });
+      assert.ok(first.intent);
+      assert.equal(first.episode.pubDate, "2099-01-01T00:00:00.000Z");
+      assert.equal(transport.requests.length, 1, "future-dated saves dispatch immediately");
+      const firstRevision = first.intent.notification.sourceRevision;
+      const firstFingerprint = first.intent.notification.requestFingerprint;
+      const replay = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });
+      assert.ok(replay.intent);
+      assert.equal(replay.intent.notification.notificationId, `episode:${episodeId}`);
+      assert.equal(replay.intent.notification.sourceRevision, firstRevision);
+      assert.equal(replay.intent.notification.requestFingerprint, firstFingerprint);
+      assert.equal(transport.requests.length, 1, "same-source update must not dispatch twice");
+
+      await fs.promises.writeFile(trailerPath, Buffer.from("scheduled trailer v2"));
+      const changedSource = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });
+      assert.ok(changedSource.intent);
+      assert.notEqual(changedSource.intent.notification.sourceRevision, firstRevision);
+      assert.notEqual(changedSource.intent.notification.requestFingerprint, firstFingerprint);
+      assert.equal(transport.requests.length, 2, "changed trailer bytes create one new source revision");
+      assert.equal(changedSource.intent.effects.length, 2);
+      assert.equal(config.promotion.activeOwner, "promotion");
+      assert.equal(episodeRepository.findByEpisodeId(episodeId)?.launchNotificationState, "idle");
+
+      const missingId = 50504;
+      getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(
+        missingId,
+        "Missing trailer before update",
+        "2099-01-02T00:00:00.000Z",
+      );
+      const missing = await saveService.saveEpisodeAndQueuePromotion({
+        episodeId: missingId,
+        payload: { ...payload, episodeId: missingId, title: "Saved without canonical trailer" },
+        transport,
+      });
+      assert.equal(missing.intent, null);
+      assert.equal(missing.promotionError?.category, "missing_media");
+      assert.equal((missing.promotionError?.description.length ?? 0) > 0, true);
+      assert.equal(missing.promotionError?.description.length <= 500, true);
+      const missingEpisode = episodeRepository.findByEpisodeId(missingId);
+      assert.equal(missingEpisode?.title, "Saved without canonical trailer");
+      assert.equal(missingEpisode?.launchNotificationError, "Promotion failed: canonical trailer media is missing or inaccessible.");
+      assert.equal(transport.requests.length, 2);
+      console.log("scheduled update replay passed with immediate dispatch, stable replay, changed source, and one promotion owner");
+      return;
+    }
+
+    if (scenarioArg === "private-media-handoff") {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        throw new Error("real fetch is prohibited in fake-only verification");
+      }) as typeof fetch;
+      try {
+        const request = service.buildEpisodePromotionRequest({
+          episodeId: 50505,
+          title: "Private handoff #offline",
+          publicDownloadUrl: "https://podcast.example/episode/50505",
+          trailerSha256: "b".repeat(64),
+          trailerByteCount: 10,
+        });
+        const resolvePrivateTrailer = async (reference: string): Promise<Buffer> => {
+          assert.match(reference, /^episodes\/[1-9][0-9]*\/trailer\.mp4$/);
+          assert.equal(reference.includes("/tmp/") || reference.includes("/home/"), false);
+          return Buffer.from("fake private trailer");
+        };
+        const media = await resolvePrivateTrailer(request.trailer.media_reference);
+        assert.equal(media.length > 0, true);
+        assert.equal(/(?:credential|authorization|token|password)/i.test(JSON.stringify(request)), false);
+        await assert.rejects(() => globalThis.fetch("http://real.invalid"), /prohibited/);
+        console.log("private media handoff passed with logical reference and real fetch guard");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      return;
+    }
+
+    if (scenarioArg === "restart-recovery") {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        throw new Error("real fetch is prohibited in fake-only verification");
+      }) as typeof fetch;
+      try {
+        const intent = episodePromotionRepository.upsertPromotionIntent({
+          request,
+          requestFingerprint: service.getPromotionRequestFingerprint(request),
+        });
+        const claimed = episodePromotionRepository.claimDuePromotionEffects({ notificationId: request.notification_id });
+        assert.equal(claimed.length, 2);
+        const recovered = episodePromotionRepository.recoverExpiredPromotionLeases(new Date(Date.now() + 120_000));
+        assert.equal(recovered.length, 2);
+        assert.ok(recovered.every((effect) => effect.status === "unknown"));
+        const recoveryTransport = {
+          requests: 0,
+          reconciliations: 0,
+          async sendPromotion(): Promise<unknown> {
+            this.requests += 1;
+            throw new Error("restart recovery must reconcile before send");
+          },
+          async reconcilePromotion(effectRequest: PromotionRequest, effect: PromotionEffectRow): Promise<unknown> {
+            this.reconciliations += 1;
+            return {
+              destination: effect.destination,
+              status: "complete",
+              message_id: `recovered-${effect.destination}`,
+              acknowledged_at: new Date().toISOString(),
+            };
+          },
+        };
+        const recoveredResult = await service.dispatchPromotionIntent(intent.notification.notificationId, recoveryTransport);
+        assert.equal(recoveryTransport.reconciliations, 2);
+        assert.equal(recoveryTransport.requests, 0);
+        assert.equal(recoveredResult, null);
+        assert.equal(episodePromotionRepository.listIncompletePromotionEffects(request.notification_id).length, 0);
+        await assert.rejects(() => globalThis.fetch("http://real.invalid"), /prohibited/);
+        console.log("restart recovery passed with stale-lease reconciliation and no real transport");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
       return;
     }
     const first = await service.createOrReusePromotionIntent(requestInput, transport);
