@@ -708,6 +708,19 @@ export const swaggerSpec = swaggerJsdoc({
           },
         },
       },
+      "/internal/v1/episodes/latest": {
+        get: {
+          tags: ["Internal Episodes"],
+          summary: "Read the latest API-owned episode for the bot",
+          description: "Private service-authenticated read seam for preserved Telegram commands. The API remains the owner of episode identity and publication eligibility; the bot receives only canonical DTO data.",
+          security: [{ promotionServiceAuth: [] }],
+          responses: {
+            "200": { description: "Latest episode or an empty/unavailable contract response." },
+            "401": { description: "Dedicated service authentication missing or invalid." },
+            "503": { description: "The private service boundary is not configured or temporarily unavailable." },
+          },
+        },
+      },
       "/health": {
         get: {
           tags: ["System"],
