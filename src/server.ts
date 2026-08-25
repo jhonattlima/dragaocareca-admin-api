@@ -52,7 +52,9 @@ const bootstrap = async (): Promise<void> => {
     console.info("YouTube trailer job worker disabled by DISABLE_BACKGROUND_WORKERS=true");
   }
 
-  if (config.promotion.activeOwner === "promotion" && !backgroundWorkersDisabled) {
+  // Promotion delivery is API-owned and must remain independently runnable when
+  // legacy external workers are disabled to avoid a second Telegram poller.
+  if (config.promotion.activeOwner === "promotion") {
     await startEpisodePromotionWorker();
   }
 
