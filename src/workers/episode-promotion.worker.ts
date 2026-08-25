@@ -34,9 +34,6 @@ const configuredPromotionTransport: PromotionTransport = {
   },
 };
 
-const backgroundWorkersDisabled = (): boolean =>
-  (process.env.DISABLE_BACKGROUND_WORKERS ?? "false").toLowerCase() === "true";
-
 const privateBotConfigurationIsValid = (): boolean => {
   if (config.promotion.activeOwner !== "promotion" || !config.promotion.enabled) return false;
   if (!config.promotion.sharedSecretConfigured || !config.promotion.sharedSecret) return false;
@@ -120,10 +117,6 @@ const runOnce = async (options: EpisodePromotionRecoveryOptions): Promise<void> 
 export const startEpisodePromotionWorker = async (
   options: EpisodePromotionRecoveryOptions = {},
 ): Promise<() => void> => {
-  if (backgroundWorkersDisabled()) {
-    console.info("Episode promotion worker disabled by DISABLE_BACKGROUND_WORKERS=true");
-    return () => undefined;
-  }
   if (!privateBotConfigurationIsValid()) {
     console.info("Episode promotion worker disabled because private bot configuration is incomplete or invalid");
     return () => undefined;
