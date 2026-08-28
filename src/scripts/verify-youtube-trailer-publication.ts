@@ -543,12 +543,16 @@ const verifyPublicationAndRetention = async (modules: RuntimeModules, episodeId:
   assert.equal(modules.episodeRepository.findByEpisodeId(episodeId)?.youtube, "https://www.youtube.com/watch?v=fake-private-publication-video");
   assert.equal(provider.metadata?.description, modules.episodeRepository.findByEpisodeId(episodeId)?.summary);
   assert.deepEqual(provider.events.map((event) => event === "provider-read" ? "provider-read" : event), [
-    "provider-read", "metadata-update", "provider-read", "playlist-read", "playlist-insert", "playlist-read", "provider-read", "public-update", "provider-read",
+    "provider-read", "metadata-update", "provider-read", "playlist-read", "playlist-insert", "provider-read", "public-update", "provider-read",
   ]);
   assert.equal((await fs.promises.readdir(path.dirname(currentPath))).filter((name) => /^trailer\.v\d+\.mp4$/u.test(name)).length, 12);
   const repeated = await modules.publishYoutubeTrailer(episodeId, "phase17-publish-job", { title: "Trailer - Fixture", hashtags: ["#fase17"] }, provider);
   assert.equal(repeated.url, result.url);
-  assert.equal(provider.events.length, 9, "repeated publication must not call provider again");
+  assert.equal(provider.events.length, 9, "repeated publication must verify the public provider metadata");
+  provider.metadata = { title: "Trailer - Fixture", description: provider.metadata?.description ?? "", categoryId: "22" };
+  const synchronized = await modules.publishYoutubeTrailer(episodeId, "phase17-publish-job", { title: "Trailer - Fixture", hashtags: ["#fase17", "#podcast"] }, provider);
+  assert.equal(synchronized.url, result.url);
+  assert.equal(provider.metadata?.title, "Trailer - Fixture #fase17 #podcast", "a public trailer must synchronize title hashtags");
   await assert.rejects(() => modules.publishYoutubeTrailer(episodeId, "phase17-publish-job", { title: "<invalid>", hashtags: [] }, provider), /invalid|100 characters/u);
 };
 

@@ -110,6 +110,7 @@ Recent decisions affecting current work:
 - [Phase 18]: Use Gemini as the primary summary and hashtag-authoring provider, with Groq as the automatic fallback; persist and expose the actual provider used for each step.
 - [Phase 18]: Keep hashtag authoring advisory: a failed or invalid provider response must not invalidate a completed summary, and its retry/error state stays in `suggestedTags`.
 - [Phase 18]: Keep provider status in the existing episode state and protected DTOs rather than creating parallel status files or UI-trigger endpoints.
+- [Post-v1.4]: Preserve title/summary/hashtags in the publication job snapshot while hashing only provider metadata; a save of an already-public trailer reconciles YouTube title/description so missing hashtags can be corrected without re-uploading.
 
 ### Pending Todos
 

@@ -84,7 +84,15 @@ export const publishYoutubeTrailer = async (
   if (!episode || !initial || initial.status !== "ready" || !initial.providerVideoId) throw new Error("Ready trailer publication job was not found.");
   const current = await fingerprintYoutubeTrailerSource(episodeId);
   if (JSON.stringify(sourceOf(initial)) !== JSON.stringify(current)) throw new Error("Trailer publication source is stale.");
+  const getVideo = providerMethod(provider, "getVideo") as (id: string) => Promise<YoutubeTrailerVideoRecord>;
+  const updateMetadata = providerMethod(provider, "updateMetadata") as (id: string, metadata: { title: string; description: string; categoryId?: string }) => Promise<YoutubeTrailerVideoRecord>;
   if (initial.publicationStatus === "public_confirmed" && initial.canonicalUrl) {
+    const currentVideo = await getVideo(initial.providerVideoId);
+    if (currentVideo.privacyStatus !== "public") throw new Error("YouTube public trailer could not be confirmed.");
+    if (currentVideo.title !== title || currentVideo.description !== episode.summary) {
+      const accepted = await updateMetadata(initial.providerVideoId, { title, description: episode.summary, categoryId: currentVideo.categoryId ?? undefined });
+      if (accepted.privacyStatus !== "public") throw new Error("YouTube public trailer metadata update could not be confirmed.");
+    }
     if (initial.retentionStatus !== "complete") {
       const cleanup = await retainEpisodeTrailerVersions(episodeId);
       const cleanupRow = youtubeTrailerJobRepository.updatePublication(
@@ -101,21 +109,20 @@ export const publishYoutubeTrailer = async (
   if (!claimed || !claimed.publicationLeaseId) return dto(youtubeTrailerJobRepository.findByJobId(episodeId, jobId) ?? initial);
   let publicationLease = leaseOf(claimed);
   try {
-    const getVideo = providerMethod(provider, "getVideo") as (id: string) => Promise<YoutubeTrailerVideoRecord>;
-    const updateMetadata = providerMethod(provider, "updateMetadata") as (id: string, metadata: { title: string; description: string; categoryId?: string }) => Promise<YoutubeTrailerVideoRecord>;
     const findPlaylist = providerMethod(provider, "findPlaylistMembership") as (id: string) => Promise<unknown>;
     const insertPlaylist = providerMethod(provider, "insertPlaylistItem") as (id: string) => Promise<unknown>;
     const publishVideo = providerMethod(provider, "publishVideo") as (id: string) => Promise<YoutubeTrailerVideoRecord>;
     const providerId = claimed.providerVideoId!;
     const privateReady = await getVideo(providerId);
     if (privateReady.privacyStatus !== "private" || privateReady.uploadStatus === "failed" || privateReady.processingStatus === "processing") return failure(publicationLease, "retryable", "YouTube trailer is not privately ready for publication.");
-    const metadata = { title, description: episode.summary, categoryId: privateReady.categoryId ?? undefined };
-    const metadataJson = JSON.stringify(metadata);
-    const digest = createHash("sha256").update(metadataJson).digest("hex");
-    if (claimed.metadataDigest !== digest || claimed.metadataSnapshotJson !== metadataJson) {
-      const accepted = await updateMetadata(providerId, metadata);
+    const providerMetadata = { title, description: episode.summary, categoryId: privateReady.categoryId ?? undefined };
+    const providerMetadataJson = JSON.stringify(providerMetadata);
+    const metadataDigest = createHash("sha256").update(providerMetadataJson).digest("hex");
+    const metadataSnapshotJson = JSON.stringify({ title, summary: episode.summary, hashtags: input.hashtags, description: providerMetadata.description, categoryId: providerMetadata.categoryId });
+    if (claimed.metadataDigest !== metadataDigest) {
+      const accepted = await updateMetadata(providerId, providerMetadata);
       if (accepted.privacyStatus !== "private") return failure(publicationLease, "retryable", "YouTube trailer became public before playlist confirmation.");
-      const metadataAccepted = persist(publicationLease, { publicationStatus: "metadata_accepted", metadataSnapshotJson: metadataJson, metadataDigest: digest, metadataAcceptedAt: new Date().toISOString() });
+      const metadataAccepted = persist(publicationLease, { publicationStatus: "metadata_accepted", metadataSnapshotJson, metadataDigest, metadataAcceptedAt: new Date().toISOString() });
       publicationLease = { ...publicationLease, revision: metadataAccepted.revision };
     }
     let membership = await findPlaylist(providerId);

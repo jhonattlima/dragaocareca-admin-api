@@ -86,6 +86,21 @@ Use authenticated `POST /v1/episodes/:episodeId/trailer-video` with one `multipa
 
 This video is distinct from the existing audio `trailer` artifact. Use the protected artifact-job selector `trailer-video` to archive only the canonical final `trailer.mp4`. Replacements are allowed; after a replacement, `trailerVideoSyncStatus` can be `manual-sync-required`, which means an administrator must explicitly re-sync the final video publication. Uploading never calls YouTube.
 
+### Trailer title and hashtags
+
+The authenticated publication flow accepts the editable title prefix and up to
+three validated hashtags separately. The API assembles the final YouTube title
+(`title + hashtags`) and enforces YouTube's 100-Unicode-character limit. The
+requested title, summary, and hashtags are retained in the job snapshot while
+the provider digest tracks only the metadata sent to YouTube, so retries do not
+lose hashtags.
+
+Saving publication metadata for a trailer that is already `public_confirmed`
+also performs a provider metadata reconciliation. This allows an operator to
+correct a trailer that was published without its hashtags without uploading a
+duplicate video: reopen the episode in `admin-web`, set the desired hashtags,
+and save again.
+
 ## Legacy Import
 
 Import old `all_episodes.json` into SQLite:

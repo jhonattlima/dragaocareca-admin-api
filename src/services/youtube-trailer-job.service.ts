@@ -107,9 +107,10 @@ type YoutubeTrailerJobMetadata = { title: string; summary: string; hashtags?: st
 const metadataForJob = (job: YoutubeTrailerJobRow): YoutubeTrailerJobMetadata | undefined => {
   if (!job.metadataSnapshotJson) return undefined;
   try {
-    const value = JSON.parse(job.metadataSnapshotJson) as { title?: unknown; summary?: unknown; hashtags?: unknown };
-    return typeof value.title === "string" && typeof value.summary === "string"
-      ? { title: value.title, summary: value.summary, hashtags: Array.isArray(value.hashtags) ? value.hashtags.filter((tag): tag is string => typeof tag === "string") : [] }
+    const value = JSON.parse(job.metadataSnapshotJson) as { title?: unknown; summary?: unknown; description?: unknown; hashtags?: unknown };
+    const summary = typeof value.summary === "string" ? value.summary : value.description;
+    return typeof value.title === "string" && typeof summary === "string"
+      ? { title: value.title, summary, hashtags: Array.isArray(value.hashtags) ? value.hashtags.filter((tag): tag is string => typeof tag === "string") : [] }
       : undefined;
   } catch {
     return undefined;

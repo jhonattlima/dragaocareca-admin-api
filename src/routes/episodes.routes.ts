@@ -812,7 +812,7 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTra
     }
     const requested = youtubeTrailerJobRepository.requestPublication(current, publicationMetadata);
     const snapshot = requested ?? current;
-    if (snapshot.status === "ready") {
+    if (snapshot.status === "ready" || snapshot.publicationStatus === "public_confirmed") {
       await publishYoutubeTrailer(episodeId, snapshot.jobId, body.data);
     }
     res.status(snapshot.status === "ready" ? 200 : 202).json(toYoutubeTrailerJobStatusDto(snapshot));
