@@ -636,10 +636,30 @@ const transcribeAudioWithGroq = async (audioPath: string, onProgress?: (progress
 const transcribeAudio = async (
   audioPath: string,
   onProgress?: (progress: number) => void,
-  provider: TranscriptionProvider = getConfiguredTranscriptionProvider()
+  provider: TranscriptionProvider = getConfiguredTranscriptionProvider(),
+  onProvider?: (provider: TranscriptionProvider) => void
 ): Promise<string> => {
   if (provider === "gemini") {
-    return transcribeAudioWithGemini(audioPath, onProgress);
+    try {
+      return await transcribeAudioWithGemini(audioPath, onProgress);
+    } catch (geminiError) {
+      const geminiMessage = geminiError instanceof Error ? geminiError.message : String(geminiError);
+      console.warn(`[transcription] provider=gemini failed; fallback=groq error=${geminiMessage}`);
+
+      const groqConfigurationError = getTranscriptionConfigurationError("groq");
+      if (groqConfigurationError) {
+        throw new Error(`Gemini transcription failed: ${geminiMessage}; Groq fallback unavailable: ${groqConfigurationError}`);
+      }
+
+      onProvider?.("groq");
+      onProgress?.(0);
+      try {
+        return await transcribeAudioWithGroq(audioPath, onProgress);
+      } catch (groqError) {
+        const groqMessage = groqError instanceof Error ? groqError.message : String(groqError);
+        throw new Error(`Gemini transcription failed: ${geminiMessage}; Groq transcription failed: ${groqMessage}`);
+      }
+    }
   }
 
   if (provider === "groq") {
@@ -679,6 +699,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
   const processingState = nextDraftState(episodeId, "processing", version);
   processingState.transcript.provider = provider;
   writeDraftState(episodeId, processingState);
+  let activeProvider = provider;
 
   try {
     const transcript = await transcribeAudio(audioPath, (progress) => {
@@ -687,7 +708,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
       }
 
       const progressState = nextDraftState(episodeId, "processing", version);
-      progressState.transcript.provider = provider;
+      progressState.transcript.provider = activeProvider;
       writeDraftState(episodeId, {
         ...progressState,
         transcript: {
@@ -695,7 +716,17 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
           progress,
         },
       });
-    }, provider);
+    }, provider, (nextProvider) => {
+      if (!isDraftStateCurrent(episodeId, version)) {
+        return;
+      }
+
+      activeProvider = nextProvider;
+      const providerState = nextDraftState(episodeId, "processing", version);
+      providerState.transcript.provider = nextProvider;
+      providerState.transcript.progress = 0;
+      writeDraftState(episodeId, providerState);
+    });
 
     if (!isDraftStateCurrent(episodeId, version)) {
       return;
@@ -707,7 +738,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
     fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
 
     const doneState = nextDraftState(episodeId, "done", version);
-    doneState.transcript.provider = provider;
+    doneState.transcript.provider = activeProvider;
     await writeDraftStateAsync(episodeId, {
       ...doneState,
       transcript: {
@@ -728,7 +759,7 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
     if (isDraftStateCurrent(episodeId, version)) {
       const message = error instanceof Error ? error.message : "Unknown transcription error";
       const errorState = nextDraftState(episodeId, "error", version, message);
-      errorState.transcript.provider = provider;
+      errorState.transcript.provider = activeProvider;
       await writeDraftStateAsync(episodeId, {
         ...errorState,
         transcript: {

@@ -241,7 +241,7 @@ export class LiveYoutubeTrailerUploadProvider implements YoutubeTrailerUploadPro
   async updateMetadata(providerVideoId: string, metadata: YoutubeTrailerMetadata): Promise<YoutubeTrailerVideoRecord> {
     await this.checkPublicationReadiness();
     const current = await this.getVideo(providerVideoId);
-    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/videos?part=snippet`, {
+    const response = await this.authorizedFetch(`${config.youtube.dataBaseUrl}/videos?part=snippet,status`, {
       method: "PUT",
       headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({

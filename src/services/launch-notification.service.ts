@@ -1,5 +1,5 @@
 import { episodeRepository } from "../database/repositories/episode.repository";
-import { sendLaunchTelegramNotification } from "./telegram.service";
+import { postLaunchNotification } from "./launch-notification-client.service";
 
 type LaunchNotificationCandidate = {
   episodeId: number;
@@ -55,7 +55,7 @@ export const deliverPendingLaunchNotification = async (
   }
 
   try {
-    await sendLaunchTelegramNotification(episode);
+    await postLaunchNotification(episode);
     episodeRepository.markLaunchSent(episodeId);
     return { delivered: true, alreadySent: false };
   } catch (error) {
@@ -69,6 +69,7 @@ export const processPendingLaunchNotifications = async (): Promise<{
   delivered: number;
   failed: number;
 }> => {
+  episodeRepository.queueDueLaunchNotifications();
   const pending = await getPendingLaunchNotifications();
   let delivered = 0;
   let failed = 0;

@@ -428,6 +428,29 @@ export const initializeYoutubeTrailerJobs = async (): Promise<void> => {
 export const processNextYoutubeTrailerJob = async ({ provider = createLiveYoutubeTrailerUploadProvider() }: ProcessOptions = {}): Promise<void> => {
   const candidate = youtubeTrailerJobRepository.listRecoveryCandidates()[0];
   if (!candidate) return;
+
+  if (candidate.status === "ready") {
+    const metadata = metadataForJob(candidate);
+    const episode = episodeRepository.findByEpisodeId(candidate.episodeId);
+    if (!episode || !candidate.providerVideoId) return;
+    const result = await publishYoutubeTrailer(
+      candidate.episodeId,
+      candidate.jobId,
+      {
+        title: metadata?.title ?? `Trailer - ${episode.title}`,
+        hashtags: metadata?.hashtags ?? [],
+      },
+      provider,
+    );
+    if (result.status === "failed") {
+      console.error("YouTube trailer publication retry failed", {
+        episodeId: candidate.episodeId,
+        category: result.error.category,
+      });
+    }
+    return;
+  }
+
   const job = claimNext(candidate);
   const lease = job ? leaseForJob(job) : null;
   if (!job || !lease) return;

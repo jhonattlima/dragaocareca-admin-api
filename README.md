@@ -18,6 +18,9 @@ Telegram launch notifications:
 - queueing/deduping happens in the backend episode lifecycle
 - delivery uses `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
 - the worker polls pending launches on startup and every `TELEGRAM_POLL_INTERVAL_MS`
+- the private API-to-bot payload includes the episode-specific `image_url`, derived from the canonical media layout
+- the bot uses that URL to publish the launch as a photo and pins the resulting Telegram message
+- the API marks the notification sent only after the bot acknowledges delivery; failures remain available for retry
 
 Spotify metrics:
 - authenticated snapshot endpoint: `GET /v1/metrics/spotify`

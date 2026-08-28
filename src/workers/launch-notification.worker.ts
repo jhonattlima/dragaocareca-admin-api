@@ -24,8 +24,8 @@ const runOnce = async (): Promise<void> => {
 };
 
 export const startLaunchNotificationWorker = async (): Promise<() => void> => {
-  if (config.promotion.activeOwner !== "legacy-launch") {
-    console.log("Launch notification worker disabled because promotion owns episode delivery");
+  if (!config.promotion.legacyLaunchEnabled) {
+    console.log("Launch notification worker disabled by PROMOTION_LEGACY_LAUNCH_ENABLED=false");
     return () => undefined;
   }
   if (config.telegram.pollIntervalMs <= 0) {
@@ -33,8 +33,8 @@ export const startLaunchNotificationWorker = async (): Promise<() => void> => {
     return () => undefined;
   }
 
-  if (!config.telegram.botToken || !config.telegram.chatId) {
-    console.log("Launch notification worker disabled because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing");
+  if (!config.promotion.sharedSecret || !config.promotion.launchNotificationBotUrl) {
+    console.log("Launch notification worker disabled because API-to-bot notification authentication is missing");
     return () => undefined;
   }
 

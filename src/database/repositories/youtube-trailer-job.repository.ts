@@ -118,6 +118,9 @@ export type YoutubeTrailerJobError = {
 };
 
 export type YoutubeTrailerPublicationUpdate = {
+  errorCategory?: string | null;
+  errorMessage?: string | null;
+  errorAt?: string | null;
   publicationStatus?: YoutubeTrailerPublicationStatus;
   metadataSnapshotJson?: string | null;
   metadataDigest?: string | null;
@@ -413,7 +416,8 @@ export const youtubeTrailerJobRepository = {
     const now = nowIso();
     const result = getDb().prepare(`
       UPDATE youtube_trailer_jobs
-      SET publication_lease_id = ?, publication_lease_claimed_at = ?, revision = revision + 1, updated_at = ?
+      SET publication_lease_id = ?, publication_lease_claimed_at = ?, error_category = NULL, error_message = NULL, error_at = NULL,
+        next_attempt_at = NULL, revision = revision + 1, updated_at = ?
       WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
         AND revision = ? AND status = 'ready' AND provider_video_id IS NOT NULL
     `).run(leaseId, now, now, jobId, source.episodeId, source.sourceFileName, source.sourceSha256, source.sourceBytes, expectedRevision);
@@ -424,6 +428,9 @@ export const youtubeTrailerJobRepository = {
   updatePublication(lease: YoutubeTrailerPublicationLease, update: YoutubeTrailerPublicationUpdate): YoutubeTrailerJobRow | null {
     const fields: Array<[string, string | number | null]> = [];
     const mappings: Array<[keyof YoutubeTrailerPublicationUpdate, string]> = [
+      ["errorCategory", "error_category"],
+      ["errorMessage", "error_message"],
+      ["errorAt", "error_at"],
       ["publicationStatus", "publication_status"],
       ["metadataSnapshotJson", "metadata_snapshot_json"],
       ["metadataDigest", "metadata_digest"],
@@ -459,7 +466,14 @@ export const youtubeTrailerJobRepository = {
   listRecoveryCandidates(referenceTime = new Date()): YoutubeTrailerJobRow[] {
     return (getDb().prepare(`
       SELECT * FROM youtube_trailer_jobs
-      WHERE status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested')
+      WHERE (
+        status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested')
+        OR (
+          status = 'ready'
+          AND publication_requested_at IS NOT NULL
+          AND publication_status IN ('not_started', 'pending', 'metadata_accepted', 'playlist_confirmed', 'failed')
+        )
+      )
         AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
       ORDER BY datetime(created_at) ASC, job_id ASC
     `).all(referenceTime.toISOString()) as SqliteYoutubeTrailerJobRow[]).map((row) => mapRow(row) as YoutubeTrailerJobRow);

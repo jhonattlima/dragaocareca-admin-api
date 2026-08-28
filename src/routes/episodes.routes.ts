@@ -52,6 +52,7 @@ import {
 } from "../services/youtube-trailer-job.service";
 import { assembleYoutubeTrailerTitle, publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
 import { extractEpisodeAudioMetadata } from "../services/episode-audio-metadata.service";
+import { buildCanonicalEpisodeTitle } from "../services/episode-title.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -1119,6 +1120,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       return;
     }
     const payload = episodeSchema.parse(req.body);
+    payload.title = buildCanonicalEpisodeTitle(payload);
     if (draftCheck && payload.episodeId !== draftCheck.reservation.episodeId) {
       res.status(403).json({ message: "Episode draft reservation does not match episodeId" });
       return;
@@ -1205,6 +1207,7 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
   try {
     const routeId = Number(req.params.episodeId);
     const payload = episodeSchema.parse({ ...req.body, episodeId: routeId });
+    payload.title = buildCanonicalEpisodeTitle(payload);
     const existing = episodeRepository.findByEpisodeId(routeId);
     if (!existing) {
       res.status(404).json({ message: "Episode not found" });

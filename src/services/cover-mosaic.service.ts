@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { config } from "../config/env";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
@@ -23,9 +24,16 @@ const isValidCoverFileName = (value: string | null | undefined): value is string
   return trimmed.length > 0 && trimmed.toLowerCase() !== "string";
 };
 
+const isAvailableCoverFileName = (value: string | null | undefined): value is string => {
+  if (!isValidCoverFileName(value)) return false;
+  const storageRoot = path.resolve(config.media.storageRoot);
+  const candidate = path.resolve(storageRoot, value);
+  return (candidate === storageRoot || candidate.startsWith(`${storageRoot}${path.sep}`)) && existsSync(candidate);
+};
+
 const toCoverUrl = (episode: EpisodeRow): string => {
-  const lowFileName = isValidCoverFileName(episode.coverLowFileName) ? episode.coverLowFileName : null;
-  const highFileName = isValidCoverFileName(episode.coverFileName) ? episode.coverFileName : null;
+  const lowFileName = isAvailableCoverFileName(episode.coverLowFileName) ? episode.coverLowFileName : null;
+  const highFileName = isAvailableCoverFileName(episode.coverFileName) ? episode.coverFileName : null;
 
   if (lowFileName) {
     return `${config.feed.imageBase}${lowFileName}`;
@@ -40,14 +48,14 @@ const toCoverUrl = (episode: EpisodeRow): string => {
 
 const selectTileUrls = (episodes: EpisodeRow[]): string[] =>
   episodes
-    .filter((episode) => isValidCoverFileName(episode.coverLowFileName) || isValidCoverFileName(episode.coverFileName))
+    .filter((episode) => isAvailableCoverFileName(episode.coverLowFileName) || isAvailableCoverFileName(episode.coverFileName))
     .slice(0, columns * rows)
     .map((episode) => toCoverUrl(episode))
     .filter((url) => url.length > 0);
 
 const buildTiles = async (episodes: EpisodeRow[]): Promise<string> => {
   const selected = episodes
-    .filter((episode) => isValidCoverFileName(episode.coverLowFileName) || isValidCoverFileName(episode.coverFileName))
+    .filter((episode) => isAvailableCoverFileName(episode.coverLowFileName) || isAvailableCoverFileName(episode.coverFileName))
     .slice(0, columns * rows);
   const tiles: string[] = [];
 

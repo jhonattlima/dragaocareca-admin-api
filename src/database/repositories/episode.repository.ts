@@ -1006,8 +1006,45 @@ export const episodeRepository = {
   },
   getPendingLaunchNotifications(): EpisodeRow[] {
     const rows = getDb()
-      .prepare("SELECT * FROM episodes WHERE launch_notification_state = 'pending' AND datetime(pub_date) <= datetime(?) ORDER BY datetime(pub_date) ASC, episode_id ASC")
-      .all(new Date().toISOString()) as SqliteEpisodeRow[];
+      .prepare(`
+        SELECT *
+        FROM episodes
+        WHERE launch_notification_state = 'pending'
+          AND is_draft = 0
+          AND datetime(pub_date) <= datetime(?)
+          AND episode_id = (
+            SELECT episode_id
+            FROM episodes
+            WHERE is_draft = 0
+              AND datetime(pub_date) <= datetime(?)
+            ORDER BY datetime(pub_date) DESC, episode_id DESC
+            LIMIT 1
+          )
+      `)
+      .all(new Date().toISOString(), new Date().toISOString()) as SqliteEpisodeRow[];
     return rows.map(mapRow);
+  },
+  queueDueLaunchNotifications(): number {
+    const now = nowIso();
+    const result = getDb().prepare(`
+      UPDATE episodes
+      SET launch_notification_state = 'pending',
+          launch_notification_queued_at = ?,
+          launch_notification_error = NULL,
+          updated_at = ?
+      WHERE launch_notification_state = 'idle'
+        AND is_draft = 0
+        AND datetime(pub_date) <= datetime(?)
+        AND episode_id = (
+          SELECT episode_id
+          FROM episodes
+          WHERE launch_notification_state = 'idle'
+            AND is_draft = 0
+            AND datetime(pub_date) <= datetime(?)
+          ORDER BY datetime(pub_date) DESC, episode_id DESC
+          LIMIT 1
+        )
+    `).run(now, now, now, now);
+    return Number(result.changes);
   },
 };

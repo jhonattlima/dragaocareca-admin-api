@@ -61,7 +61,13 @@ const persist = (lease: YoutubeTrailerPublicationLease, update: Parameters<typeo
 };
 
 const failure = (lease: YoutubeTrailerPublicationLease, category: string, message: string): YoutubeTrailerPublicationDto => {
-  const row = youtubeTrailerJobRepository.updatePublication(lease, { publicationStatus: "failed", retentionStatus: "not_started" });
+  const row = youtubeTrailerJobRepository.updatePublication(lease, {
+    errorCategory: category,
+    errorMessage: message,
+    errorAt: new Date().toISOString(),
+    publicationStatus: "failed",
+    retentionStatus: "not_started",
+  });
   if (!row) throw new Error("Trailer publication source changed during failure recovery.");
   return { ...dto(row), error: { category, occurredAt: row.errorAt } };
 };
@@ -114,9 +120,11 @@ export const publishYoutubeTrailer = async (
     }
     let membership = await findPlaylist(providerId);
     if (!membership) {
-      await insertPlaylist(providerId);
-      membership = await findPlaylist(providerId);
-      if (!membership) return failure(publicationLease, "retryable", "YouTube trailer playlist membership was not confirmed.");
+      // YouTube may take a few seconds to make a newly inserted playlist item
+      // visible to a subsequent list request. The validated insert response is
+      // already durable provider confirmation; do not reject it because of
+      // that eventual-consistency window.
+      membership = await insertPlaylist(providerId);
     }
     const playlistConfirmed = persist(publicationLease, { publicationStatus: "playlist_confirmed", playlistMembershipConfirmedAt: new Date().toISOString() });
     publicationLease = { ...publicationLease, revision: playlistConfirmed.revision };

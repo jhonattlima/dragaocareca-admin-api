@@ -171,6 +171,7 @@ export const config = {
   promotion: {
     enabled: promotionEnabled,
     botUrl: process.env.PROMOTION_BOT_URL ?? "http://bot:8080/internal/promotions",
+    launchNotificationBotUrl: process.env.LAUNCH_NOTIFICATION_BOT_URL ?? "http://bot:3001/internal/launch-notifications",
     sharedSecret: process.env.PROMOTION_SHARED_SECRET ?? "",
     sharedSecretConfigured: Boolean(process.env.PROMOTION_SHARED_SECRET),
     requestTimeoutMs: boundedPositiveInteger(process.env.PROMOTION_REQUEST_TIMEOUT_MS, 10_000, "PROMOTION_REQUEST_TIMEOUT_MS", 120_000),

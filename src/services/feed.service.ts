@@ -21,11 +21,21 @@ const toSaoPauloIso = (d: Date): string => {
 
 const audioUrl = (fileName: string | undefined, episodeId: number): string => {
   const direct = `${config.feed.audioBase}${fileName ?? `episode_${episodeId}.mp3`}`;
-  return `${config.feed.audioTrackerPrefix}${direct}`;
+  const trackerPrefix = config.feed.audioTrackerPrefix.trim();
+  if (!trackerPrefix) return direct;
+
+  // Podtrac's redirect prefix expects the origin URL without its scheme:
+  // redirect.mp3/example.com/path.mp3, not redirect.mp3/https://example.com/.
+  return `${trackerPrefix}${direct.replace(/^https?:\/\//u, "")}`;
 };
 
 const imageUrl = (coverFileName: string | undefined, episodeId: number): string => {
   return `${config.feed.imageBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
+};
+
+const normalizeLegacySnapshotImages = (xmlSnapshot: string, episodeId: number): string => {
+  const canonical = `${config.feed.imageBase.replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
+  return xmlSnapshot.replace(/https?:\/\/[^\s"<>]+\/files\/images\/[^\s"<>]+/gu, canonical);
 };
 
 export const buildFeedXml = (episodes: EpisodeRow[]): string => {
@@ -95,7 +105,7 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
   for (const ep of episodes) {
     if (ep.xmlSnapshot) {
       try {
-        const legacyItem = create(ep.xmlSnapshot).root();
+        const legacyItem = create(normalizeLegacySnapshotImages(ep.xmlSnapshot, ep.episodeId)).root();
         root.import(legacyItem);
         continue;
       } catch {

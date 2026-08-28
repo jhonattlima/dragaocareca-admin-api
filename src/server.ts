@@ -29,6 +29,10 @@ const telegramWorkersEnabled =
   (process.env.ENABLE_TELEGRAM_WORKERS ?? "false").toLowerCase() === "true";
 const transcriptionWorkerEnabled =
   (process.env.ENABLE_TRANSCRIPTION_WORKER ?? "false").toLowerCase() === "true";
+const hashtagAuthoringWorkerEnabled =
+  (process.env.ENABLE_HASHTAG_AUTHORING_WORKER ?? "false").toLowerCase() === "true";
+const youtubeTrailerJobWorkerEnabled =
+  (process.env.ENABLE_YOUTUBE_TRAILER_JOB_WORKER ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
   await connectDb();
@@ -42,11 +46,11 @@ const bootstrap = async (): Promise<void> => {
   // Artifact jobs only prepare local episode files. Keep this worker available even when
   // integrations that depend on external credentials are intentionally disabled.
   await startEpisodeArtifactPreparationWorker();
-  if (!backgroundWorkersDisabled) {
+  if (!backgroundWorkersDisabled || hashtagAuthoringWorkerEnabled) {
     await startEpisodeHashtagAuthoringWorker();
   }
 
-  if (config.youtube.trailerJob.enabled && !backgroundWorkersDisabled) {
+  if (config.youtube.trailerJob.enabled && (!backgroundWorkersDisabled || youtubeTrailerJobWorkerEnabled)) {
     await startYoutubeTrailerJobWorker();
   } else if (config.youtube.trailerJob.enabled) {
     console.info("YouTube trailer job worker disabled by DISABLE_BACKGROUND_WORKERS=true");
@@ -56,6 +60,12 @@ const bootstrap = async (): Promise<void> => {
   // legacy external workers are disabled to avoid a second Telegram poller.
   if (config.promotion.activeOwner === "promotion") {
     await startEpisodePromotionWorker();
+  }
+
+  // Feed-launch delivery is an internal API-to-bot handoff. It must remain
+  // available even when external API-owned workers are disabled.
+  if (config.promotion.legacyLaunchEnabled) {
+    await startLaunchNotificationWorker();
   }
 
   if (backgroundWorkersDisabled) {
@@ -69,7 +79,6 @@ const bootstrap = async (): Promise<void> => {
 
     if (telegramWorkersEnabled) {
       console.info("Telegram workers enabled explicitly while other external workers remain disabled");
-      await startLaunchNotificationWorker();
       await startTelegramBotWorker();
     }
 
@@ -79,7 +88,6 @@ const bootstrap = async (): Promise<void> => {
     }
   } else {
     await startEpisodeTranscriptionWorker();
-    await startLaunchNotificationWorker();
     await startSpotifyMetricsWorker();
     await startYouTubeMetricsWorker();
     await startTelegramBotWorker();
