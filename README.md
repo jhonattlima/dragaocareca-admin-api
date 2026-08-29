@@ -40,6 +40,18 @@ YouTube metrics:
 3. Install deps: `npm install`
 4. Run dev server: `npm run dev`
 
+## Public contact and feed identity
+
+The production feed and public API use `dragaocarecaoficial@gmail.com` as the
+public managing-editor, owner, and contact address. Configure the corresponding
+`FEED_MANAGING_EDITOR`, `FEED_ITUNES_AUTHOR`, `FEED_ITUNES_OWNER_EMAIL`, and
+`PUBLIC_EMAIL` variables in the environment used by each deployment.
+
+The former `contato@dragaocareca.com` address remains an incoming Cloudflare
+Email Routing alias to that Gmail account; it is not the API's public contact
+identity. Keep production values in the ignored `.env.production`/deployment
+secret store and never commit them.
+
 ## Production Checklist
 
 - `NODE_ENV=production`
