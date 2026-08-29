@@ -279,12 +279,12 @@ export const config = {
     defaultImage: process.env.FEED_DEFAULT_IMAGE ?? "https://www.dragaocareca.com/files/images/2026-04-10-v4.jpeg",
     copyright: process.env.FEED_COPYRIGHT ?? "© Dragao Careca - 2019 ©",
     generator: process.env.FEED_GENERATOR ?? "go podcast v1.3.1 (github.com/eduncan911/podcast)",
-    managingEditor: process.env.FEED_MANAGING_EDITOR ?? "contato@dragaocareca.com (Dragao Careca)",
+    managingEditor: process.env.FEED_MANAGING_EDITOR ?? "dragaocarecaoficial@gmail.com (Dragao Careca)",
     categoryList: (process.env.FEED_CATEGORY_LIST ?? "Comedy,Games,RPG")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    itunesAuthor: process.env.FEED_ITUNES_AUTHOR ?? "contato@dragaocareca.com (Dragao Careca)",
+    itunesAuthor: process.env.FEED_ITUNES_AUTHOR ?? "dragaocarecaoficial@gmail.com (Dragao Careca)",
     itunesSummary:
       process.env.FEED_ITUNES_SUMMARY ??
       "Um podcast de entretenimento onde aventureiros contam historias e desbravam a cultura pop com muito humor, nostalgia e entrevistas curiosas.",
@@ -292,7 +292,7 @@ export const config = {
     itunesExplicit: process.env.FEED_ITUNES_EXPLICIT ?? "no",
     itunesType: process.env.FEED_ITUNES_TYPE ?? "episodic",
     itunesOwnerName: process.env.FEED_ITUNES_OWNER_NAME ?? "Jhonatt Lima e Diego Broniszak",
-    itunesOwnerEmail: process.env.FEED_ITUNES_OWNER_EMAIL ?? "contato@dragaocareca.com",
+    itunesOwnerEmail: process.env.FEED_ITUNES_OWNER_EMAIL ?? "dragaocarecaoficial@gmail.com",
     itunesKeywords: process.env.FEED_ITUNES_KEYWORDS ?? "Entertainment,Games,Fiction",
     itunesCategoryPrimary: process.env.FEED_ITUNES_CATEGORY_PRIMARY ?? "Comedy",
     itunesCategoryPrimarySub: process.env.FEED_ITUNES_CATEGORY_PRIMARY_SUB ?? "Improv",
@@ -308,7 +308,7 @@ export const config = {
     aboutDescription:
       process.env.PUBLIC_ABOUT_DESCRIPTION ??
       "Dragão Careca é um podcast de humor com temática de RPG, cultura pop e aventuras improvisadas.",
-    email: process.env.PUBLIC_EMAIL ?? "contato@dragaocareca.com",
+    email: process.env.PUBLIC_EMAIL ?? "dragaocarecaoficial@gmail.com",
     characterSheetsBaseUrl: process.env.PUBLIC_CHARACTER_SHEETS_BASE_URL ?? "https://ficha.dragaocareca.com/#",
     maxEpisodesPerPage: Number(process.env.PUBLIC_MAX_EPISODES_PER_PAGE ?? 10),
     transitionTimeMs: Number(process.env.PUBLIC_TRANSITION_TIME_MS ?? 7000),

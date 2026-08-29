@@ -422,7 +422,7 @@ export const swaggerSpec = swaggerJsdoc({
           type: "object",
           required: ["email", "characterSheetsBaseUrl"],
           properties: {
-            email: { type: "string", example: "contato@dragaocareca.com" },
+            email: { type: "string", example: "dragaocarecaoficial@gmail.com" },
             characterSheetsBaseUrl: { type: "string", format: "uri", example: "https://ficha.dragaocareca.com/#" },
           },
         },
@@ -437,7 +437,7 @@ export const swaggerSpec = swaggerJsdoc({
             "disqus",
           ],
           properties: {
-            email: { type: "string", example: "contato@dragaocareca.com" },
+            email: { type: "string", example: "dragaocarecaoficial@gmail.com" },
             supportersUrl: { type: "string", format: "uri", example: "http://bit.ly/guildadc" },
             characterSheetsBaseUrl: { type: "string", format: "uri", example: "https://ficha.dragaocareca.com/#" },
             maxEpisodesPerPage: { type: "integer", example: 10 },
