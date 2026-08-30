@@ -24,6 +24,7 @@
     "verify:episode-hashtag-authoring:full": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-hashtag-authoring.js",
     "verify:summary-runtime-contract": "NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js",
     "verify:summary-quality-contract": "NODE_ENV=development node dist/scripts/verify-summary-quality-contract.js",
+    "verify:transcript-quality": "npm run build && NODE_ENV=development node dist/scripts/verify-transcript-quality.js",
     "import:episodes": "tsx src/scripts/import-legacy-episodes.ts",
     "spotify:metrics": "npm run build && NODE_ENV=development node dist/scripts/spotify-metrics.js"
   },

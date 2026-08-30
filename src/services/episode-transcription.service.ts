@@ -26,6 +26,10 @@ import {
   type EpisodeDraftState,
   type EpisodeDraftStepStatus,
 } from "../schemas/episode-draft-state";
+import {
+  assertTranscriptTimestampQuality,
+  formatTranscriptSegments,
+} from "./transcript-quality.service";
 
 const execFileAsync = promisify(execFile);
 const tempRoot = path.resolve(os.tmpdir(), "dragaocareca-episode-transcription");
@@ -51,6 +55,12 @@ type GeminiResponse = {
   error?: {
     message?: string;
   };
+};
+
+type GroqTranscriptionResponse = {
+  text?: string;
+  segments?: Array<{ start?: number; text?: string }>;
+  error?: { message?: string };
 };
 
 export type EpisodeTranscriptionStatusSnapshot = {
@@ -378,7 +388,9 @@ const transcribeAudioWithGemini = async (
               {
                 text:
                   `Transcreva integralmente o áudio em ${config.transcription.language === "pt" ? "pt-BR" : config.transcription.language}. ` +
-                  "Preserve nomes próprios, interrupções relevantes e linguagem coloquial. Não resuma, não explique e não adicione título.",
+                  "Preserve nomes próprios, interrupções relevantes e linguagem coloquial. Não resuma, não explique e não adicione título. " +
+                  "Comece cada bloco de fala com um timestamp absoluto no formato M:SS (ou H:MM:SS), em ordem crescente, " +
+                  "e crie blocos frequentes, sem deixar intervalos maiores que 120 segundos entre timestamps. Não invente timestamps.",
               },
               { fileData: { mimeType: uploaded.file.mimeType, fileUri: uploaded.file.uri } },
             ],
@@ -404,6 +416,9 @@ const transcribeAudioWithGemini = async (
     if (!transcript) {
       throw new Error("Gemini transcription completed without output");
     }
+
+    const durationSeconds = await getAudioDurationSeconds(audioPath);
+    assertTranscriptTimestampQuality(rawTranscript ?? "", durationSeconds);
 
     onProgress?.(95);
     return transcript;
@@ -458,14 +473,19 @@ const getAudioDurationSeconds = async (wavPath: string): Promise<number> => {
   return Number.isFinite(duration) && duration > 0 ? duration : 0;
 };
 
-const runTranscriptionCommand = async (wavPath: string, outputBase: string, provider: TranscriptionProvider): Promise<string> => {
+const runTranscriptionCommand = async (
+  wavPath: string,
+  outputBase: string,
+  provider: TranscriptionProvider,
+  timestampOffsetSeconds = 0,
+): Promise<string> => {
   if (provider === "groq") {
     const audioBytes = await fs.promises.readFile(wavPath);
     const form = new FormData();
     form.append("file", new Blob([audioBytes], { type: "audio/wav" }), path.basename(wavPath));
     form.append("model", config.transcription.groqModel);
     form.append("language", config.transcription.language);
-    form.append("response_format", "json");
+    form.append("response_format", "verbose_json");
     form.append("temperature", "0");
     const response = await fetch(`${config.summary.groqApiBaseUrl.replace(/\/+$/, "")}/audio/transcriptions`, {
       method: "POST",
@@ -473,9 +493,15 @@ const runTranscriptionCommand = async (wavPath: string, outputBase: string, prov
       body: form,
       signal: AbortSignal.timeout(config.transcription.timeoutMs),
     });
-    const body = (await response.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
+    const body = (await response.json().catch(() => ({}))) as GroqTranscriptionResponse;
     if (!response.ok) throw new Error(`Groq transcription failed (${response.status}): ${body.error?.message ?? "unknown error"}`);
     console.info(`[transcription] provider=groq chunk=${path.basename(wavPath)} chars=${body.text?.length ?? 0}`);
+    if (body.segments?.length) {
+      return formatTranscriptSegments(
+        body.segments.map((segment) => ({ start: segment.start ?? 0, text: segment.text ?? "" })),
+        timestampOffsetSeconds,
+      );
+    }
     return body.text ?? "";
   }
 
@@ -582,7 +608,7 @@ const transcribeAudioInChunks = async (
         { maxBuffer: 20 * 1024 * 1024 }
       );
 
-      const rawTranscript = await runTranscriptionCommand(chunkPath, chunkBase, provider);
+      const rawTranscript = await runTranscriptionCommand(chunkPath, chunkBase, provider, chunkStart);
       const transcript = normalizeTranscriptText(rawTranscript);
       if (transcript) {
         chunkTexts.push(transcript);
@@ -621,12 +647,13 @@ const transcribeAudioWithGroq = async (audioPath: string, onProgress?: (progress
         "-ac", "1", "-ar", "16000", "-vn", "-f", "wav", chunkPath,
       ], { maxBuffer: 20 * 1024 * 1024 });
 
-      const text = normalizeTranscriptText(await runTranscriptionCommand(chunkPath, chunkPath, "groq"));
+      const text = normalizeTranscriptText(await runTranscriptionCommand(chunkPath, chunkPath, "groq", chunkStart));
       if (text) chunkTexts.push(text);
       onProgress?.(clampProgress(((index + 1) / totalChunks) * 100));
     }
     const transcript = normalizeTranscriptText(chunkTexts.join("\n\n"));
     if (!transcript) throw new Error("Groq transcription completed without output");
+    assertTranscriptTimestampQuality(transcript, durationSeconds);
     return transcript;
   } finally {
     await fs.promises.rm(workingDir, { recursive: true, force: true }).catch(() => undefined);
