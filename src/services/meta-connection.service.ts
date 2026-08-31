@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config/env";
+import { upsertMetaConnectionStatus } from "../database/repositories/meta-connection.repository";
 import { metaConnectionStatusSchema, META_GRAPH_API_VERSION, MetaConnectionStatus, MetaGraphClient, MetaProbeResult } from "../schemas/meta-connection";
 
 const disabledGate = (enabled: boolean, reason: string) => ({
@@ -16,8 +17,8 @@ const defaultProbe: MetaGraphClient = {
     const requestId = randomUUID();
     try {
       const graph = `https://graph.facebook.com/${input.version}`;
-      const get = async (path: string, token: string, fields: string): Promise<Record<string, unknown>> => {
-        const url = `${graph}/${path}?fields=${encodeURIComponent(fields)}`;
+      const get = async (path: string, token: string, fields: string, query = ""): Promise<Record<string, unknown>> => {
+        const url = `${graph}/${path}?fields=${encodeURIComponent(fields)}${query}`;
         const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
         if (!response.ok) throw new Error("Meta provider request failed");
         const body: unknown = await response.json();
@@ -31,7 +32,7 @@ const defaultProbe: MetaGraphClient = {
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
       const pageToken = typeof page?.access_token === "string" ? page.access_token : "";
       const instagram = pageToken ? await get(input.instagramAccountId, pageToken, "id,username,account_type") : {};
-      const debug = await get("debug_token", input.appSecret, "data");
+      const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.userAccessToken)}`);
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
       const expiresAt = typeof debugData.expires_at === "number" ? new Date(debugData.expires_at * 1000).toISOString() : null;
       const valid = debugData.is_valid === true;
@@ -39,12 +40,14 @@ const defaultProbe: MetaGraphClient = {
       return {
         identity: Boolean(page), linkage: linkedId === input.instagramAccountId,
         permissions: Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0,
+        permissionNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
+        taskNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
         version: input.version === META_GRAPH_API_VERSION,
         tokenStatus: valid ? (expiring ? "expiring" : "valid") : "invalid",
-        expiresAt, requestId, diagnostic: Boolean(page) && instagram.account_type === "BUSINESS" ? "validated" : "validation_failed",
+        expiresAt, requestId, diagnostic: Boolean(page) && (instagram.account_type === "BUSINESS" || instagram.account_type === "CREATOR") ? "validated" : "validation_failed",
       };
     } catch (_error) {
-      return { identity: false, linkage: false, permissions: false, version: input.version === META_GRAPH_API_VERSION, tokenStatus: "unknown", expiresAt: null, requestId, diagnostic: "provider_unavailable" };
+      return { identity: false, linkage: false, permissions: false, permissionNames: [], taskNames: [], version: input.version === META_GRAPH_API_VERSION, tokenStatus: "unknown", expiresAt: null, requestId, diagnostic: "provider_unavailable" };
     } finally {
       clearTimeout(timeout);
     }
@@ -81,25 +84,37 @@ export const getMetaConnectionStatus = async (): Promise<MetaConnectionStatus> =
       instagram: disabledGate(config.meta.instagramEnabled, configured ? "Connection validation has not completed." : "Meta connection is not configured."),
       facebookReel: disabledGate(config.meta.facebookReelEnabled, configured ? "Connection validation has not completed." : "Meta connection is not configured."),
     },
+    permissions: [],
+    tasks: [],
     accountTagging: "not_proven" as const,
     checkedAt: null,
     requestId: null,
     diagnostic: configured ? "validation_failed" as const : "not_configured" as const,
   };
 
-  if (!configured || config.meta.graphApiVersion !== META_GRAPH_API_VERSION) return metaConnectionStatusSchema.parse(base);
+  if (!configured || config.meta.graphApiVersion !== META_GRAPH_API_VERSION) {
+    const status = metaConnectionStatusSchema.parse(base);
+    upsertMetaConnectionStatus(status);
+    return status;
+  }
   try {
     const probe = await graphClient.probe({ ...config.meta, version: META_GRAPH_API_VERSION });
-    return metaConnectionStatusSchema.parse({
+    const status = metaConnectionStatusSchema.parse({
       ...base,
       token: { status: probe.tokenStatus, expiresAt: probe.expiresAt },
       checks: { identity: probe.identity, linkage: probe.linkage, permissions: probe.permissions, version: probe.version },
+      permissions: probe.permissionNames,
+      tasks: probe.taskNames,
       gates: { instagram: buildGate(config.meta.instagramEnabled, probe, "instagram"), facebookReel: buildGate(config.meta.facebookReelEnabled, probe, "facebookReel") },
       checkedAt: new Date().toISOString(),
       requestId: probe.requestId,
       diagnostic: probe.diagnostic,
     });
+    upsertMetaConnectionStatus(status);
+    return status;
   } catch (_error) {
-    return metaConnectionStatusSchema.parse(base);
+    const status = metaConnectionStatusSchema.parse(base);
+    upsertMetaConnectionStatus(status);
+    return status;
   }
 };

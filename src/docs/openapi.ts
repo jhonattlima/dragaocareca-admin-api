@@ -629,6 +629,7 @@ export const swaggerSpec = swaggerJsdoc({
             page: { type: "object", additionalProperties: false, required: ["id", "linkedInstagramAccountId"], properties: { id: { type: "string", nullable: true }, linkedInstagramAccountId: { type: "string", nullable: true } } },
             token: { type: "object", additionalProperties: false, required: ["status", "expiresAt"], properties: { status: { type: "string", enum: ["valid", "expiring", "invalid", "unknown"] }, expiresAt: { type: "string", format: "date-time", nullable: true } } },
             checks: { type: "object", additionalProperties: false, required: ["identity", "linkage", "permissions", "version"], properties: { identity: { type: "boolean" }, linkage: { type: "boolean" }, permissions: { type: "boolean" }, version: { type: "boolean" } } },
+            permissions: { type: "array", items: { type: "string", maxLength: 100 }, maxItems: 30 }, tasks: { type: "array", items: { type: "string", maxLength: 100 }, maxItems: 30 },
             gates: { type: "object", additionalProperties: false, required: ["instagram", "facebookReel"], properties: { instagram: { $ref: "#/components/schemas/MetaGate" }, facebookReel: { $ref: "#/components/schemas/MetaGate" } } },
             accountTagging: { type: "string", enum: ["not_checked", "proven", "not_proven", "unsupported"] },
             checkedAt: { type: "string", format: "date-time", nullable: true }, requestId: { type: "string", nullable: true },

@@ -450,8 +450,38 @@ export const getDb = (): DatabaseSync => {
     ensureYoutubeTrailerJobColumns(db);
     ensureYoutubeHashtagCacheTables(db);
     ensureEpisodePromotionTables(db);
+    ensureMetaConnectionTable(db);
   }
   return db;
+};
+
+const ensureMetaConnectionTable = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS meta_connections (
+      connection_key TEXT PRIMARY KEY,
+      contract_version TEXT NOT NULL,
+      graph_api_version TEXT NOT NULL,
+      configured INTEGER NOT NULL CHECK (configured IN (0, 1)),
+      page_id TEXT,
+      linked_instagram_account_id TEXT,
+      token_status TEXT NOT NULL CHECK (token_status IN ('valid', 'expiring', 'invalid', 'unknown')),
+      token_expires_at TEXT,
+      identity_check INTEGER NOT NULL CHECK (identity_check IN (0, 1)),
+      linkage_check INTEGER NOT NULL CHECK (linkage_check IN (0, 1)),
+      permissions_check INTEGER NOT NULL CHECK (permissions_check IN (0, 1)),
+      version_check INTEGER NOT NULL CHECK (version_check IN (0, 1)),
+      permissions_json TEXT NOT NULL DEFAULT '[]',
+      tasks_json TEXT NOT NULL DEFAULT '[]',
+      instagram_gate_json TEXT NOT NULL,
+      facebook_reel_gate_json TEXT NOT NULL,
+      account_tagging TEXT NOT NULL CHECK (account_tagging IN ('not_checked', 'proven', 'not_proven', 'unsupported')),
+      checked_at TEXT,
+      request_id TEXT,
+      diagnostic TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_meta_connections_checked_at ON meta_connections(checked_at);
+  `);
 };
 
 const ensureEpisodePromotionTables = (database: DatabaseSync): void => {

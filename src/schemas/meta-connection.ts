@@ -18,6 +18,8 @@ export const metaConnectionStatusSchema = z.object({
   page: z.object({ id: z.string().nullable(), linkedInstagramAccountId: z.string().nullable() }).strict(),
   token: z.object({ status: z.enum(["valid", "expiring", "invalid", "unknown"]), expiresAt: z.string().datetime({ offset: true }).nullable() }).strict(),
   checks: z.object({ identity: z.boolean(), linkage: z.boolean(), permissions: z.boolean(), version: z.boolean() }).strict(),
+  permissions: z.array(z.string().min(1).max(100)).max(30),
+  tasks: z.array(z.string().min(1).max(100)).max(30),
   gates: z.object({ instagram: metaGateSchema, facebookReel: metaGateSchema }).strict(),
   accountTagging: metaAccountTaggingSchema,
   checkedAt: z.string().datetime({ offset: true }).nullable(),
@@ -34,6 +36,8 @@ export type MetaProbeResult = {
   identity: boolean;
   linkage: boolean;
   permissions: boolean;
+  permissionNames: string[];
+  taskNames: string[];
   version: boolean;
   tokenStatus: "valid" | "expiring" | "invalid" | "unknown";
   expiresAt: string | null;
