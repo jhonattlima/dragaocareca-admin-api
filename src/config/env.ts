@@ -229,6 +229,16 @@ export const config = {
       ),
     },
   },
+  meta: {
+    graphApiVersion: process.env.META_GRAPH_API_VERSION ?? "v25.0",
+    userAccessToken: process.env.META_USER_ACCESS_TOKEN ?? "",
+    appId: process.env.META_APP_ID ?? "",
+    appSecret: process.env.META_APP_SECRET ?? "",
+    pageId: process.env.META_PAGE_ID ?? "",
+    instagramAccountId: process.env.META_INSTAGRAM_ACCOUNT_ID ?? "",
+    instagramEnabled: parseBoolean(process.env.META_INSTAGRAM_ENABLED),
+    facebookReelEnabled: parseBoolean(process.env.META_FACEBOOK_REEL_ENABLED),
+  },
   transcription: {
     enabled: (process.env.EPISODE_TRANSCRIPTION_ENABLED ?? "false").toLowerCase() === "true",
     provider: process.env.EPISODE_TRANSCRIPTION_PROVIDER ?? "internal",

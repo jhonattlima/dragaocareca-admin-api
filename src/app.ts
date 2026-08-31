@@ -11,6 +11,7 @@ import { assetsRouter } from "./routes/assets.routes";
 import { episodesRouter } from "./routes/episodes.routes";
 import { feedRouter } from "./routes/feed.routes";
 import { metricsRouter } from "./routes/metrics.routes";
+import { metaConnectionRouter } from "./routes/meta-connection.routes";
 import { publicEpisodesRouter } from "./routes/public-episodes.routes";
 import { publicSiteRouter } from "./routes/public-site.routes";
 import { publicSupportersRouter } from "./routes/public-supporters.routes";
@@ -87,6 +88,7 @@ app.use("/v1/public/supporters", publicSupportersRouter);
 app.use("/v1/episodes", episodesRouter);
 app.use("/v1/feed", feedRouter);
 app.use("/v1/metrics", metricsRouter);
+app.use("/v1/meta-connection", metaConnectionRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {

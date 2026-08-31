@@ -5,6 +5,7 @@ import {
   PROMOTION_CONTRACT_VERSION,
   type PromotionContractProjection,
 } from "../schemas/episode-promotion";
+import { META_GRAPH_API_VERSION } from "../schemas/meta-connection";
 
 export const swaggerSpec = swaggerJsdoc({
   definition: {
@@ -617,6 +618,24 @@ export const swaggerSpec = swaggerJsdoc({
             details: { type: "string", nullable: true },
           },
         },
+        MetaConnectionStatus: {
+          type: "object", additionalProperties: false,
+          description: "Authenticated, redacted Meta connection projection. Credentials, Graph URLs, headers, tokens, raw responses, and raw provider errors are never returned.",
+          required: ["contractVersion", "graphApiVersion", "configured", "page", "token", "checks", "gates", "accountTagging", "checkedAt", "requestId", "diagnostic"],
+          properties: {
+            contractVersion: { type: "string", enum: ["meta-connection.v1"] },
+            graphApiVersion: { type: "string", enum: [META_GRAPH_API_VERSION] },
+            configured: { type: "boolean" },
+            page: { type: "object", additionalProperties: false, required: ["id", "linkedInstagramAccountId"], properties: { id: { type: "string", nullable: true }, linkedInstagramAccountId: { type: "string", nullable: true } } },
+            token: { type: "object", additionalProperties: false, required: ["status", "expiresAt"], properties: { status: { type: "string", enum: ["valid", "expiring", "invalid", "unknown"] }, expiresAt: { type: "string", format: "date-time", nullable: true } } },
+            checks: { type: "object", additionalProperties: false, required: ["identity", "linkage", "permissions", "version"], properties: { identity: { type: "boolean" }, linkage: { type: "boolean" }, permissions: { type: "boolean" }, version: { type: "boolean" } } },
+            gates: { type: "object", additionalProperties: false, required: ["instagram", "facebookReel"], properties: { instagram: { $ref: "#/components/schemas/MetaGate" }, facebookReel: { $ref: "#/components/schemas/MetaGate" } } },
+            accountTagging: { type: "string", enum: ["not_checked", "proven", "not_proven", "unsupported"] },
+            checkedAt: { type: "string", format: "date-time", nullable: true }, requestId: { type: "string", nullable: true },
+            diagnostic: { type: "string", enum: ["not_configured", "disabled", "validated", "validation_failed", "provider_unavailable"] },
+          },
+        },
+        MetaGate: { type: "object", additionalProperties: false, required: ["enabled", "canPublish", "status", "reasons"], properties: { enabled: { type: "boolean" }, canPublish: { type: "boolean" }, status: { type: "string", enum: ["disabled", "blocked", "ready"] }, reasons: { type: "array", items: { type: "string" } } } },
       },
     },
     paths: {
@@ -995,6 +1014,12 @@ export const swaggerSpec = swaggerJsdoc({
             "400": { description: "Connector unavailable or misconfigured" },
             "401": { description: "Unauthorized" },
           },
+        },
+      },
+      "/v1/meta-connection/status": {
+        get: {
+          tags: ["Meta Connection"], summary: "Read redacted Meta connection and capability-gate status", security: [{ bearerAuth: [] }],
+          responses: { "200": { description: "Redacted no-store connection projection", content: { "application/json": { schema: { $ref: "#/components/schemas/MetaConnectionStatus" } } } }, "401": { description: "Unauthorized" } },
         },
       },
       "/v1/episodes/drafts": {
