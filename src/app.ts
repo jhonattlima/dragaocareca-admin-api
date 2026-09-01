@@ -17,6 +17,7 @@ import { publicSiteRouter } from "./routes/public-site.routes";
 import { publicSupportersRouter } from "./routes/public-supporters.routes";
 import { internalPromotionMediaRouter } from "./routes/internal-promotion-media.routes";
 import { internalEpisodeRouter } from "./routes/internal-episode.routes";
+import { internalPublicationRouter } from "./routes/internal-publication.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
 
 export const app = express();
@@ -41,6 +42,7 @@ app.use(
 );
 app.use("/internal/promotion-media", internalPromotionMediaRouter);
 app.use("/internal/v1", internalEpisodeRouter);
+app.use("/internal/publication", internalPublicationRouter);
 
 app.get("/health", async (_req, res, next) => {
   try {
