@@ -25,6 +25,7 @@
     "verify:meta-connection": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-meta-connection.js --fake-only",
     "verify:meta-provider-contract": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-meta-provider-contract.js",
     "verify:episode-publication-contract": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-publication-contract.js --fake-only",
+    "verify:episode-publication-delivery": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-publication-delivery.js --fake-only",
     "verify:summary-runtime-contract": "NODE_ENV=development node dist/scripts/verify-summary-runtime-contract.js",
     "verify:summary-quality-contract": "NODE_ENV=development node dist/scripts/verify-summary-quality-contract.js",
     "verify:transcript-quality": "npm run build && NODE_ENV=development node dist/scripts/verify-transcript-quality.js",

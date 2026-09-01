@@ -4,7 +4,7 @@ import { z } from "zod";
 export const EPISODE_PUBLICATION_CONTRACT_VERSION = "episode-publication.v1";
 export const publicationDestinationSchema = z.enum(["telegram", "instagram_reel", "facebook_native_video"]);
 export type PublicationDestination = z.infer<typeof publicationDestinationSchema>;
-export const publicationLifecycleSchema = z.enum(["pending", "eligible", "blocked", "delivering", "published", "failed"]);
+export const publicationLifecycleSchema = z.enum(["pending", "eligible", "delivering", "processing", "published", "failed", "blocked", "uncertain"]);
 export type PublicationLifecycle = z.infer<typeof publicationLifecycleSchema>;
 
 export const publicationSourceSchema = z.object({
@@ -46,7 +46,18 @@ export type PublicationEffectProjection = {
   remoteId: string | null;
   permalink: string | null;
   preflight: PublicationPreflight;
+  checkpoint: PublicationCheckpoint;
+  attempts: number;
+  nextAttemptAt: string | null;
 };
+
+export const publicationCheckpointSchema = z.object({
+  stage: z.enum(["none", "preflight", "provider_created", "upload_accepted", "processing", "publish_complete", "remote_identity"]),
+  providerId: z.string().max(200).nullable(),
+  uploadId: z.string().max(200).nullable(),
+  updatedAt: z.string().datetime({ offset: true }).nullable(),
+}).strict();
+export type PublicationCheckpoint = z.infer<typeof publicationCheckpointSchema>;
 
 export const publicationSourceRevision = (episodeId: number, source: PublicationSource): string =>
   `episode:${episodeId}:${createHash("sha256").update(JSON.stringify(source)).digest("hex")}`;

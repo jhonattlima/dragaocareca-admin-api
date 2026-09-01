@@ -518,6 +518,12 @@ const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
     CREATE INDEX IF NOT EXISTS idx_episode_publication_effects_intent
       ON episode_publication_effects(intent_id, destination);
   `);
+  const columns = database.prepare("PRAGMA table_info(episode_publication_effects)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("checkpoint_json")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT '{\"stage\":\"none\",\"providerId\":null,\"uploadId\":null,\"updatedAt\":null}'");
+  if (!names.has("attempts")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+  if (!names.has("next_attempt_at")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN next_attempt_at TEXT");
+  if (!names.has("lease_id")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN lease_id TEXT");
 };
 
 const ensureEpisodeSocialMetadataColumns = (database: DatabaseSync): void => {

@@ -5,6 +5,8 @@ import { config } from "../config/env";
 import { publicationMetadataSchema, publicationSourceRevision, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../schemas/episode-publication";
 import { preflightEpisodePublicationMedia } from "./episode-publication-media.service";
 import { postLaunchNotification } from "./launch-notification-client.service";
+import { deliverInstagramReel } from "./instagram-reel-publication.service";
+import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.service";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
 
@@ -40,6 +42,12 @@ export const createEpisodePublication = async (episode: EpisodeRow): Promise<{ s
 
 export const deliverEpisodePublication = async (episode: EpisodeRow): Promise<{ delivered: boolean; effects: PublicationEffectProjection[] }> => {
   const publication = await createEpisodePublication(episode);
+  const instagram = publication.effects.find((effect) => effect.destination === "instagram_reel");
+  const facebook = publication.effects.find((effect) => effect.destination === "facebook_native_video");
+  await Promise.all([
+    instagram ? deliverInstagramReel(episode.episodeId, instagram) : Promise.resolve(),
+    facebook ? deliverFacebookNativeVideo(episode.episodeId, facebook) : Promise.resolve(),
+  ]);
   const telegram = publication.effects.find((effect) => effect.destination === "telegram");
   if (!telegram || telegram.lifecycle !== "eligible") return { delivered: false, effects: publication.effects };
   await postLaunchNotification(episode);

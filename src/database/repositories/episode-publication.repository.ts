@@ -1,8 +1,8 @@
 import { getDb, nowIso } from "../sqlite";
-import { publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
+import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
 
 type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight };
-type Row = { effect_key: string; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null };
+type Row = { effect_key: string; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null };
 
 const map = (row: Row): PublicationEffectProjection => ({
   destination: publicationDestinationSchema.parse(row.destination),
@@ -15,6 +15,9 @@ const map = (row: Row): PublicationEffectProjection => ({
   remoteId: row.remote_id,
   permalink: row.permalink,
   preflight: publicationPreflightSchema.parse(JSON.parse(row.preflight_json)),
+  checkpoint: publicationCheckpointSchema.parse(JSON.parse(row.checkpoint_json)),
+  attempts: row.attempts,
+  nextAttemptAt: row.next_attempt_at,
 });
 
 export const episodePublicationRepository = {
@@ -42,5 +45,16 @@ export const episodePublicationRepository = {
   },
   markTelegramDelivered(episodeId: number, sourceRevision: string): void {
     getDb().prepare("UPDATE episode_publication_effects SET lifecycle = 'published', updated_at = ? WHERE episode_id = ? AND source_revision = ? AND destination = 'telegram' AND lifecycle = 'eligible'").run(nowIso(), episodeId, sourceRevision);
+  },
+  updateCheckpoint(effectKey: string, checkpoint: PublicationCheckpoint, lifecycle: string, diagnostics: string[] = [], remoteId: string | null = null, permalink: string | null = null): void {
+    publicationCheckpointSchema.parse(checkpoint);
+    publicationLifecycleSchema.parse(lifecycle);
+    getDb().prepare("UPDATE episode_publication_effects SET checkpoint_json = ?, lifecycle = ?, diagnostics_json = ?, remote_id = COALESCE(?, remote_id), permalink = COALESCE(?, permalink), updated_at = ? WHERE effect_key = ?").run(JSON.stringify(checkpoint), lifecycle, JSON.stringify(diagnostics), remoteId, permalink, nowIso(), effectKey);
+  },
+  recordAttempt(effectKey: string, nextAttemptAt: string | null, diagnostics: string[]): number {
+    const row = getDb().prepare("SELECT attempts FROM episode_publication_effects WHERE effect_key = ?").get(effectKey) as { attempts: number } | undefined;
+    const attempts = (row?.attempts ?? 0) + 1;
+    getDb().prepare("UPDATE episode_publication_effects SET attempts = ?, next_attempt_at = ?, diagnostics_json = ?, updated_at = ? WHERE effect_key = ?").run(attempts, nextAttemptAt, JSON.stringify(diagnostics), nowIso(), effectKey);
+    return attempts;
   },
 };
