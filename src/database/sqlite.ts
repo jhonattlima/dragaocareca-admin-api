@@ -451,6 +451,7 @@ export const getDb = (): DatabaseSync => {
     ensureYoutubeHashtagCacheTables(db);
     ensureEpisodePromotionTables(db);
     ensureMetaConnectionTable(db);
+    ensureEpisodePublicationTables(db);
   }
   return db;
 };
@@ -481,6 +482,40 @@ const ensureMetaConnectionTable = (database: DatabaseSync): void => {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_meta_connections_checked_at ON meta_connections(checked_at);
+  `);
+};
+
+const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS episode_publication_intents (
+      intent_id TEXT PRIMARY KEY,
+      episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+      source_revision TEXT NOT NULL,
+      source_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (episode_id, source_revision)
+    );
+    CREATE TABLE IF NOT EXISTS episode_publication_effects (
+      effect_key TEXT PRIMARY KEY,
+      intent_id TEXT NOT NULL REFERENCES episode_publication_intents(intent_id) ON DELETE CASCADE,
+      episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+      destination TEXT NOT NULL,
+      source_revision TEXT NOT NULL,
+      source_json TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      eligibility TEXT NOT NULL CHECK (eligibility IN ('eligible', 'blocked')),
+      lifecycle TEXT NOT NULL CHECK (lifecycle IN ('pending', 'eligible', 'blocked', 'delivering', 'published', 'failed')),
+      diagnostics_json TEXT NOT NULL DEFAULT '[]',
+      preflight_json TEXT NOT NULL,
+      remote_id TEXT,
+      permalink TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (intent_id, destination, source_revision)
+    );
+    CREATE INDEX IF NOT EXISTS idx_episode_publication_effects_intent
+      ON episode_publication_effects(intent_id, destination);
   `);
 };
 

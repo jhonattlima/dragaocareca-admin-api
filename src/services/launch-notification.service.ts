@@ -1,5 +1,5 @@
 import { episodeRepository } from "../database/repositories/episode.repository";
-import { postLaunchNotification } from "./launch-notification-client.service";
+import { deliverEpisodePublication } from "./episode-publication.service";
 
 type LaunchNotificationCandidate = {
   episodeId: number;
@@ -55,7 +55,7 @@ export const deliverPendingLaunchNotification = async (
   }
 
   try {
-    await postLaunchNotification(episode);
+    await deliverEpisodePublication(episode);
     episodeRepository.markLaunchSent(episodeId);
     return { delivered: true, alreadySent: false };
   } catch (error) {
