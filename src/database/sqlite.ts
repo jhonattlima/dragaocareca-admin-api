@@ -452,6 +452,7 @@ export const getDb = (): DatabaseSync => {
     ensureEpisodePromotionTables(db);
     ensureMetaConnectionTable(db);
     ensureEpisodePublicationTables(db);
+    ensureEpisodeSocialMetadataColumns(db);
   }
   return db;
 };
@@ -517,6 +518,13 @@ const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
     CREATE INDEX IF NOT EXISTS idx_episode_publication_effects_intent
       ON episode_publication_effects(intent_id, destination);
   `);
+};
+
+const ensureEpisodeSocialMetadataColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(episodes)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("instagram_caption_mentions_json")) database.exec("ALTER TABLE episodes ADD COLUMN instagram_caption_mentions_json TEXT NOT NULL DEFAULT '[]';");
+  if (!names.has("instagram_hashtags_json")) database.exec("ALTER TABLE episodes ADD COLUMN instagram_hashtags_json TEXT NOT NULL DEFAULT '[]';");
 };
 
 const ensureEpisodePromotionTables = (database: DatabaseSync): void => {

@@ -13,6 +13,8 @@ export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   citations: string[];
   musicCredits: string[];
   coverCredits: string[];
+  instagramCaptionMentions: string[];
+  instagramHashtags: string[];
   transcriptFileName?: string | null;
   transcriptStatus?: "idle" | "pending" | "processing" | "done" | "error";
   transcriptUpdatedAt?: string | null;
@@ -53,6 +55,8 @@ type SqliteEpisodeRow = {
   xml_snapshot: string | null;
   music_credits_json: string;
   cover_credits_json: string;
+  instagram_caption_mentions_json: string;
+  instagram_hashtags_json: string;
   transcript_file_name: string | null;
   transcript_status: "idle" | "pending" | "processing" | "done" | "error";
   transcript_updated_at: string | null;
@@ -411,6 +415,8 @@ const mapRow = (row: SqliteEpisodeRow): EpisodeRow => ({
   xmlSnapshot: row.xml_snapshot ?? undefined,
   musicCredits: parseArray(row.music_credits_json),
   coverCredits: parseArray(row.cover_credits_json),
+  instagramCaptionMentions: parseArray(row.instagram_caption_mentions_json),
+  instagramHashtags: parseArray(row.instagram_hashtags_json),
   transcriptFileName: row.transcript_file_name ?? undefined,
   transcriptStatus: row.transcript_status,
   transcriptUpdatedAt: row.transcript_updated_at ?? undefined,
@@ -447,14 +453,14 @@ const baseInsert = `
 INSERT INTO episodes (
   episode_id, is_draft, title, summary, episode_number, episode_type, pub_date, duration, bytes, explicit,
   authors_json, guests_json, tags_json, citations_json, file_name, cover_file_name, cover_low_file_name,
-  trailer_file_name, trailer_video_file_name, trailer_video_sync_status, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json,
+  trailer_file_name, trailer_video_file_name, trailer_video_sync_status, youtube, spotify_id, xml_snapshot, music_credits_json, cover_credits_json, instagram_caption_mentions_json, instagram_hashtags_json,
   transcript_file_name, transcript_status, transcript_updated_at, transcript_error,
   launch_notification_state, launch_notification_queued_at, launch_notification_sent_at, launch_notification_error,
   created_at, updated_at
 ) VALUES (
   @episodeId, @isDraft, @title, @summary, @episodeNumber, @episodeType, @pubDate, @duration, @bytes, @explicit,
   @authorsJson, @guestsJson, @tagsJson, @citationsJson, @fileName, @coverFileName, @coverLowFileName,
-  @trailerFileName, @trailerVideoFileName, @trailerVideoSyncStatus, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson,
+  @trailerFileName, @trailerVideoFileName, @trailerVideoSyncStatus, @youtube, @spotifyId, @xmlSnapshot, @musicCreditsJson, @coverCreditsJson, @instagramCaptionMentionsJson, @instagramHashtagsJson,
   @transcriptFileName, @transcriptStatus, @transcriptUpdatedAt, @transcriptError,
   @launchNotificationState, @launchNotificationQueuedAt, @launchNotificationSentAt, @launchNotificationError,
   @createdAt, @updatedAt
@@ -744,6 +750,8 @@ export const episodeRepository = {
       xmlSnapshot: input.xmlSnapshot ?? null,
       musicCreditsJson: jsonArray(input.musicCredits),
       coverCreditsJson: jsonArray(input.coverCredits),
+      instagramCaptionMentionsJson: jsonArray(input.instagramCaptionMentions),
+      instagramHashtagsJson: jsonArray(input.instagramHashtags),
       transcriptFileName: null,
       transcriptStatus: "idle",
       transcriptUpdatedAt: null,
@@ -803,6 +811,8 @@ export const episodeRepository = {
         xml_snapshot = @xmlSnapshot,
         music_credits_json = @musicCreditsJson,
         cover_credits_json = @coverCreditsJson,
+        instagram_caption_mentions_json = @instagramCaptionMentionsJson,
+        instagram_hashtags_json = @instagramHashtagsJson,
         transcript_file_name = @transcriptFileName,
         transcript_status = @transcriptStatus,
         transcript_updated_at = @transcriptUpdatedAt,
@@ -834,6 +844,8 @@ export const episodeRepository = {
       xmlSnapshot: input.xmlSnapshot ?? null,
       musicCreditsJson: jsonArray(input.musicCredits),
       coverCreditsJson: jsonArray(input.coverCredits),
+      instagramCaptionMentionsJson: jsonArray(input.instagramCaptionMentions),
+      instagramHashtagsJson: jsonArray(input.instagramHashtags),
       transcriptFileName: existing.transcriptFileName ?? null,
       transcriptStatus: existing.transcriptStatus ?? "idle",
       transcriptUpdatedAt: existing.transcriptUpdatedAt ?? null,

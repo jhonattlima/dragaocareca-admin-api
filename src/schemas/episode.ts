@@ -65,6 +65,8 @@ export const episodeSchema = z.object({
   xmlSnapshot: z.string().optional(),
   musicCredits: completeMusicCredits,
   coverCredits: z.array(z.string()).default([]),
+  instagramCaptionMentions: z.array(z.string().trim().max(40)).max(50).optional(),
+  instagramHashtags: z.array(z.string().trim().max(100)).max(50).optional(),
 });
 
 export type EpisodeInput = z.infer<typeof episodeSchema>;
