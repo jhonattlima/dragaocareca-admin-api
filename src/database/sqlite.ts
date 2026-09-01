@@ -506,7 +506,7 @@ const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
       source_json TEXT NOT NULL,
       metadata_json TEXT NOT NULL,
       eligibility TEXT NOT NULL CHECK (eligibility IN ('eligible', 'blocked')),
-      lifecycle TEXT NOT NULL CHECK (lifecycle IN ('pending', 'eligible', 'blocked', 'delivering', 'published', 'failed')),
+      lifecycle TEXT NOT NULL CHECK (lifecycle IN ('pending', 'eligible', 'delivering', 'processing', 'published', 'failed', 'blocked', 'uncertain')),
       diagnostics_json TEXT NOT NULL DEFAULT '[]',
       preflight_json TEXT NOT NULL,
       remote_id TEXT,
