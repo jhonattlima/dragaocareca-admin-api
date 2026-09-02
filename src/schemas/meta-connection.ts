@@ -29,7 +29,7 @@ export const metaConnectionStatusSchema = z.object({
 export type MetaConnectionStatus = z.infer<typeof metaConnectionStatusSchema>;
 
 export type MetaGraphClient = {
-  probe: (input: { pageId: string; instagramAccountId: string; userAccessToken: string; pageAccessToken: string; appId: string; appSecret: string; version: string }) => Promise<MetaProbeResult>;
+  probe: (input: { pageId: string; instagramAccountId: string; userAccessToken: string; pageAccessToken: string; systemUserAccessToken: string; appId: string; appSecret: string; version: string }) => Promise<MetaProbeResult>;
 };
 
 export type MetaProbeResult = {

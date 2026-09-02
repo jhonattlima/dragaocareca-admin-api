@@ -26,25 +26,25 @@ const defaultProbe: MetaGraphClient = {
         if (!body || typeof body !== "object") throw new Error("Meta provider response invalid");
         return body as Record<string, unknown>;
       };
-      const accounts = await get("me/accounts", input.userAccessToken, "id,name,tasks,instagram_business_account,access_token");
+      const publicationToken = input.systemUserAccessToken || input.pageAccessToken;
+      const accounts = input.systemUserAccessToken ? {} : await get("me/accounts", input.userAccessToken, "id,name,tasks,instagram_business_account,access_token");
       const data = Array.isArray(accounts.data) ? accounts.data : [];
-      const page = data.find((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).id === input.pageId) as Record<string, unknown> | undefined;
+      const page = input.systemUserAccessToken
+        ? await get(input.pageId, publicationToken, "id,name,instagram_business_account,tasks")
+        : data.find((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).id === input.pageId) as Record<string, unknown> | undefined;
       const linked = page?.instagram_business_account;
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
-      const instagram = input.pageAccessToken ? await get(input.instagramAccountId, input.pageAccessToken, "id,username") : {};
-      const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(input.userAccessToken)}`);
-      const pageDebug = await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(input.pageAccessToken)}`);
+      const instagram = publicationToken ? await get(input.instagramAccountId, publicationToken, "id,username") : {};
+      const debug = publicationToken ? await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(publicationToken)}`) : {};
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
-      const pageDebugData = pageDebug.data && typeof pageDebug.data === "object" ? pageDebug.data as Record<string, unknown> : {};
       const expiresAt = typeof debugData.expires_at === "number" ? new Date(debugData.expires_at * 1000).toISOString() : null;
-      const pageExpiresAt = typeof pageDebugData.expires_at === "number" ? new Date(pageDebugData.expires_at * 1000).toISOString() : null;
-      const valid = debugData.is_valid === true && pageDebugData.is_valid === true;
-      const lifecycleExpiresAt = pageExpiresAt ?? expiresAt;
+      const valid = debugData.is_valid === true;
+      const lifecycleExpiresAt = expiresAt;
       const expiring = lifecycleExpiresAt !== null && new Date(lifecycleExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
       return {
         identity: Boolean(page), linkage: linkedId === input.instagramAccountId,
-        permissions: Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0,
-        permissionNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
+        permissions: (Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0) || (Array.isArray(debugData.scopes) && debugData.scopes.length > 0),
+        permissionNames: Array.isArray(debugData.scopes) ? debugData.scopes.filter((scope): scope is string => typeof scope === "string") : [],
         taskNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
         version: input.version === META_GRAPH_API_VERSION,
         tokenStatus: valid ? (expiring ? "expiring" : "valid") : "invalid",
@@ -76,7 +76,7 @@ const buildGate = (enabled: boolean, probe: MetaProbeResult, network: "instagram
 };
 
 export const getMetaConnectionStatus = async (): Promise<MetaConnectionStatus> => {
-  const configured = Boolean(config.meta.userAccessToken && config.meta.pageAccessToken && config.meta.pageId && config.meta.instagramAccountId);
+  const configured = Boolean((config.meta.systemUserAccessToken || (config.meta.userAccessToken && config.meta.pageAccessToken)) && config.meta.pageId && config.meta.instagramAccountId);
   const base = {
     contractVersion: "meta-connection.v1" as const,
     graphApiVersion: META_GRAPH_API_VERSION as typeof META_GRAPH_API_VERSION,
