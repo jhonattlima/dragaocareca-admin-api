@@ -14,7 +14,7 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
   try {
     let identity = effect.checkpoint.providerId;
     if (!identity) {
-      const result = await provider.createInstagramContainer({ mediaUrl: `https://media.invalid/${effect.source.mediaReference}`, caption: effect.metadata.renderedCaption });
+      const result = await provider.createInstagramContainer({ mediaUrl: `${config.meta.providerMediaBaseUrl}/${episodeId}/trailer.mp4`, caption: effect.metadata.renderedCaption });
       identity = result.id;
       episodePublicationRepository.updateCheckpoint(key, checkpoint("provider_created", result), "processing");
     }
@@ -35,4 +35,3 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
 };
 
 export const readTrailerBytes = (path: string): Promise<Blob> => fs.promises.readFile(path).then((bytes) => new Blob([bytes], { type: "video/mp4" }));
-

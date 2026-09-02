@@ -19,6 +19,8 @@ import { internalPromotionMediaRouter } from "./routes/internal-promotion-media.
 import { internalEpisodeRouter } from "./routes/internal-episode.routes";
 import { internalPublicationRouter } from "./routes/internal-publication.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
+import fs from "node:fs";
+import { getEpisodePromotionMedia } from "./services/episode-promotion-media.service";
 
 export const app = express();
 
@@ -30,8 +32,27 @@ app.use(
 );
 app.use(morgan("[:date[iso]] :method :url :status :response-time ms - :res[content-length]"));
 app.use(express.json({ limit: "4mb" }));
-app.use("/media/episodes/:episodeId/trailer.mp4", (_req, res) => {
+app.use("/media/episodes/:episodeId/trailer.mp4", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
+  if (req.method === "GET" && config.meta.providerMediaExposureEnabled && Number(req.params.episodeId) === config.meta.providerMediaEpisodeId) {
+    void getEpisodePromotionMedia(Number(req.params.episodeId)).then((media) => {
+      const range = req.get("range");
+      const match = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
+      let start = 0;
+      let end = media.byteCount - 1;
+      if (range && (!match || (!match[1] && !match[2]))) { res.status(416).setHeader("Content-Range", `bytes */${media.byteCount}`).end(); return; }
+      if (match?.[1]) start = Number(match[1]);
+      if (match?.[2]) end = Number(match[2]);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= media.byteCount) { res.status(416).setHeader("Content-Range", `bytes */${media.byteCount}`).end(); return; }
+      end = Math.min(end, media.byteCount - 1);
+      res.status(range ? 206 : 200).set({ "Content-Type": media.mimeType, "Content-Length": String(end - start + 1), "Accept-Ranges": "bytes", ...(range ? { "Content-Range": `bytes ${start}-${end}/${media.byteCount}` } : {}) });
+      fs.createReadStream(media.filePath, { start, end }).on("error", () => res.destroy()).pipe(res);
+    }).catch(() => res.status(404).json({ message: "Media resource is unavailable." }));
+    return;
+  }
+  next();
+});
+app.use("/media/episodes/:episodeId/trailer.mp4", (_req, res) => {
   res.status(404).json({ message: "Media resource is unavailable." });
 });
 app.use(

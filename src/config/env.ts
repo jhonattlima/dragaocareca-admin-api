@@ -238,6 +238,9 @@ export const config = {
     instagramAccountId: process.env.META_INSTAGRAM_ACCOUNT_ID ?? "",
     instagramEnabled: parseBoolean(process.env.META_INSTAGRAM_ENABLED),
     facebookReelEnabled: parseBoolean(process.env.META_FACEBOOK_REEL_ENABLED),
+    providerMediaBaseUrl: process.env.META_PROVIDER_MEDIA_BASE_URL ?? "https://api.dragaocareca.com/media/episodes",
+    providerMediaEpisodeId: Number(process.env.META_PROVIDER_MEDIA_EPISODE_ID ?? 0),
+    providerMediaExposureEnabled: parseBoolean(process.env.META_PROVIDER_MEDIA_EXPOSURE_ENABLED),
   },
   transcription: {
     enabled: (process.env.EPISODE_TRANSCRIPTION_ENABLED ?? "false").toLowerCase() === "true",
