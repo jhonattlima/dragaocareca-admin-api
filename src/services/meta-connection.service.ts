@@ -18,7 +18,8 @@ const defaultProbe: MetaGraphClient = {
     try {
       const graph = `https://graph.facebook.com/${input.version}`;
       const get = async (path: string, token: string, fields: string, query = ""): Promise<Record<string, unknown>> => {
-        const url = `${graph}/${path}?fields=${encodeURIComponent(fields)}${query}`;
+        const fieldQuery = fields ? `?fields=${encodeURIComponent(fields)}` : "?";
+        const url = `${graph}/${path}${fieldQuery}${query}`;
         const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
         if (!response.ok) throw new Error("Meta provider request failed");
         const body: unknown = await response.json();
@@ -31,8 +32,8 @@ const defaultProbe: MetaGraphClient = {
       const linked = page?.instagram_business_account;
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
       const instagram = input.pageAccessToken ? await get(input.instagramAccountId, input.pageAccessToken, "id,username") : {};
-      const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.userAccessToken)}`);
-      const pageDebug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.pageAccessToken)}`);
+      const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(input.userAccessToken)}`);
+      const pageDebug = await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(input.pageAccessToken)}`);
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
       const pageDebugData = pageDebug.data && typeof pageDebug.data === "object" ? pageDebug.data as Record<string, unknown> : {};
       const expiresAt = typeof debugData.expires_at === "number" ? new Date(debugData.expires_at * 1000).toISOString() : null;
