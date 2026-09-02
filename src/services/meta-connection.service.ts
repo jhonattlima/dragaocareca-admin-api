@@ -30,13 +30,16 @@ const defaultProbe: MetaGraphClient = {
       const page = data.find((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).id === input.pageId) as Record<string, unknown> | undefined;
       const linked = page?.instagram_business_account;
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
-      const pageToken = typeof page?.access_token === "string" ? page.access_token : "";
-      const instagram = pageToken ? await get(input.instagramAccountId, pageToken, "id,username,account_type") : {};
+      const instagram = input.pageAccessToken ? await get(input.instagramAccountId, input.pageAccessToken, "id,username,account_type") : {};
       const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.userAccessToken)}`);
+      const pageDebug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.pageAccessToken)}`);
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
+      const pageDebugData = pageDebug.data && typeof pageDebug.data === "object" ? pageDebug.data as Record<string, unknown> : {};
       const expiresAt = typeof debugData.expires_at === "number" ? new Date(debugData.expires_at * 1000).toISOString() : null;
-      const valid = debugData.is_valid === true;
-      const expiring = expiresAt !== null && new Date(expiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
+      const pageExpiresAt = typeof pageDebugData.expires_at === "number" ? new Date(pageDebugData.expires_at * 1000).toISOString() : null;
+      const valid = debugData.is_valid === true && pageDebugData.is_valid === true;
+      const lifecycleExpiresAt = pageExpiresAt ?? expiresAt;
+      const expiring = lifecycleExpiresAt !== null && new Date(lifecycleExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
       return {
         identity: Boolean(page), linkage: linkedId === input.instagramAccountId,
         permissions: Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0,
@@ -44,7 +47,7 @@ const defaultProbe: MetaGraphClient = {
         taskNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
         version: input.version === META_GRAPH_API_VERSION,
         tokenStatus: valid ? (expiring ? "expiring" : "valid") : "invalid",
-        expiresAt, requestId, diagnostic: Boolean(page) && (instagram.account_type === "BUSINESS" || instagram.account_type === "CREATOR") ? "validated" : "validation_failed",
+        expiresAt: lifecycleExpiresAt, requestId, diagnostic: Boolean(page) && linkedId === input.instagramAccountId && (instagram.account_type === "BUSINESS" || instagram.account_type === "CREATOR") && valid ? "validated" : "validation_failed",
       };
     } catch (_error) {
       return { identity: false, linkage: false, permissions: false, permissionNames: [], taskNames: [], version: input.version === META_GRAPH_API_VERSION, tokenStatus: "unknown", expiresAt: null, requestId, diagnostic: "provider_unavailable" };
@@ -72,7 +75,7 @@ const buildGate = (enabled: boolean, probe: MetaProbeResult, network: "instagram
 };
 
 export const getMetaConnectionStatus = async (): Promise<MetaConnectionStatus> => {
-  const configured = Boolean(config.meta.userAccessToken && config.meta.pageId && config.meta.instagramAccountId);
+  const configured = Boolean(config.meta.userAccessToken && config.meta.pageAccessToken && config.meta.pageId && config.meta.instagramAccountId);
   const base = {
     contractVersion: "meta-connection.v1" as const,
     graphApiVersion: META_GRAPH_API_VERSION as typeof META_GRAPH_API_VERSION,

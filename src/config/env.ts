@@ -232,6 +232,7 @@ export const config = {
   meta: {
     graphApiVersion: process.env.META_GRAPH_API_VERSION ?? "v25.0",
     userAccessToken: process.env.META_USER_ACCESS_TOKEN ?? "",
+    pageAccessToken: process.env.META_PAGE_ACCESS_TOKEN ?? "",
     appId: process.env.META_APP_ID ?? "",
     appSecret: process.env.META_APP_SECRET ?? "",
     pageId: process.env.META_PAGE_ID ?? "",

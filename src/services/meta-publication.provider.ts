@@ -12,7 +12,7 @@ export type MetaPublicationProvider = {
 
 const providerUrl = (path: string): string => `https://graph.facebook.com/${config.meta.graphApiVersion}/${path}`;
 const request = async (path: string, init: RequestInit = {}): Promise<ProviderResult> => {
-  if (!config.meta.userAccessToken) throw Object.assign(new Error("Meta connection is not configured."), { category: "configuration" as const });
+  if (!config.meta.pageAccessToken) throw Object.assign(new Error("Meta Page connection is not configured."), { category: "configuration" as const });
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) {
@@ -23,18 +23,17 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
 };
 
 export const metaPublicationProvider: MetaPublicationProvider = {
-  createInstagramContainer: (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: config.meta.userAccessToken }) }),
-  getInstagramContainer: (id) => request(`${id}?fields=id,status_code,permalink&access_token=${encodeURIComponent(config.meta.userAccessToken)}`),
-  publishInstagramContainer: (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: config.meta.userAccessToken }) }),
+  createInstagramContainer: (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: config.meta.pageAccessToken }) }),
+  getInstagramContainer: (id) => request(`${id}?fields=id,status_code,permalink&access_token=${encodeURIComponent(config.meta.pageAccessToken)}`),
+  publishInstagramContainer: (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: config.meta.pageAccessToken }) }),
   uploadFacebookVideo: async (input) => {
     const form = new FormData();
     form.set("source", input.media, "trailer.mp4");
     form.set("title", input.title);
     form.set("description", input.description);
-    form.set("access_token", config.meta.userAccessToken);
+    form.set("access_token", config.meta.pageAccessToken);
     return request(`${config.meta.pageId}/videos`, { method: "POST", body: form });
   },
-  getFacebookVideo: (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(config.meta.userAccessToken)}`),
-  publishFacebookVideo: (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: config.meta.userAccessToken }) }),
+  getFacebookVideo: (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(config.meta.pageAccessToken)}`),
+  publishFacebookVideo: (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: config.meta.pageAccessToken }) }),
 };
-
