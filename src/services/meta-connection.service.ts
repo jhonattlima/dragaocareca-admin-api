@@ -30,7 +30,7 @@ const defaultProbe: MetaGraphClient = {
       const page = data.find((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).id === input.pageId) as Record<string, unknown> | undefined;
       const linked = page?.instagram_business_account;
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
-      const instagram = input.pageAccessToken ? await get(input.instagramAccountId, input.pageAccessToken, "id,username,account_type") : {};
+      const instagram = input.pageAccessToken ? await get(input.instagramAccountId, input.pageAccessToken, "id,username") : {};
       const debug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.userAccessToken)}`);
       const pageDebug = await get("debug_token", `${input.appId}|${input.appSecret}`, "data", `&input_token=${encodeURIComponent(input.pageAccessToken)}`);
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
@@ -47,7 +47,7 @@ const defaultProbe: MetaGraphClient = {
         taskNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
         version: input.version === META_GRAPH_API_VERSION,
         tokenStatus: valid ? (expiring ? "expiring" : "valid") : "invalid",
-        expiresAt: lifecycleExpiresAt, requestId, diagnostic: Boolean(page) && linkedId === input.instagramAccountId && (instagram.account_type === "BUSINESS" || instagram.account_type === "CREATOR") && valid ? "validated" : "validation_failed",
+        expiresAt: lifecycleExpiresAt, requestId, diagnostic: Boolean(page) && linkedId === input.instagramAccountId && instagram.id === input.instagramAccountId && typeof instagram.username === "string" && valid ? "validated" : "validation_failed",
       };
     } catch (_error) {
       return { identity: false, linkage: false, permissions: false, permissionNames: [], taskNames: [], version: input.version === META_GRAPH_API_VERSION, tokenStatus: "unknown", expiresAt: null, requestId, diagnostic: "provider_unavailable" };
