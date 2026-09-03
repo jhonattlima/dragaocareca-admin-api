@@ -37,7 +37,7 @@ const defaultProbe: MetaGraphClient = {
       const instagram = publicationToken ? await get(input.instagramAccountId, publicationToken, "id,username") : {};
       const debug = publicationToken ? await get("debug_token", `${input.appId}|${input.appSecret}`, "", `input_token=${encodeURIComponent(publicationToken)}`) : {};
       const debugData = debug.data && typeof debug.data === "object" ? debug.data as Record<string, unknown> : {};
-      const expiresAt = typeof debugData.expires_at === "number" ? new Date(debugData.expires_at * 1000).toISOString() : null;
+      const expiresAt = typeof debugData.expires_at === "number" && debugData.expires_at > 0 ? new Date(debugData.expires_at * 1000).toISOString() : null;
       const valid = debugData.is_valid === true;
       const lifecycleExpiresAt = expiresAt;
       const expiring = lifecycleExpiresAt !== null && new Date(lifecycleExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
@@ -55,6 +55,7 @@ const defaultProbe: MetaGraphClient = {
         expiresAt: lifecycleExpiresAt, requestId, diagnostic: Boolean(page) && linkedId === input.instagramAccountId && instagram.id === input.instagramAccountId && typeof instagram.username === "string" && valid ? "validated" : "validation_failed",
       };
     } catch (_error) {
+      console.warn(`[meta-connection] read-only probe failed: ${_error instanceof Error ? _error.message : "unknown error"}`);
       return { identity: false, linkage: false, permissions: false, permissionNames: [], taskNames: [], version: input.version === META_GRAPH_API_VERSION, tokenStatus: "unknown", expiresAt: null, requestId, diagnostic: "provider_unavailable" };
     } finally {
       clearTimeout(timeout);
@@ -121,6 +122,7 @@ export const getMetaConnectionStatus = async (): Promise<MetaConnectionStatus> =
     upsertMetaConnectionStatus(status);
     return status;
   } catch (_error) {
+    console.warn(`[meta-connection] status persistence failed: ${_error instanceof Error ? _error.message : "unknown error"}`);
     const status = metaConnectionStatusSchema.parse(base);
     upsertMetaConnectionStatus(status);
     return status;
