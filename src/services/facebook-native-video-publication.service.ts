@@ -25,8 +25,11 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
     episodePublicationRepository.updateCheckpoint(key, { stage: "remote_identity", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() }, "published", [], published.id || identity, published.permalink ?? null);
   } catch (error) {
     const category = error && typeof error === "object" && "category" in error ? String(error.category) : "transient";
+    const providerCode = error && typeof error === "object" && "providerCode" in error ? String(error.providerCode) : null;
+    const providerStatus = error && typeof error === "object" && "providerStatus" in error ? String(error.providerStatus) : null;
+    const providerMessage = error instanceof Error ? error.message : null;
+    const diagnostic = [providerCode ? `code=${providerCode}` : null, providerStatus ? `http=${providerStatus}` : null, providerMessage].filter(Boolean).join(" ").slice(0, 320);
     const attempts = episodePublicationRepository.recordAttempt(key, category === "transient" ? new Date(Date.now() + 60_000).toISOString() : null, [`Facebook delivery ${category}.`]);
-    episodePublicationRepository.updateCheckpoint(key, { stage: effect.checkpoint.stage, providerId: effect.checkpoint.providerId, uploadId: effect.checkpoint.uploadId, updatedAt: new Date().toISOString() }, category === "transient" && attempts < 4 ? "failed" : category === "transient" ? "uncertain" : "blocked", [`Facebook delivery requires operator action (${category}).`]);
+    episodePublicationRepository.updateCheckpoint(key, { stage: effect.checkpoint.stage, providerId: effect.checkpoint.providerId, uploadId: effect.checkpoint.uploadId, updatedAt: new Date().toISOString() }, category === "transient" && attempts < 4 ? "failed" : category === "transient" ? "uncertain" : "blocked", [diagnostic || `Facebook delivery requires operator action (${category}).`]);
   }
 };
-

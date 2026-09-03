@@ -1,6 +1,7 @@
 import { config } from "../config/env";
 
 export type ProviderResult = { id: string; status?: string; permalink?: string | null };
+type MetaProviderFailure = Error & { category: "permission" | "provider" | "transient"; providerCode?: number; providerStatus?: number };
 export type MetaPublicationProvider = {
   createInstagramContainer(input: { mediaUrl: string; caption: string }): Promise<ProviderResult>;
   getInstagramContainer(id: string): Promise<ProviderResult>;
@@ -17,8 +18,16 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) {
-    const category = response.status === 401 || response.status === 403 ? "permission" : response.status >= 500 ? "transient" : "provider";
-    throw Object.assign(new Error(typeof body.error === "object" && body.error && "message" in body.error ? String(body.error.message) : "Meta provider request failed"), { category });
+    const category: MetaProviderFailure["category"] = response.status === 401 || response.status === 403 ? "permission" : response.status >= 500 ? "transient" : "provider";
+    const providerError = typeof body.error === "object" && body.error ? body.error as Record<string, unknown> : {};
+    const message = typeof providerError.message === "string" ? providerError.message : "Meta provider request failed";
+    const safeMessage = message.replace(/access_token=[^&\s]+/gi, "access_token=[redacted]").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").slice(0, 240);
+    const failure: MetaProviderFailure = Object.assign(new Error(safeMessage), {
+      category,
+      providerCode: typeof providerError.code === "number" ? providerError.code : undefined,
+      providerStatus: response.status,
+    });
+    throw failure;
   }
   return { id: String(body.id ?? body.video_id ?? ""), status: typeof body.status === "string" ? body.status : undefined, permalink: typeof body.permalink_url === "string" ? body.permalink_url : null };
 };
