@@ -30,7 +30,7 @@ const defaultProbe: MetaGraphClient = {
       const accounts = input.systemUserAccessToken ? {} : await get("me/accounts", input.userAccessToken, "id,name,tasks,instagram_business_account,access_token");
       const data = Array.isArray(accounts.data) ? accounts.data : [];
       const page = input.systemUserAccessToken
-        ? await get(input.pageId, publicationToken, "id,name,instagram_business_account,tasks")
+        ? await get(input.pageId, publicationToken, "id,name,instagram_business_account")
         : data.find((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).id === input.pageId) as Record<string, unknown> | undefined;
       const linked = page?.instagram_business_account;
       const linkedId = linked && typeof linked === "object" ? (linked as Record<string, unknown>).id : undefined;
@@ -43,8 +43,12 @@ const defaultProbe: MetaGraphClient = {
       const expiring = lifecycleExpiresAt !== null && new Date(lifecycleExpiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
       return {
         identity: Boolean(page), linkage: linkedId === input.instagramAccountId,
-        permissions: (Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0) || (Array.isArray(debugData.scopes) && debugData.scopes.length > 0),
-        permissionNames: Array.isArray(debugData.scopes) ? debugData.scopes.filter((scope): scope is string => typeof scope === "string") : [],
+        permissions: (Array.isArray(page?.tasks) && (page.tasks as unknown[]).length > 0) || (Array.isArray(debugData.scopes) && debugData.scopes.length > 0) || (Array.isArray(debugData.granular_scopes) && debugData.granular_scopes.length > 0),
+        permissionNames: Array.isArray(debugData.scopes)
+          ? debugData.scopes.filter((scope): scope is string => typeof scope === "string")
+          : Array.isArray(debugData.granular_scopes)
+            ? debugData.granular_scopes.map((scope) => scope && typeof scope === "object" && typeof (scope as Record<string, unknown>).scope === "string" ? (scope as Record<string, unknown>).scope as string : "").filter(Boolean)
+            : [],
         taskNames: Array.isArray(page?.tasks) ? (page.tasks as unknown[]).filter((task): task is string => typeof task === "string") : [],
         version: input.version === META_GRAPH_API_VERSION,
         tokenStatus: valid ? (expiring ? "expiring" : "valid") : "invalid",

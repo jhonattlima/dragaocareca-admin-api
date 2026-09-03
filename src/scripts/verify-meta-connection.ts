@@ -28,6 +28,7 @@ const [{ getDb }, { findMetaConnectionStatus }, { getMetaConnectionStatus, setMe
 
 // Start from an explicitly empty connection regardless of developer .env files.
 config.meta.userAccessToken = "";
+config.meta.systemUserAccessToken = "";
 config.meta.appId = "";
 config.meta.appSecret = "";
 config.meta.pageId = "";
