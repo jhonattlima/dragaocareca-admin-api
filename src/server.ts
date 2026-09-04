@@ -34,6 +34,8 @@ const hashtagAuthoringWorkerEnabled =
   (process.env.ENABLE_HASHTAG_AUTHORING_WORKER ?? "false").toLowerCase() === "true";
 const youtubeTrailerJobWorkerEnabled =
   (process.env.ENABLE_YOUTUBE_TRAILER_JOB_WORKER ?? "false").toLowerCase() === "true";
+const socialPublicationRetryWorkerEnabled =
+  (process.env.ENABLE_SOCIAL_PUBLICATION_RETRY_WORKER ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
   await connectDb();
@@ -68,7 +70,7 @@ const bootstrap = async (): Promise<void> => {
   if (config.promotion.legacyLaunchEnabled) {
     await startLaunchNotificationWorker();
   }
-  if (!backgroundWorkersDisabled) {
+  if (!backgroundWorkersDisabled || socialPublicationRetryWorkerEnabled) {
     await startSocialPublicationRetryWorker();
   }
 
