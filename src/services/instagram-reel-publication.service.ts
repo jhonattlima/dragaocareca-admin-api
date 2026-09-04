@@ -20,7 +20,8 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
     }
     const processing = await provider.getInstagramContainer(identity);
     if (processing.status && !["FINISHED", "PUBLISHED"].includes(processing.status)) {
-      episodePublicationRepository.updateCheckpoint(key, checkpoint("processing", processing), "processing");
+      const attempts = episodePublicationRepository.recordAttempt(key, new Date(Date.now() + 60_000).toISOString(), ["Instagram container is still processing; retry scheduled."]);
+      episodePublicationRepository.updateCheckpoint(key, checkpoint("processing", processing), attempts < 4 ? "failed" : "uncertain", ["Instagram container is still processing; retry scheduled."]);
       return;
     }
     episodePublicationRepository.updateCheckpoint(key, checkpoint("processing", processing), "processing");

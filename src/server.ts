@@ -12,6 +12,7 @@ import { startYoutubeTrailerJobWorker } from "./workers/youtube-trailer-job.work
 import { startTelegramBotWorker } from "./services/telegram-bot.worker";
 import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-authoring.worker";
 import { startEpisodePromotionWorker } from "./workers/episode-promotion.worker";
+import { startSocialPublicationRetryWorker } from "./workers/social-publication-retry.worker";
 
 type ConsoleMethod = (...args: unknown[]) => void;
 
@@ -66,6 +67,9 @@ const bootstrap = async (): Promise<void> => {
   // available even when external API-owned workers are disabled.
   if (config.promotion.legacyLaunchEnabled) {
     await startLaunchNotificationWorker();
+  }
+  if (!backgroundWorkersDisabled) {
+    await startSocialPublicationRetryWorker();
   }
 
   if (backgroundWorkersDisabled) {

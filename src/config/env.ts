@@ -178,6 +178,7 @@ export const config = {
     retryAttempts: boundedPositiveInteger(process.env.PROMOTION_RETRY_ATTEMPTS, 5, "PROMOTION_RETRY_ATTEMPTS", 20),
     retryBackoffMs: parsePromotionRetryDelays(process.env),
     pollIntervalMs: boundedPositiveInteger(process.env.PROMOTION_POLL_INTERVAL_MS, 30_000, "PROMOTION_POLL_INTERVAL_MS", 3_600_000),
+    socialRetryPollIntervalMs: boundedPositiveInteger(process.env.SOCIAL_PUBLICATION_RETRY_POLL_INTERVAL_MS, 60_000, "SOCIAL_PUBLICATION_RETRY_POLL_INTERVAL_MS", 3_600_000),
     legacyLaunchEnabled,
     activeOwner: promotionEnabled ? "promotion" as const : legacyLaunchEnabled ? "legacy-launch" as const : "none" as const,
   },

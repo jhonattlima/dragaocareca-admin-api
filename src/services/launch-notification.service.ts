@@ -1,5 +1,8 @@
 import { episodeRepository } from "../database/repositories/episode.repository";
 import { deliverEpisodePublication } from "./episode-publication.service";
+import { deliverInstagramReel } from "./instagram-reel-publication.service";
+import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.service";
+import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
 
 type LaunchNotificationCandidate = {
   episodeId: number;
@@ -90,4 +93,31 @@ export const processPendingLaunchNotifications = async (): Promise<{
     delivered,
     failed,
   };
+};
+
+export const processDueSocialPublicationEffects = async (): Promise<{
+  processed: number;
+  attempted: number;
+  failed: number;
+}> => {
+  const due = episodePublicationRepository.listDueSocialEffects();
+  let attempted = 0;
+  let failed = 0;
+
+  for (const item of due) {
+    const episode = episodeRepository.findByEpisodeId(item.episodeId);
+    if (!episode) continue;
+    attempted += 1;
+    try {
+      if (item.effect.destination === "instagram_reel") {
+        await deliverInstagramReel(item.episodeId, item.effect);
+      } else {
+        await deliverFacebookNativeVideo(item.episodeId, item.effect);
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { processed: due.length, attempted, failed };
 };

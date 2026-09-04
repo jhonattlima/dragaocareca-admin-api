@@ -2,7 +2,7 @@ import { getDb, nowIso } from "../sqlite";
 import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
 
 type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight };
-type Row = { effect_key: string; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null };
+type Row = { effect_key: string; episode_id: number; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null };
 
 const map = (row: Row): PublicationEffectProjection => ({
   destination: publicationDestinationSchema.parse(row.destination),
@@ -42,6 +42,19 @@ export const episodePublicationRepository = {
       ? getDb().prepare("SELECT * FROM episode_publication_effects WHERE episode_id = ? AND source_revision = ? ORDER BY destination").all(episodeId, sourceRevision)
       : getDb().prepare("SELECT * FROM episode_publication_effects WHERE episode_id = ? ORDER BY created_at DESC, destination").all(episodeId)) as Row[];
     return rows.map(map);
+  },
+  listDueSocialEffects(now = new Date(), limit = 20): Array<{ episodeId: number; effect: PublicationEffectProjection }> {
+    const rows = getDb().prepare(`
+      SELECT * FROM episode_publication_effects
+      WHERE destination IN ('instagram_reel', 'facebook_native_video')
+        AND eligibility = 'eligible'
+        AND lifecycle = 'failed'
+        AND attempts < 4
+        AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      ORDER BY COALESCE(next_attempt_at, updated_at), updated_at
+      LIMIT ?
+    `).all(now.toISOString(), limit) as Row[];
+    return rows.map((row) => ({ episodeId: row.episode_id, effect: map(row) }));
   },
   markTelegramDelivered(episodeId: number, sourceRevision: string): void {
     getDb().prepare("UPDATE episode_publication_effects SET lifecycle = 'published', updated_at = ? WHERE episode_id = ? AND source_revision = ? AND destination = 'telegram' AND lifecycle = 'eligible'").run(nowIso(), episodeId, sourceRevision);
