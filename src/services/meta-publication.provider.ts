@@ -13,7 +13,16 @@ export type MetaPublicationProvider = {
 
 const providerUrl = (path: string): string => `https://graph.facebook.com/${config.meta.graphApiVersion}/${path}`;
 const publicationToken = (): string => config.meta.systemUserAccessToken || config.meta.pageAccessToken;
-const pagePublicationToken = (): string => config.meta.pageAccessToken || config.meta.systemUserAccessToken;
+const pagePublicationToken = async (): Promise<string> => {
+  if (!config.meta.systemUserAccessToken) return config.meta.pageAccessToken;
+  try {
+    const response = await fetch(providerUrl(`me/accounts?fields=id,access_token&access_token=${encodeURIComponent(config.meta.systemUserAccessToken)}`), { signal: AbortSignal.timeout(30_000) });
+    const body = await response.json() as { data?: Array<{ id?: string; access_token?: string }> };
+    const page = body.data?.find((item) => item.id === config.meta.pageId);
+    if (response.ok && page?.access_token) return page.access_token;
+  } catch { /* use the configured page token as a fallback */ }
+  return config.meta.pageAccessToken;
+};
 const request = async (path: string, init: RequestInit = {}): Promise<ProviderResult> => {
   if (!publicationToken()) throw Object.assign(new Error("Meta publication connection is not configured."), { category: "configuration" as const });
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
@@ -42,9 +51,9 @@ export const metaPublicationProvider: MetaPublicationProvider = {
     form.set("source", input.media, "trailer.mp4");
     form.set("title", input.title);
     form.set("description", input.description);
-    form.set("access_token", pagePublicationToken());
+    form.set("access_token", await pagePublicationToken());
     return request(`${config.meta.pageId}/videos`, { method: "POST", body: form });
   },
-  getFacebookVideo: (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(pagePublicationToken())}`),
-  publishFacebookVideo: (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: pagePublicationToken() }) }),
+  getFacebookVideo: async (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(await pagePublicationToken())}`),
+  publishFacebookVideo: async (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: await pagePublicationToken() }) }),
 };
