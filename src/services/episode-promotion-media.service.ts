@@ -73,7 +73,7 @@ const ensureProviderCompatibleMedia = async (canonicalPath: string): Promise<str
   if (active) return active;
 
   const job = (async () => {
-    const temporaryPath = `${providerPath}.${process.pid}.${Date.now()}.tmp`;
+    const temporaryPath = `${providerPath}.${process.pid}.${Date.now()}.tmp.mp4`;
     try {
       await execFileAsync("ffmpeg", [
         "-v", "error",
