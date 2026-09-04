@@ -22,6 +22,9 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
     }
     const processing = await provider.getInstagramContainer(identity);
+    if (processing.status === "ERROR" || processing.status === "ERROR_OCCURRED") {
+      throw Object.assign(new Error("Instagram container processing failed at Meta."), { category: "provider" as const });
+    }
     if (processing.status && !["FINISHED", "PUBLISHED"].includes(processing.status)) {
       const attempts = episodePublicationRepository.recordAttempt(key, new Date(Date.now() + 60_000).toISOString(), ["Instagram container is still processing; retry scheduled."]);
       currentCheckpoint = checkpoint("processing", processing);
