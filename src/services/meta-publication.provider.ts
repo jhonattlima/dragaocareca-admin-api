@@ -23,6 +23,13 @@ const pagePublicationToken = async (): Promise<string> => {
   } catch { /* use the configured page token as a fallback */ }
   return config.meta.pageAccessToken;
 };
+export const normalizeMetaProviderStatus = (body: Record<string, unknown>): string | undefined => {
+  const statusCode = typeof body.status_code === "string" ? body.status_code : undefined;
+  if (statusCode) return statusCode;
+  const status = typeof body.status === "string" ? body.status : typeof body.status === "object" && body.status ? String((body.status as Record<string, unknown>).video_status ?? "") : undefined;
+  return status || undefined;
+};
+
 const request = async (path: string, init: RequestInit = {}): Promise<ProviderResult> => {
   if (!publicationToken()) throw Object.assign(new Error("Meta publication connection is not configured."), { category: "configuration" as const });
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
@@ -40,7 +47,7 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
     });
     throw failure;
   }
-  const status = typeof body.status === "string" ? body.status : typeof body.status === "object" && body.status ? String((body.status as Record<string, unknown>).video_status ?? "") : undefined;
+  const status = normalizeMetaProviderStatus(body);
   return { id: String(body.id ?? body.video_id ?? ""), status: status || undefined, permalink: typeof body.permalink_url === "string" ? body.permalink_url : null, uploadUrl: typeof body.upload_url === "string" ? body.upload_url : undefined };
 };
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { config } from "../config/env";
 import { deliverInstagramReel } from "../services/instagram-reel-publication.service";
-import type { MetaPublicationProvider, ProviderResult } from "../services/meta-publication.provider";
+import { normalizeMetaProviderStatus, type MetaPublicationProvider, type ProviderResult } from "../services/meta-publication.provider";
 import type { PublicationEffectProjection } from "../schemas/episode-publication";
 
 const effect = (destination: "instagram_reel" | "facebook_native_video"): PublicationEffectProjection => ({
@@ -14,6 +14,9 @@ const effect = (destination: "instagram_reel" | "facebook_native_video"): Public
 });
 
 const run = async (): Promise<void> => {
+  assert.equal(normalizeMetaProviderStatus({ status_code: "IN_PROGRESS" }), "IN_PROGRESS");
+  assert.equal(normalizeMetaProviderStatus({ status_code: "FINISHED" }), "FINISHED");
+  assert.equal(normalizeMetaProviderStatus({ status: { video_status: "ready" } }), "ready");
   const calls: string[] = [];
   const result = (id: string, status = "FINISHED"): ProviderResult => ({ id, status, permalink: `https://example.invalid/${id}` });
   const fake: MetaPublicationProvider = {
@@ -45,4 +48,3 @@ if (process.argv.includes("--fake-only")) {
   console.error("Refusing live delivery verification. Use --fake-only.");
   process.exitCode = 2;
 }
-
