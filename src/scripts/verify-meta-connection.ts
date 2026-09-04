@@ -28,6 +28,7 @@ const [{ getDb }, { findMetaConnectionStatus }, { getMetaConnectionStatus, setMe
 
 // Start from an explicitly empty connection regardless of developer .env files.
 config.meta.userAccessToken = "";
+config.meta.pageAccessToken = "";
 config.meta.systemUserAccessToken = "";
 config.meta.appId = "";
 config.meta.appSecret = "";
@@ -52,6 +53,7 @@ for (const forbidden of ["fake-only-secret", "fake-secret", "access_token", "Aut
 }
 
 config.meta.userAccessToken = "fake-only-secret";
+config.meta.pageAccessToken = "fake-page-token";
 config.meta.appId = "fake-app";
 config.meta.appSecret = "fake-secret";
 config.meta.pageId = "page-1";
