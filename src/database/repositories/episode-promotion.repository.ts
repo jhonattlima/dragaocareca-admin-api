@@ -62,6 +62,7 @@ export type UpsertPromotionIntentInput = {
   request: PromotionRequest;
   requestFingerprint: string;
   withinTransaction?: boolean;
+  allowPayloadReplacement?: boolean;
 };
 
 export type ClaimDuePromotionEffectsInput = {
@@ -270,7 +271,7 @@ export const episodePromotionRepository = {
     const request = promotionRequestSchema.parse(input.request);
     const now = nowIso();
     const existing = selectNotification(request.notification_id);
-    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== input.requestFingerprint) {
+    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== input.requestFingerprint && !input.allowPayloadReplacement) {
       throw new Error(`Conflicting promotion payload fingerprint for ${request.notification_id}.`);
     }
 
@@ -311,6 +312,9 @@ export const episodePromotionRepository = {
           ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, ?, ?)
           ON CONFLICT(notification_id, destination, source_revision) DO NOTHING
         `).run(effectKey, request.notification_id, request.episode_id, destination, request.source_revision, input.requestFingerprint, now, now);
+      }
+      if (input.allowPayloadReplacement) {
+        getDb().prepare("UPDATE promotion_effects SET request_fingerprint = ?, updated_at = ? WHERE notification_id = ? AND source_revision = ?").run(input.requestFingerprint, now, request.notification_id, request.source_revision);
       }
     };
     if (input.withinTransaction) {

@@ -99,6 +99,7 @@ export const saveEpisodeAndQueuePromotion = async (
           request,
           requestFingerprint: getPromotionRequestFingerprint(request),
           withinTransaction: true,
+          allowPayloadReplacement: true,
         })
       : null;
     if (!intent) {
