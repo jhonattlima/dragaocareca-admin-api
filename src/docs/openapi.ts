@@ -1153,7 +1153,7 @@ export const swaggerSpec = swaggerJsdoc({
         get: {
           tags: ["Episodes"], summary: "Get the current finalized-source YouTube trailer job", description: "Authenticated no-store reload/restart recovery lookup for the current canonical trailer source.", security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
-          responses: { "200": { description: "Safe current-source snapshot.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" } } } }, "401": { description: "Missing, invalid, or expired bearer token." }, "404": { description: "No current-source job." } },
+          responses: { "200": { description: "Safe current-source snapshot, or null when no job exists.", headers: { "Cache-Control": { schema: { type: "string", example: "no-store" } } }, content: { "application/json": { schema: { oneOf: [{ $ref: "#/components/schemas/YoutubeTrailerJobSnapshot" }, { type: "null" }] } } } }, "401": { description: "Missing, invalid, or expired bearer token." } },
         },
       },
       "/v1/episodes/{episodeId}/youtube-trailer-jobs/commit": {

@@ -967,13 +967,13 @@ episodesRouter.get("/:episodeId/youtube-trailer-jobs/current", noStoreYoutubeTra
     }
     const job = await getCurrentYoutubeTrailerJob(episodeId);
     if (!job) {
-      res.status(404).json({ message: "YouTube trailer job not found" });
+      res.json(null);
       return;
     }
     res.json(toYoutubeTrailerJobStatusDto(job));
   } catch (error) {
     if (error instanceof Error && error.message === "Final trailer-video source is missing") {
-      res.status(404).json({ message: "YouTube trailer job not found" });
+      res.json(null);
       return;
     }
     next(error);
