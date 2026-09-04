@@ -45,6 +45,7 @@ export const promotionRequestSchema = z.object({
   episode_number: z.number().int().positive(),
   title: z.string().trim().min(1).max(300).refine((value) => !/(^|\s)#\S+/.test(value), "Title must not contain hashtags."),
   public_download_url: z.string().url(),
+  image_url: z.string().url().refine((value) => /^https?:\/\//.test(value), "Image URL must use HTTP(S).").optional(),
   trailer: z.object({
     media_reference: logicalMediaReferenceSchema,
     sha256: z.string().regex(/^[a-f0-9]{64}$/),

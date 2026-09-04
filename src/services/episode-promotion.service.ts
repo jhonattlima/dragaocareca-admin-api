@@ -18,6 +18,7 @@ export type EpisodePromotionInput = {
   title: string;
   episodeNumber?: number | null;
   publicDownloadUrl: string;
+  imageUrl?: string;
   trailerMediaReference?: string;
   trailerSha256: string;
   trailerByteCount: number;
@@ -50,6 +51,7 @@ export const buildEpisodePromotionRequest = (input: EpisodePromotionInput): Prom
     episode_number: input.episodeNumber ?? input.episodeId,
     title: stripHashtags(input.title),
     public_download_url: input.publicDownloadUrl,
+    ...(input.imageUrl ? { image_url: input.imageUrl } : {}),
     trailer: {
       media_reference: input.trailerMediaReference ?? `episodes/${input.episodeId}/trailer.mp4`,
       sha256: input.trailerSha256,

@@ -84,6 +84,7 @@ export const saveEpisodeAndQueuePromotion = async (
         title: payload.title,
         episodeNumber: payload.episodeNumber,
         publicDownloadUrl: publicDownloadUrlFor(input.episodeId),
+        imageUrl: `${config.feed.imageBase}${payload.coverFileName ?? `episodes/${input.episodeId}/cover.jpeg`}`,
         trailerMediaReference: getEpisodeMediaRelativePath(input.episodeId, "trailerVideo"),
         trailerSha256: trailer.sha256,
         trailerByteCount: trailer.byteCount,

@@ -84,6 +84,7 @@ export const swaggerSpec = swaggerJsdoc({
             episode_number: { type: "integer", minimum: 1 },
             title: { type: "string", minLength: 1, maxLength: 300, description: "Hashtag-free API-prepared title." },
             public_download_url: { type: "string", format: "uri" },
+            image_url: { type: "string", format: "uri", description: "Optional canonical episode cover URL used by Telegram access promotion." },
             trailer: {
               type: "object",
               additionalProperties: false,

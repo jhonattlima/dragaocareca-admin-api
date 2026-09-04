@@ -22,14 +22,14 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
     }
     if (currentCheckpoint.stage === "upload_accepted") {
-      const finished = await provider.publishFacebookVideo(identity);
+      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
       currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
       return;
     }
     const processing = await provider.getFacebookVideo(identity);
     if (processing.status === "upload_complete") {
-      const finished = await provider.publishFacebookVideo(identity);
+      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
       currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
       return;
@@ -42,7 +42,7 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
     }
     currentCheckpoint = { stage: "processing", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
     episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
-    const published = await provider.publishFacebookVideo(identity);
+    const published = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
     currentCheckpoint = { stage: "remote_identity", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
     episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], published.id || identity, published.permalink ?? null);
   } catch (error) {

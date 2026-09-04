@@ -8,7 +8,7 @@ export type MetaPublicationProvider = {
   publishInstagramContainer(id: string): Promise<ProviderResult>;
   uploadFacebookVideo(input: { media: Blob; title: string; description: string }): Promise<ProviderResult>;
   getFacebookVideo(id: string): Promise<ProviderResult>;
-  publishFacebookVideo(id: string): Promise<ProviderResult>;
+  publishFacebookVideo(id: string, input?: { title: string; description: string }): Promise<ProviderResult>;
 };
 
 const providerUrl = (path: string): string => `https://graph.facebook.com/${config.meta.graphApiVersion}/${path}`;
@@ -64,5 +64,5 @@ export const metaPublicationProvider: MetaPublicationProvider = {
     return { id: start.id };
   },
   getFacebookVideo: async (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(await pagePublicationToken())}`),
-  publishFacebookVideo: async (id) => request(`${config.meta.pageId}/video_reels`, { method: "POST", body: new URLSearchParams({ video_id: id, upload_phase: "finish", video_state: "PUBLISHED", access_token: await pagePublicationToken() }) }),
+  publishFacebookVideo: async (id, input) => request(`${config.meta.pageId}/video_reels`, { method: "POST", body: new URLSearchParams({ video_id: id, upload_phase: "finish", video_state: "PUBLISHED", ...(input?.title ? { title: input.title } : {}), ...(input?.description ? { description: input.description } : {}), access_token: await pagePublicationToken() }) }),
 };
