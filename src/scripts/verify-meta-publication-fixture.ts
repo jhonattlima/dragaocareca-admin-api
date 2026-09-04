@@ -14,6 +14,7 @@ const live = process.argv.includes("--authorize-live");
 const selected = (value("--destinations") ?? "instagram,facebook").split(",").filter((d): d is "instagram" | "facebook" => d === "instagram" || d === "facebook");
 const recreateMissingCheckpoint = process.argv.includes("--recreate-missing-checkpoint");
 const requeuePersistedCheckpoint = process.argv.includes("--requeue-persisted-checkpoint");
+const recreateInstagram = process.argv.includes("--recreate-instagram");
 
 const main = async (): Promise<void> => {
   if (!fake && !live) throw new Error("Refusing fixture execution without --dry-run/--fake-only or --authorize-live.");
@@ -51,6 +52,10 @@ const main = async (): Promise<void> => {
       if (effect.destination === "telegram" || !selected.includes(effect.destination === "instagram_reel" ? "instagram" : "facebook")) continue;
       episodePublicationRepository.requeueSocialEffectForFixture(`episode:${episodeId}:${publication.sourceRevision}:${effect.destination}`);
     }
+    effects = episodePublicationRepository.list(episodeId, publication.sourceRevision);
+  }
+  if (recreateInstagram) {
+    episodePublicationRepository.resetInstagramEffectForFixture(`episode:${episodeId}:${publication.sourceRevision}:instagram_reel`);
     effects = episodePublicationRepository.list(episodeId, publication.sourceRevision);
   }
   for (const effect of effects) {

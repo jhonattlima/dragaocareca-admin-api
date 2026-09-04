@@ -21,7 +21,19 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
       currentCheckpoint = { stage: "upload_accepted", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
     }
+    if (currentCheckpoint.stage === "upload_accepted") {
+      const finished = await provider.publishFacebookVideo(identity);
+      currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
+      episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
+      return;
+    }
     const processing = await provider.getFacebookVideo(identity);
+    if (processing.status === "upload_complete") {
+      const finished = await provider.publishFacebookVideo(identity);
+      currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
+      episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
+      return;
+    }
     if (processing.status && !["ready", "published", "FINISHED"].includes(processing.status)) {
       const attempts = episodePublicationRepository.recordAttempt(key, new Date(Date.now() + 60_000).toISOString(), ["Facebook video is still processing; retry scheduled."]);
       currentCheckpoint = { stage: "processing", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };

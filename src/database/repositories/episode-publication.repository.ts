@@ -85,6 +85,20 @@ export const episodePublicationRepository = {
     );
     return result.changes > 0;
   },
+  resetInstagramEffectForFixture(effectKey: string): boolean {
+    const result = getDb().prepare(`UPDATE episode_publication_effects
+      SET lifecycle = 'eligible', attempts = 0, next_attempt_at = NULL,
+          diagnostics_json = '[]', remote_id = NULL, permalink = NULL,
+          checkpoint_json = ?, updated_at = ?
+      WHERE effect_key = ?
+        AND destination = 'instagram_reel'
+        AND remote_id IS NULL`).run(
+      JSON.stringify({ stage: "none", providerId: null, uploadId: null, updatedAt: null }),
+      nowIso(),
+      effectKey,
+    );
+    return result.changes > 0;
+  },
   requeueSocialEffectForFixture(effectKey: string): boolean {
     const result = getDb().prepare(`UPDATE episode_publication_effects
       SET lifecycle = 'failed', next_attempt_at = ?, diagnostics_json = ?, updated_at = ?
