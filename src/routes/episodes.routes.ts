@@ -1161,9 +1161,10 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       episodeRepository.markTranscriptionError(created.episodeId, "Draft transcription failed");
     }
 
-    const promotionResult = config.promotion.enabled
-      ? await saveEpisodeAndQueuePromotion({ episodeId: created.episodeId, payload, mediaUpdates })
-      : null;
+    // Persist the promotion outbox whenever final trailer media exists.  The
+    // transport flag only controls delivery, so an operational toggle cannot
+    // silently lose the immediate trailer/early-access intent from Save.
+    const promotionResult = await saveEpisodeAndQueuePromotion({ episodeId: created.episodeId, payload, mediaUpdates });
     if (!promotionResult && config.promotion.legacyLaunchEnabled) {
       await queueLaunchNotification(created.episodeId);
     }
@@ -1219,9 +1220,8 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
       await clearEpisodeTranscription(routeId);
       await queueEpisodeTranscription(routeId);
     }
-    const promotionResult = config.promotion.enabled
-      ? await saveEpisodeAndQueuePromotion({ episodeId: routeId, payload, mediaUpdates })
-      : null;
+    // See create: retain an outbox intent even while delivery is disabled.
+    const promotionResult = await saveEpisodeAndQueuePromotion({ episodeId: routeId, payload, mediaUpdates });
     if (!promotionResult) {
       episodeRepository.update(routeId, payload);
       if (config.promotion.legacyLaunchEnabled) {

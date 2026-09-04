@@ -80,6 +80,10 @@ export const discoverTrailerVideoVersions = async (episodeId: number): Promise<T
 };
 
 const removeWithRollback = async (paths: string[]): Promise<void> => {
+  // There is no filesystem operation to protect when every discovered version
+  // is retained. In particular, do not derive a rollback directory from the
+  // process cwd: containers commonly run from `/`, which is not writable.
+  if (paths.length === 0) return;
   const rollbackRoot = await fs.promises.mkdtemp(path.join(path.dirname(paths[0] ?? process.cwd()), ".trailer-retention-"));
   const backups: Array<{ source: string; backup: string }> = [];
   try {

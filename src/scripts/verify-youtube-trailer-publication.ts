@@ -28,6 +28,7 @@ type RuntimeModules = {
   parseEpisodeArtifactSelectors: typeof import("../services/episode-artifact-download.service.js").parseEpisodeArtifactSelectors;
   publishYoutubeTrailer: typeof import("../services/youtube-trailer-publication.service.js").publishYoutubeTrailer;
   discoverTrailerVideoVersions: typeof import("../services/episode-trailer-retention.service.js").discoverTrailerVideoVersions;
+  retainEpisodeTrailerVersions: typeof import("../services/episode-trailer-retention.service.js").retainEpisodeTrailerVersions;
   fingerprintYoutubeTrailerSource: typeof import("../services/youtube-trailer-job.service.js").fingerprintYoutubeTrailerSource;
 };
 
@@ -527,6 +528,17 @@ const verifyRetentionDeletionFailureRecovery = async (modules: RuntimeModules, e
   assert.equal((await fs.promises.readdir(path.dirname(currentPath))).filter((name) => /^trailer\.v\d+\.mp4$/u.test(name)).length, 12, "cleanup retry must keep current plus twelve prior versions");
 };
 
+const verifyRetentionWithoutDeletions = async (modules: RuntimeModules, episodeId: number): Promise<void> => {
+  const currentPath = modules.getEpisodeMediaFinalPath(episodeId, "trailerVideo");
+  await fs.promises.mkdir(path.dirname(currentPath), { recursive: true });
+  await fs.promises.writeFile(currentPath, "retention-current-only");
+
+  const retained = await modules.retainEpisodeTrailerVersions(episodeId);
+  assert.equal(retained.status, "complete");
+  assert.deepEqual(retained.deleted, []);
+  assert.equal(retained.errorMessage, null);
+};
+
 const verifyPublicationAndRetention = async (modules: RuntimeModules, episodeId: number): Promise<void> => {
   const currentPath = modules.getEpisodeMediaFinalPath(episodeId, "trailerVideo");
   for (let version = 1; version <= 14; version += 1) {
@@ -620,6 +632,7 @@ const main = async (): Promise<void> => {
     await verifyMetadataBoundaries(modules, currentEpisodeId + 3);
     await verifyPublicationFailureRecovery(modules, currentEpisodeId + 2);
     await verifyRetentionDeletionFailureRecovery(modules, currentEpisodeId + 4);
+    await verifyRetentionWithoutDeletions(modules, currentEpisodeId + 6);
     await verifyDraftPromotionAndRollback(modules, fixture, currentEpisodeId);
     await verifyProtectedPublicationBoundary();
 

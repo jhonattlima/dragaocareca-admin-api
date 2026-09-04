@@ -215,7 +215,7 @@ const claimPromotionEffects = (
     const conditions = [
       mode === "unknown"
         ? "e.status = 'unknown'"
-        : "e.status IN ('pending', 'temporary_failure', 'unknown')",
+        : "e.status IN ('pending', 'temporary_failure')",
       "e.source_revision = n.source_revision",
     ];
     const parameters: Array<string | number> = [];
@@ -242,7 +242,7 @@ const claimPromotionEffects = (
         SET status = 'in_progress', lease_id = ?, lease_claimed_at = ?, last_attempt_at = ?,
             next_attempt_at = ?, attempt_count = attempt_count + 1, revision = revision + 1, updated_at = ?
         WHERE effect_key = ? AND notification_id = ? AND source_revision = ? AND revision = ?
-          AND status ${mode === "unknown" ? "= 'unknown'" : "IN ('pending', 'temporary_failure', 'unknown')"}
+          AND status ${mode === "unknown" ? "= 'unknown'" : "IN ('pending', 'temporary_failure')"}
           ${mode === "due" ? "AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))" : ""}
       `).run(
         leaseId,
@@ -411,11 +411,11 @@ export const episodePromotionRepository = {
       ? getDb().prepare(`
           SELECT e.* FROM promotion_effects e JOIN promotion_notifications n ON n.notification_id = e.notification_id
           WHERE e.notification_id = ? AND e.source_revision = n.source_revision
-            AND e.status IN ('pending', 'temporary_failure', 'unknown') ORDER BY e.destination
+            AND e.status IN ('pending', 'temporary_failure') ORDER BY e.destination
         `).all(notificationId)
       : getDb().prepare(`
           SELECT e.* FROM promotion_effects e JOIN promotion_notifications n ON n.notification_id = e.notification_id
-          WHERE e.source_revision = n.source_revision AND e.status IN ('pending', 'temporary_failure', 'unknown')
+          WHERE e.source_revision = n.source_revision AND e.status IN ('pending', 'temporary_failure')
           ORDER BY datetime(e.created_at) ASC, e.effect_key ASC
         `).all();
     return (rows as SqlitePromotionEffectRow[]).map((row) => mapEffect(row) as PromotionEffectRow);
