@@ -11,6 +11,7 @@ const runOnce = async (): Promise<void> => {
     const expired = episodeRepository.expireSpotifyResolutionJobs();
     const due = episodeRepository.getDueSpotifyResolutionJobs();
     for (const job of due) {
+      if (!episodeRepository.claimSpotifyResolutionJob(job.episodeId)) continue;
       try {
         const result = await resolveEpisodeSpotifyId(job.episodeId);
         episodeRepository.markSpotifyResolutionAttempt(job.episodeId, result === "matched" || result === "already_set" ? "matched" : "no_match");

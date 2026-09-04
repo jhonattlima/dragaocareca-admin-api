@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_episodes_launch_state ON episodes(launch_notifica
 
 CREATE TABLE IF NOT EXISTS spotify_episode_resolution_jobs (
   episode_id INTEGER PRIMARY KEY REFERENCES episodes(episode_id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'matched', 'no_match', 'failed', 'expired')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'matched', 'no_match', 'failed', 'expired')),
   attempt_count INTEGER NOT NULL DEFAULT 0,
   first_attempt_at TEXT,
   last_attempt_at TEXT,
