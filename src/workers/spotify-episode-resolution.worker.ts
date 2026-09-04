@@ -8,6 +8,7 @@ let active: Promise<void> | null = null;
 const runOnce = async (): Promise<void> => {
   if (active) return active;
   active = (async () => {
+    const recovered = episodeRepository.recoverSpotifyResolutionJobs();
     const expired = episodeRepository.expireSpotifyResolutionJobs();
     const due = episodeRepository.getDueSpotifyResolutionJobs();
     for (const job of due) {
@@ -21,7 +22,7 @@ const runOnce = async (): Promise<void> => {
         console.warn("Spotify episode resolution failed", { episode_id: job.episodeId, attempt: job.attemptCount + 1 });
       }
     }
-    if (expired || due.length) console.info("Spotify episode resolution worker pass", { expired, processed: due.length });
+    if (recovered || expired || due.length) console.info("Spotify episode resolution worker pass", { recovered, expired, processed: due.length });
   })().finally(() => { active = null; });
   return active;
 };

@@ -1093,6 +1093,10 @@ export const episodeRepository = {
     const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'processing', updated_at = ? WHERE episode_id = ? AND status = 'pending'").run(nowIso(), episodeId);
     return Number(result.changes) === 1;
   },
+  recoverSpotifyResolutionJobs(): number {
+    const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'pending', updated_at = ? WHERE status = 'processing'").run(nowIso());
+    return Number(result.changes);
+  },
   markSpotifyResolutionAttempt(episodeId: number, status: "matched" | "no_match" | "failed", error?: string): void {
     const now = new Date();
     const next = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
