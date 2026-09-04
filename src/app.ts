@@ -20,7 +20,7 @@ import { internalEpisodeRouter } from "./routes/internal-episode.routes";
 import { internalPublicationRouter } from "./routes/internal-publication.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
 import fs from "node:fs";
-import { getEpisodePromotionMedia } from "./services/episode-promotion-media.service";
+import { getEpisodeProviderMedia } from "./services/episode-promotion-media.service";
 
 export const app = express();
 
@@ -35,7 +35,7 @@ app.use(express.json({ limit: "4mb" }));
 app.use("/media/episodes/:episodeId/trailer.mp4", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "GET" && config.meta.providerMediaExposureEnabled && Number(req.params.episodeId) === config.meta.providerMediaEpisodeId) {
-    void getEpisodePromotionMedia(Number(req.params.episodeId)).then((media) => {
+    void getEpisodeProviderMedia(Number(req.params.episodeId)).then((media) => {
       const range = req.get("range");
       const match = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
       let start = 0;
