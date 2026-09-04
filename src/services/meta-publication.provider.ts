@@ -1,6 +1,6 @@
 import { config } from "../config/env";
 
-export type ProviderResult = { id: string; status?: string; permalink?: string | null };
+export type ProviderResult = { id: string; status?: string; permalink?: string | null; uploadUrl?: string };
 type MetaProviderFailure = Error & { category: "permission" | "provider" | "transient"; providerCode?: number; providerStatus?: number };
 export type MetaPublicationProvider = {
   createInstagramContainer(input: { mediaUrl: string; caption: string }): Promise<ProviderResult>;
@@ -40,21 +40,22 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
     });
     throw failure;
   }
-  return { id: String(body.id ?? body.video_id ?? ""), status: typeof body.status === "string" ? body.status : undefined, permalink: typeof body.permalink_url === "string" ? body.permalink_url : null };
+  const status = typeof body.status === "string" ? body.status : typeof body.status === "object" && body.status ? String((body.status as Record<string, unknown>).video_status ?? "") : undefined;
+  return { id: String(body.id ?? body.video_id ?? ""), status: status || undefined, permalink: typeof body.permalink_url === "string" ? body.permalink_url : null, uploadUrl: typeof body.upload_url === "string" ? body.upload_url : undefined };
 };
 
 export const metaPublicationProvider: MetaPublicationProvider = {
-  createInstagramContainer: (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: publicationToken() }) }),
-  getInstagramContainer: (id) => request(`${id}?fields=id,status_code&access_token=${encodeURIComponent(publicationToken())}`),
-  publishInstagramContainer: (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: publicationToken() }) }),
+  createInstagramContainer: async (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: await pagePublicationToken() }) }),
+  getInstagramContainer: async (id) => request(`${id}?fields=id,status_code&access_token=${encodeURIComponent(await pagePublicationToken())}`),
+  publishInstagramContainer: async (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: await pagePublicationToken() }) }),
   uploadFacebookVideo: async (input) => {
-    const form = new FormData();
-    form.set("source", input.media, "trailer.mp4");
-    form.set("title", input.title);
-    form.set("description", input.description);
-    form.set("access_token", await pagePublicationToken());
-    return request(`${config.meta.pageId}/videos`, { method: "POST", body: form });
+    const token = await pagePublicationToken();
+    const start = await request(`${config.meta.pageId}/video_reels?upload_phase=start&access_token=${encodeURIComponent(token)}`, { method: "POST" });
+    if (!start.id || !start.uploadUrl) throw Object.assign(new Error("Facebook Reel upload session did not return a video ID and upload URL."), { category: "provider" as const });
+    const upload = await fetch(start.uploadUrl, { method: "POST", headers: { Authorization: `OAuth ${token}`, offset: "0", file_size: String(input.media.size), "Content-Type": "application/octet-stream" }, body: input.media, signal: AbortSignal.timeout(60_000) });
+    if (!upload.ok) throw Object.assign(new Error(`Facebook Reel binary upload failed (HTTP ${upload.status}).`), { category: upload.status >= 500 ? "transient" as const : "provider" as const, providerStatus: upload.status });
+    return { id: start.id };
   },
   getFacebookVideo: async (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(await pagePublicationToken())}`),
-  publishFacebookVideo: async (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: await pagePublicationToken() }) }),
+  publishFacebookVideo: async (id) => request(`${config.meta.pageId}/video_reels`, { method: "POST", body: new URLSearchParams({ video_id: id, upload_phase: "finish", video_state: "PUBLISHED", access_token: await pagePublicationToken() }) }),
 };
