@@ -134,6 +134,23 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_pub_date ON episodes(pub_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_launch_state ON episodes(launch_notification_state, pub_date);
 
+CREATE TABLE IF NOT EXISTS spotify_episode_resolution_jobs (
+  episode_id INTEGER PRIMARY KEY REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'matched', 'no_match', 'failed', 'expired')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  first_attempt_at TEXT,
+  last_attempt_at TEXT,
+  next_attempt_at TEXT,
+  deadline_at TEXT,
+  matched_spotify_id TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_spotify_resolution_due
+  ON spotify_episode_resolution_jobs(status, next_attempt_at, deadline_at);
+
 CREATE TABLE IF NOT EXISTS promotion_notifications (
   notification_id TEXT PRIMARY KEY,
   episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,

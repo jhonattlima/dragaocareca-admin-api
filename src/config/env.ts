@@ -191,6 +191,12 @@ export const config = {
     baseUrl: process.env.SPOTIFY_METRICS_BASE_URL ?? "https://generic.wg.spotify.com/podcasters/v0",
     timeoutMs: Number(process.env.SPOTIFY_METRICS_TIMEOUT_MS ?? 15000),
     sampleIntervalMs: Number(process.env.SPOTIFY_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
+    episodeResolver: {
+      enabled: (process.env.SPOTIFY_EPISODE_RESOLVER_ENABLED ?? "false").toLowerCase() === "true",
+      showId: process.env.SPOTIFY_EPISODE_SHOW_ID ?? "",
+      clientId: process.env.SPOTIFY_EPISODE_CLIENT_ID ?? "",
+      clientSecret: process.env.SPOTIFY_EPISODE_CLIENT_SECRET ?? "",
+    },
   },
   youtube: {
     enabled: (process.env.YOUTUBE_METRICS_ENABLED ?? "false").toLowerCase() === "true",

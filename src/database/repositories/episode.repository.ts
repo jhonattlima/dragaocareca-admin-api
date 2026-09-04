@@ -1008,6 +1008,15 @@ export const episodeRepository = {
       UPDATE episodes SET launch_notification_state = 'sent', launch_notification_sent_at = ?, launch_notification_error = NULL, updated_at = ?
       WHERE episode_id = ?
     `).run(nowIso(), nowIso(), episodeId);
+    const now = new Date();
+    const nowText = now.toISOString();
+    const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    getDb().prepare(`
+      INSERT INTO spotify_episode_resolution_jobs (episode_id, status, first_attempt_at, next_attempt_at, deadline_at, created_at, updated_at)
+      SELECT episode_id, 'pending', ?, ?, ?, ?, ? FROM episodes
+      WHERE episode_id = ? AND (spotify_id IS NULL OR spotify_id = '')
+      ON CONFLICT (episode_id) DO NOTHING
+    `).run(nowText, nowText, deadline, nowText, nowText, episodeId);
     return this.findByEpisodeId(episodeId);
   },
   markLaunchError(episodeId: number, message: string): EpisodeRow | null {
@@ -1015,6 +1024,13 @@ export const episodeRepository = {
       UPDATE episodes SET launch_notification_error = ?, updated_at = ? WHERE episode_id = ?
     `).run(message, nowIso(), episodeId);
     return this.findByEpisodeId(episodeId);
+  },
+  setSpotifyIdIfMissing(episodeId: number, spotifyId: string): boolean {
+    const result = getDb().prepare(`
+      UPDATE episodes SET spotify_id = ?, updated_at = ?
+      WHERE episode_id = ? AND (spotify_id IS NULL OR spotify_id = '')
+    `).run(spotifyId, nowIso(), episodeId);
+    return Number(result.changes) === 1;
   },
   getPendingLaunchNotifications(): EpisodeRow[] {
     const rows = getDb()
@@ -1057,6 +1073,28 @@ export const episodeRepository = {
           LIMIT 1
         )
     `).run(now, now, now, now);
+    return Number(result.changes);
+  },
+  getDueSpotifyResolutionJobs(now = nowIso()): Array<{ episodeId: number; attemptCount: number; deadlineAt: string }> {
+    const rows = getDb().prepare(`
+      SELECT episode_id, attempt_count, deadline_at FROM spotify_episode_resolution_jobs
+      WHERE status = 'pending' AND datetime(next_attempt_at) <= datetime(?) AND datetime(deadline_at) > datetime(?)
+      ORDER BY datetime(next_attempt_at), episode_id
+    `).all(now, now) as Array<{ episode_id: number; attempt_count: number; deadline_at: string }>;
+    return rows.map((row) => ({ episodeId: row.episode_id, attemptCount: row.attempt_count, deadlineAt: row.deadline_at }));
+  },
+  markSpotifyResolutionAttempt(episodeId: number, status: "matched" | "no_match" | "failed", error?: string): void {
+    const now = new Date();
+    const next = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+    const episode = this.findByEpisodeId(episodeId);
+    if (status === "matched" || episode?.spotifyId) {
+      getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'matched', attempt_count = attempt_count + 1, last_attempt_at = ?, matched_spotify_id = ?, updated_at = ? WHERE episode_id = ?").run(now.toISOString(), episode?.spotifyId ?? null, now.toISOString(), episodeId);
+      return;
+    }
+    getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = ?, attempt_count = attempt_count + 1, last_attempt_at = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE episode_id = ? AND status = 'pending'").run(status, now.toISOString(), next, error ?? null, now.toISOString(), episodeId);
+  },
+  expireSpotifyResolutionJobs(now = nowIso()): number {
+    const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'expired', updated_at = ?, last_error = 'resolution deadline exceeded' WHERE status = 'pending' AND datetime(deadline_at) <= datetime(?)").run(now, now);
     return Number(result.changes);
   },
 };
