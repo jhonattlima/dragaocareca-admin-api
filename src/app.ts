@@ -21,8 +21,23 @@ import { internalPublicationRouter } from "./routes/internal-publication.routes"
 import { episodeRepository } from "./database/repositories/episode.repository";
 import fs from "node:fs";
 import { getEpisodeProviderMedia } from "./services/episode-promotion-media.service";
+import { getEpisodeMediaFinalPath } from "./services/episode-media-layout.service";
 
 export const app = express();
+
+const isProviderMediaExposed = (episodeId: number): boolean => {
+  if (!config.meta.providerMediaExposureEnabled) return false;
+  if (config.meta.providerMediaEpisodeId > 0 && episodeId === config.meta.providerMediaEpisodeId) return true;
+
+  // Scheduled episodes remain private. Once an episode is released, expose
+  // only its finalized trailer through the provider-specific MP4 route.
+  const episode = episodeRepository.findByEpisodeId(episodeId);
+  if (!episode) return false;
+  const publicationDate = new Date(episode.pubDate);
+  return Number.isFinite(publicationDate.getTime())
+    && publicationDate <= new Date()
+    && fs.existsSync(getEpisodeMediaFinalPath(episodeId, "trailerVideo"));
+};
 
 app.use(helmet());
 app.use(
@@ -34,7 +49,7 @@ app.use(morgan("[:date[iso]] :method :url :status :response-time ms - :res[conte
 app.use(express.json({ limit: "4mb" }));
 app.use("/media/episodes/:episodeId/trailer.mp4", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
-  if (req.method === "GET" && config.meta.providerMediaExposureEnabled && Number(req.params.episodeId) === config.meta.providerMediaEpisodeId) {
+  if (req.method === "GET" && isProviderMediaExposed(Number(req.params.episodeId))) {
     void getEpisodeProviderMedia(Number(req.params.episodeId)).then((media) => {
       const range = req.get("range");
       const match = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
