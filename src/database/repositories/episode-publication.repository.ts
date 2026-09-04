@@ -70,4 +70,19 @@ export const episodePublicationRepository = {
     getDb().prepare("UPDATE episode_publication_effects SET attempts = ?, next_attempt_at = ?, diagnostics_json = ?, updated_at = ? WHERE effect_key = ?").run(attempts, nextAttemptAt, JSON.stringify(diagnostics), nowIso(), effectKey);
     return attempts;
   },
+  resetSocialEffectForFixture(effectKey: string): boolean {
+    const result = getDb().prepare(`UPDATE episode_publication_effects
+      SET lifecycle = 'eligible', attempts = 0, next_attempt_at = NULL,
+          diagnostics_json = '[]', remote_id = NULL, permalink = NULL,
+          checkpoint_json = ?, updated_at = ?
+      WHERE effect_key = ?
+        AND destination IN ('instagram_reel', 'facebook_native_video')
+        AND remote_id IS NULL
+        AND json_extract(checkpoint_json, '$.providerId') IS NULL`).run(
+      JSON.stringify({ stage: "none", providerId: null, uploadId: null, updatedAt: null }),
+      nowIso(),
+      effectKey,
+    );
+    return result.changes > 0;
+  },
 };

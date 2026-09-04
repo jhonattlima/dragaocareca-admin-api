@@ -6,11 +6,13 @@ import { preflightEpisodePublicationMedia } from "../services/episode-publicatio
 import { createEpisodePublication } from "../services/episode-publication.service";
 import { deliverInstagramReel } from "../services/instagram-reel-publication.service";
 import { deliverFacebookNativeVideo } from "../services/facebook-native-video-publication.service";
+import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
 
 const value = (name: string): string | null => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] ?? null : null; };
 const fake = process.argv.includes("--fake-only") || process.argv.includes("--dry-run");
 const live = process.argv.includes("--authorize-live");
 const selected = (value("--destinations") ?? "instagram,facebook").split(",").filter((d): d is "instagram" | "facebook" => d === "instagram" || d === "facebook");
+const recreateMissingCheckpoint = process.argv.includes("--recreate-missing-checkpoint");
 
 const main = async (): Promise<void> => {
   if (!fake && !live) throw new Error("Refusing fixture execution without --dry-run/--fake-only or --authorize-live.");
@@ -35,7 +37,15 @@ const main = async (): Promise<void> => {
   if (!connection.configured || !connection.checks.identity || !connection.checks.linkage || !connection.checks.permissions || !connection.checks.version) throw new Error("Meta connection preflight did not pass; no publication attempted.");
   config.meta.instagramEnabled = selected.includes("instagram");
   config.meta.facebookReelEnabled = selected.includes("facebook");
-  for (const effect of publication.effects) {
+  let effects = episodePublicationRepository.list(episodeId, publication.sourceRevision);
+  if (recreateMissingCheckpoint) {
+    for (const effect of effects) {
+      if (effect.destination === "telegram" || !selected.includes(effect.destination === "instagram_reel" ? "instagram" : "facebook")) continue;
+      episodePublicationRepository.resetSocialEffectForFixture(`episode:${episodeId}:${publication.sourceRevision}:${effect.destination}`);
+    }
+    effects = episodePublicationRepository.list(episodeId, publication.sourceRevision);
+  }
+  for (const effect of effects) {
     if (effect.destination === "instagram_reel" && selected.includes("instagram")) await deliverInstagramReel(episodeId, effect);
     if (effect.destination === "facebook_native_video" && selected.includes("facebook")) await deliverFacebookNativeVideo(episodeId, effect);
   }
