@@ -28,13 +28,14 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) {
-    const category: MetaProviderFailure["category"] = response.status === 401 || response.status === 403 ? "permission" : response.status >= 500 ? "transient" : "provider";
     const providerError = typeof body.error === "object" && body.error ? body.error as Record<string, unknown> : {};
+    const providerCode = typeof providerError.code === "number" ? providerError.code : undefined;
+    const category: MetaProviderFailure["category"] = response.status === 401 || response.status === 403 ? "permission" : response.status >= 500 || providerCode === 9007 ? "transient" : "provider";
     const message = typeof providerError.message === "string" ? providerError.message : "Meta provider request failed";
     const safeMessage = message.replace(/access_token=[^&\s]+/gi, "access_token=[redacted]").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").slice(0, 240);
     const failure: MetaProviderFailure = Object.assign(new Error(safeMessage), {
       category,
-      providerCode: typeof providerError.code === "number" ? providerError.code : undefined,
+      providerCode,
       providerStatus: response.status,
     });
     throw failure;
