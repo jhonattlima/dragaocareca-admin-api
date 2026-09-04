@@ -13,6 +13,7 @@ export type MetaPublicationProvider = {
 
 const providerUrl = (path: string): string => `https://graph.facebook.com/${config.meta.graphApiVersion}/${path}`;
 const publicationToken = (): string => config.meta.systemUserAccessToken || config.meta.pageAccessToken;
+const pagePublicationToken = (): string => config.meta.pageAccessToken || config.meta.systemUserAccessToken;
 const request = async (path: string, init: RequestInit = {}): Promise<ProviderResult> => {
   if (!publicationToken()) throw Object.assign(new Error("Meta publication connection is not configured."), { category: "configuration" as const });
   const response = await fetch(providerUrl(path), { ...init, signal: AbortSignal.timeout(30_000) });
@@ -34,16 +35,16 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
 
 export const metaPublicationProvider: MetaPublicationProvider = {
   createInstagramContainer: (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: publicationToken() }) }),
-  getInstagramContainer: (id) => request(`${id}?fields=id,status_code,permalink&access_token=${encodeURIComponent(publicationToken())}`),
+  getInstagramContainer: (id) => request(`${id}?fields=id,status_code&access_token=${encodeURIComponent(publicationToken())}`),
   publishInstagramContainer: (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: publicationToken() }) }),
   uploadFacebookVideo: async (input) => {
     const form = new FormData();
     form.set("source", input.media, "trailer.mp4");
     form.set("title", input.title);
     form.set("description", input.description);
-    form.set("access_token", publicationToken());
+    form.set("access_token", pagePublicationToken());
     return request(`${config.meta.pageId}/videos`, { method: "POST", body: form });
   },
-  getFacebookVideo: (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(publicationToken())}`),
-  publishFacebookVideo: (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: publicationToken() }) }),
+  getFacebookVideo: (id) => request(`${id}?fields=id,status,permalink_url&access_token=${encodeURIComponent(pagePublicationToken())}`),
+  publishFacebookVideo: (id) => request(`${id}`, { method: "POST", body: new URLSearchParams({ published: "true", access_token: pagePublicationToken() }) }),
 };
