@@ -49,7 +49,7 @@ export const episodePublicationRepository = {
       WHERE destination IN ('instagram_reel', 'facebook_native_video')
         AND eligibility = 'eligible'
         AND lifecycle = 'failed'
-        AND attempts < 4
+        AND attempts < 12
         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
       ORDER BY COALESCE(next_attempt_at, updated_at), updated_at
       LIMIT ?
@@ -80,6 +80,20 @@ export const episodePublicationRepository = {
         AND remote_id IS NULL
         AND json_extract(checkpoint_json, '$.providerId') IS NULL`).run(
       JSON.stringify({ stage: "none", providerId: null, uploadId: null, updatedAt: null }),
+      nowIso(),
+      effectKey,
+    );
+    return result.changes > 0;
+  },
+  requeueSocialEffectForFixture(effectKey: string): boolean {
+    const result = getDb().prepare(`UPDATE episode_publication_effects
+      SET lifecycle = 'failed', next_attempt_at = ?, diagnostics_json = ?, updated_at = ?
+      WHERE effect_key = ?
+        AND destination IN ('instagram_reel', 'facebook_native_video')
+        AND remote_id IS NULL
+        AND json_extract(checkpoint_json, '$.providerId') IS NOT NULL`).run(
+      nowIso(),
+      JSON.stringify(["Fixture recovery requeued the persisted provider checkpoint."]),
       nowIso(),
       effectKey,
     );
