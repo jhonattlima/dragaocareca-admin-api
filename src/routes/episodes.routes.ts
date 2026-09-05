@@ -167,7 +167,9 @@ const uploadSpecs: Record<Exclude<UploadKind, "trailerVideo">, UploadSpec> = {
     field: "coverLowFileName",
     buildFileName: (episodeId) => getEpisodeMediaRelativePath(episodeId, "coverLow"),
     buildStagingDirectory: (episodeId) => getEpisodeMediaStagingDirectory(episodeId),
-    buildStagingFileName: () => "cover.webp",
+    // Keep this aligned with getEpisodeMediaStagingPath(). A mismatch causes
+    // promoteStagedMedia() to skip the uploaded WebP during episode save.
+    buildStagingFileName: () => "cover_low.webp",
     allowedExtensions: [".webp"],
     allowedMimeTypes: ["image/webp"],
     maxBytes: 10 * 1024 * 1024,
@@ -440,17 +442,27 @@ const promoteStagedMedia = async (episodeId: number) => {
   for (const spec of Object.values(uploadSpecs)) {
     const fileName = spec.buildFileName(episodeId);
     const stagingPath = getEpisodeMediaStagingPath(episodeId, spec.kind);
+    // Older WebP uploads used cover.webp in staging while the finalization
+    // contract uses cover_low.webp. Recover those already-staged files once.
+    const legacyStagingPath = spec.kind === "coverLow"
+      ? path.join(getEpisodeMediaStagingDirectory(episodeId), "cover.webp")
+      : null;
     const finalPath = getEpisodeMediaFinalPath(episodeId, spec.kind);
     const stagedExists = await fs.promises
       .access(stagingPath)
       .then(() => true)
       .catch(() => false);
+    const actualStagingPath = stagedExists
+      ? stagingPath
+      : legacyStagingPath && await fs.promises.access(legacyStagingPath).then(() => true).catch(() => false)
+        ? legacyStagingPath
+        : null;
 
-    if (!stagedExists) {
+    if (!actualStagingPath) {
       continue;
     }
 
-    await moveFile(stagingPath, finalPath);
+    await moveFile(actualStagingPath, finalPath);
     updates[spec.field] = fileName;
   }
 

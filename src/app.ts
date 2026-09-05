@@ -70,28 +70,6 @@ app.use("/media/episodes/:episodeId/trailer.mp4", (req, res, next) => {
 app.use("/media/episodes/:episodeId/trailer.mp4", (_req, res) => {
   res.status(404).json({ message: "Media resource is unavailable." });
 });
-// A low-resolution cover is an optimization, not a publication requirement.
-// Keep the stable low-cover URL usable when a derivative is missing during a
-// legacy migration or an interrupted upload by serving the canonical cover.
-app.get("/media/episodes/:episodeId/cover_low.webp", (req, res, next) => {
-  const episodeId = Number(req.params.episodeId);
-  if (!Number.isSafeInteger(episodeId) || episodeId <= 0) {
-    next();
-    return;
-  }
-
-  const lowPath = getEpisodeMediaFinalPath(episodeId, "coverLow");
-  const canonicalPath = getEpisodeMediaFinalPath(episodeId, "cover");
-  if (fs.existsSync(lowPath)) {
-    next();
-    return;
-  }
-  if (fs.existsSync(canonicalPath)) {
-    res.sendFile(canonicalPath, { headers: { "Cache-Control": "no-cache" } });
-    return;
-  }
-  next();
-});
 app.use(
   "/media",
   express.static(config.media.storageRoot, {
