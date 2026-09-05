@@ -123,6 +123,13 @@ export const findExistingEpisodeMediaPath = async (
   }
 
   if (kind !== "transcript") {
+    // A previous cover WebP upload used a staging filename that did not match
+    // getEpisodeMediaStagingPath(). Prefer staged cover files so a restart can
+    // finalize interrupted replacements instead of leaving a broken DB URL.
+    if (kind === "coverLow") {
+      candidates.push(getEpisodeMediaStagingPath(episodeId, kind));
+      candidates.push(path.join(getEpisodeMediaStagingDirectory(episodeId), "cover.webp"));
+    }
     candidates.push(getEpisodeMediaFinalPath(episodeId, kind));
     if (kind === "audio") {
       candidates.push(getEpisodeMediaStagingPath(episodeId, kind));
