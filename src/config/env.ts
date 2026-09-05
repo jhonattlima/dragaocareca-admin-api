@@ -196,8 +196,8 @@ export const config = {
       showId: process.env.SPOTIFY_EPISODE_SHOW_ID ?? "",
       // Reuse the existing Spotify application credentials unless the resolver
       // is explicitly given a separate pair.
-      clientId: process.env.SPOTIFY_EPISODE_CLIENT_ID ?? process.env.SPOTIFY_CLIENT_ID ?? "",
-      clientSecret: process.env.SPOTIFY_EPISODE_CLIENT_SECRET ?? process.env.SPOTIFY_SP_KEY ?? "",
+      clientId: process.env.SPOTIFY_EPISODE_CLIENT_ID || process.env.SPOTIFY_CLIENT_ID || "",
+      clientSecret: process.env.SPOTIFY_EPISODE_CLIENT_SECRET || process.env.SPOTIFY_SP_KEY || "",
     },
   },
   youtube: {
