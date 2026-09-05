@@ -32,6 +32,8 @@ export const startSpotifyEpisodeResolutionWorker = async (): Promise<() => void>
     console.info("Spotify episode resolution worker disabled by SPOTIFY_EPISODE_RESOLVER_ENABLED=false");
     return () => undefined;
   }
+  const queued = episodeRepository.enqueueMissingSpotifyResolutions();
+  if (queued) console.info("Spotify episode resolution backfill queued", { queued });
   await runOnce();
   timer = setInterval(() => void runOnce().catch((error: unknown) => console.error("Spotify episode resolution worker failed", error)), 5 * 60 * 1000);
   return () => { if (timer) clearInterval(timer); timer = undefined; };

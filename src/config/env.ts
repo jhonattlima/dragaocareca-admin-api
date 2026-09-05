@@ -194,8 +194,10 @@ export const config = {
     episodeResolver: {
       enabled: (process.env.SPOTIFY_EPISODE_RESOLVER_ENABLED ?? "false").toLowerCase() === "true",
       showId: process.env.SPOTIFY_EPISODE_SHOW_ID ?? "",
-      clientId: process.env.SPOTIFY_EPISODE_CLIENT_ID ?? "",
-      clientSecret: process.env.SPOTIFY_EPISODE_CLIENT_SECRET ?? "",
+      // Reuse the existing Spotify application credentials unless the resolver
+      // is explicitly given a separate pair.
+      clientId: process.env.SPOTIFY_EPISODE_CLIENT_ID ?? process.env.SPOTIFY_CLIENT_ID ?? "",
+      clientSecret: process.env.SPOTIFY_EPISODE_CLIENT_SECRET ?? process.env.SPOTIFY_SP_KEY ?? "",
     },
   },
   youtube: {

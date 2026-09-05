@@ -1012,6 +1012,17 @@ export const episodeRepository = {
       ON CONFLICT (episode_id) DO NOTHING
     `).run(nowText, nowText, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(), nowText, nowText, episodeId);
   },
+  enqueueMissingSpotifyResolutions(): number {
+    const now = new Date();
+    const nowText = now.toISOString();
+    const result = getDb().prepare(`
+      INSERT INTO spotify_episode_resolution_jobs (episode_id, status, first_attempt_at, next_attempt_at, deadline_at, created_at, updated_at)
+      SELECT episode_id, 'pending', ?, ?, ?, ?, ? FROM episodes
+      WHERE is_draft = 0 AND (spotify_id IS NULL OR spotify_id = '')
+      ON CONFLICT (episode_id) DO NOTHING
+    `).run(nowText, nowText, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(), nowText, nowText);
+    return Number(result.changes);
+  },
   markLaunchSent(episodeId: number): EpisodeRow | null {
     const existing = this.findByEpisodeId(episodeId);
     if (!existing) return null;
