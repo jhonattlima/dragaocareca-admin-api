@@ -1095,13 +1095,14 @@ export const episodeRepository = {
   getDueSpotifyResolutionJobs(now = nowIso()): Array<{ episodeId: number; attemptCount: number; deadlineAt: string }> {
     const rows = getDb().prepare(`
       SELECT episode_id, attempt_count, deadline_at FROM spotify_episode_resolution_jobs
-      WHERE status = 'pending' AND datetime(next_attempt_at) <= datetime(?) AND datetime(deadline_at) > datetime(?)
+      WHERE status IN ('pending', 'failed', 'no_match')
+        AND datetime(next_attempt_at) <= datetime(?) AND datetime(deadline_at) > datetime(?)
       ORDER BY datetime(next_attempt_at), episode_id
     `).all(now, now) as Array<{ episode_id: number; attempt_count: number; deadline_at: string }>;
     return rows.map((row) => ({ episodeId: row.episode_id, attemptCount: row.attempt_count, deadlineAt: row.deadline_at }));
   },
   claimSpotifyResolutionJob(episodeId: number): boolean {
-    const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'processing', updated_at = ? WHERE episode_id = ? AND status = 'pending'").run(nowIso(), episodeId);
+    const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'processing', updated_at = ? WHERE episode_id = ? AND status IN ('pending', 'failed', 'no_match')").run(nowIso(), episodeId);
     return Number(result.changes) === 1;
   },
   recoverSpotifyResolutionJobs(): number {
