@@ -3,6 +3,7 @@ import path from "node:path";
 import { getDb, nowIso } from "../sqlite";
 import type { EpisodeInput, TrailerVideoSyncStatus } from "../../schemas/episode";
 import type { EpisodeTrailerVideoDraftLifecycle, EpisodeTrailerVideoDraftReservation } from "../../schemas/episode-draft-state";
+import { signalSpotifyResolutionEnqueued } from "../../workers/spotify-episode-resolution.signal";
 
 export type EpisodeRow = Omit<EpisodeInput, "pubDate"> & {
   id?: number;
@@ -1005,12 +1006,13 @@ export const episodeRepository = {
   enqueueSpotifyResolution(episodeId: number): void {
     const now = new Date();
     const nowText = now.toISOString();
-    getDb().prepare(`
+    const result = getDb().prepare(`
       INSERT INTO spotify_episode_resolution_jobs (episode_id, status, first_attempt_at, next_attempt_at, deadline_at, created_at, updated_at)
       SELECT episode_id, 'pending', ?, ?, ?, ?, ? FROM episodes
       WHERE episode_id = ? AND (spotify_id IS NULL OR spotify_id = '')
       ON CONFLICT (episode_id) DO NOTHING
     `).run(nowText, nowText, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(), nowText, nowText, episodeId);
+    if (result.changes) signalSpotifyResolutionEnqueued();
   },
   enqueueMissingSpotifyResolutions(): number {
     const now = new Date();
@@ -1021,6 +1023,7 @@ export const episodeRepository = {
       WHERE is_draft = 0 AND (spotify_id IS NULL OR spotify_id = '')
       ON CONFLICT (episode_id) DO NOTHING
     `).run(nowText, nowText, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(), nowText, nowText);
+    if (result.changes) signalSpotifyResolutionEnqueued();
     return Number(result.changes);
   },
   markLaunchSent(episodeId: number): EpisodeRow | null {
@@ -1100,6 +1103,15 @@ export const episodeRepository = {
       ORDER BY datetime(next_attempt_at), episode_id
     `).all(now, now) as Array<{ episode_id: number; attempt_count: number; deadline_at: string }>;
     return rows.map((row) => ({ episodeId: row.episode_id, attemptCount: row.attempt_count, deadlineAt: row.deadline_at }));
+  },
+  hasActiveSpotifyResolutionJobs(now = nowIso()): boolean {
+    const row = getDb().prepare(`
+      SELECT 1 FROM spotify_episode_resolution_jobs
+      WHERE status IN ('pending', 'failed', 'no_match')
+        AND datetime(deadline_at) > datetime(?)
+      LIMIT 1
+    `).get(now);
+    return Boolean(row);
   },
   claimSpotifyResolutionJob(episodeId: number): boolean {
     const result = getDb().prepare("UPDATE spotify_episode_resolution_jobs SET status = 'processing', updated_at = ? WHERE episode_id = ? AND status IN ('pending', 'failed', 'no_match')").run(nowIso(), episodeId);

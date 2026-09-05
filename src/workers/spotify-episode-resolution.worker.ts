@@ -1,9 +1,11 @@
 import { config } from "../config/env";
 import { episodeRepository } from "../database/repositories/episode.repository";
 import { resolveEpisodeSpotifyId } from "../services/spotify-episode-resolver.service";
+import { setSpotifyResolutionWakeListener } from "./spotify-episode-resolution.signal";
 
 let timer: NodeJS.Timeout | undefined;
 let active: Promise<void> | null = null;
+const retryDelayMs = 5 * 60 * 1000;
 
 const runOnce = async (): Promise<void> => {
   if (active) return active;
@@ -27,6 +29,26 @@ const runOnce = async (): Promise<void> => {
   return active;
 };
 
+const scheduleNextPass = (): void => {
+  if (timer || !episodeRepository.hasActiveSpotifyResolutionJobs()) return;
+  timer = setTimeout(() => {
+    timer = undefined;
+    void runOnce()
+      .catch((error: unknown) => console.error("Spotify episode resolution worker failed", error))
+      .finally(scheduleNextPass);
+  }, retryDelayMs);
+};
+
+const wake = (): void => {
+  if (timer) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+  void runOnce()
+    .catch((error: unknown) => console.error("Spotify episode resolution worker failed", error))
+    .finally(scheduleNextPass);
+};
+
 export const startSpotifyEpisodeResolutionWorker = async (): Promise<() => void> => {
   if (!config.spotify.episodeResolver.enabled) {
     console.info("Spotify episode resolution worker disabled by SPOTIFY_EPISODE_RESOLVER_ENABLED=false");
@@ -34,7 +56,12 @@ export const startSpotifyEpisodeResolutionWorker = async (): Promise<() => void>
   }
   const queued = episodeRepository.enqueueMissingSpotifyResolutions();
   if (queued) console.info("Spotify episode resolution backfill queued", { queued });
+  setSpotifyResolutionWakeListener(wake);
   await runOnce();
-  timer = setInterval(() => void runOnce().catch((error: unknown) => console.error("Spotify episode resolution worker failed", error)), 5 * 60 * 1000);
-  return () => { if (timer) clearInterval(timer); timer = undefined; };
+  scheduleNextPass();
+  return () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    setSpotifyResolutionWakeListener(undefined);
+  };
 };
