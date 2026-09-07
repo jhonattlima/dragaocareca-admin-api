@@ -238,6 +238,14 @@ export const config = {
       ),
     },
   },
+  umami: {
+    enabled: parseBoolean(process.env.UMAMI_METRICS_ENABLED),
+    baseUrl: process.env.UMAMI_BASE_URL ?? "http://umami:3000",
+    websiteId: process.env.UMAMI_WEBSITE_ID ?? "",
+    username: process.env.UMAMI_USERNAME ?? "",
+    password: process.env.UMAMI_PASSWORD ?? "",
+    timeoutMs: boundedPositiveInteger(process.env.UMAMI_TIMEOUT_MS, 15_000, "UMAMI_TIMEOUT_MS", 120_000),
+  },
   meta: {
     graphApiVersion: process.env.META_GRAPH_API_VERSION ?? "v25.0",
     userAccessToken: process.env.META_USER_ACCESS_TOKEN ?? "",
