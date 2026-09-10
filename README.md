@@ -10,6 +10,21 @@ Before making changes, read:
 
 Node.js backend for Dragao Careca admin, with SQLite episode storage, dynamic RSS feed generation, and shared media/reference assets.
 
+## Production deployment (VPS)
+
+Production is deployed by the ecosystem deployment repository, not by copying
+this working tree or running a local server on the VPS. The VPS keeps this
+repository as a detached Git checkout under
+`/srv/dragaocareca/apps/dragaocareca-admin-api`; its revision is pinned by the
+external `/srv/dragaocareca/deploy/secrets/repositories.env` file.
+
+For a release, commit and push the API change, then ask the deployment operator
+to update the API SHA and run `deploy-git-release.sh`. The deployment script
+builds the image, preserves `/srv/dragaocareca/data`, and waits for `GET
+/health` before declaring success. Never copy `.env.production`, SQLite data,
+media, or credentials into Git. Rollback is owned by
+`/srv/dragaocareca/deploy/scripts/rollback-git-release.sh`.
+
 Workspace layout:
 - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
 - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`
