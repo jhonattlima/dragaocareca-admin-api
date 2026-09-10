@@ -49,7 +49,7 @@ const readCanonicalTrailerFingerprint = async (episodeId: number): Promise<Trail
 };
 
 const publicDownloadUrlFor = (episodeId: number): string =>
-  `${config.feed.baseLink.replace(/\/+$/, "")}/${episodeId}`;
+  `${config.feed.audioBase.replace(/\/+$/, "")}/episodes/${episodeId}/audio.mp3`;
 
 const configuredPromotionTransport = (): PromotionTransport => ({
   async sendPromotion(request, effects): Promise<unknown> {

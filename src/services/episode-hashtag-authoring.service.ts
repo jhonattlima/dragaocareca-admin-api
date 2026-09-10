@@ -31,8 +31,8 @@ const geminiCandidateJsonSchema = {
   properties: {
     candidates: {
       type: "array",
-      minItems: 50,
-      maxItems: 50,
+      minItems: 0,
+      maxItems: 70,
       items: {
         type: "object",
         properties: {
@@ -58,7 +58,7 @@ const sampleTranscriptForHashtags = (transcript: string): string => {
 
 const buildPrompt = (transcript: string, summary: string): string => [
   "Você sugere hashtags para um vídeo do episódio do podcast.",
-  "Responda somente com o objeto JSON solicitado. Gere exatamente 50 registros.",
+  "Responda somente com o objeto JSON solicitado. Gere entre 60 e 70 registros para permitir a remoção de duplicatas.",
   "Use apenas fatos sustentados pelo transcript e pelo summary abaixo. Não invente entidades, eventos ou temas.",
   "Não sugira o nome do programa, da marca, do podcast, nomes recorrentes do canal ou termos que serviriam para qualquer episódio.",
   "Não sugira números ou códigos de episódio, títulos de episódios anteriores, referências negadas, piadas isoladas, chamadas de abertura ou menções incidentais.",
@@ -151,16 +151,16 @@ const createDefaultGenerateCandidates = (onProvider: (provider: "gemini" | "groq
 
 export const validateGeminiTagCandidates = (value: unknown): SuggestedTagCandidate[] => {
   const parsed = responseSchema.parse(value);
-  if (parsed.candidates.length < 50) throw new Error("AI must return at least 50 hashtag candidates");
   const byNormalized = new Map<string, SuggestedTagCandidate>();
   for (const candidate of parsed.candidates) {
     const normalized = normalizeHashtagTag(candidate.tag);
     if (!normalized) continue;
     if (isBlockedGenericHashtag(normalized.normalizedTag)) continue;
-    if (byNormalized.has(normalized.normalizedTag)) throw new Error("Gemini returned duplicate hashtag candidates");
+    // Providers occasionally repeat a tag or vary only its casing/# prefix.
+    // Deduplicate after normalization instead of discarding the whole result.
+    if (byNormalized.has(normalized.normalizedTag)) continue;
     byNormalized.set(normalized.normalizedTag, { ...normalized, relevant: candidate.relevant, relevanceScore: candidate.relevanceScore });
   }
-  if (byNormalized.size < 50) throw new Error("AI must return at least 50 unique normalized hashtag candidates");
   return [...byNormalized.values()].slice(0, 50);
 };
 
@@ -220,7 +220,7 @@ export const createEpisodeHashtagAuthoringService = (options: { generateCandidat
         .map(({ candidate, retrieval }) => ({ ...retrieval, relevanceScore: candidate.relevanceScore }));
       return { status: "done", provider: providerUsed, errorCategory: null, retryAt: null, candidates, retrievals, suggestions };
     } catch (error) {
-      console.warn(`[hashtags] authoring unavailable category=${outcomeError(error)} message=${error instanceof Error ? error.message : "unknown error"}`);
+      console.warn(`[hashtags] authoring unavailable provider=${providerUsed} category=${outcomeError(error)} message=${error instanceof Error ? error.message : "unknown error"}`);
       return { status: "unavailable", provider: providerUsed, errorCategory: outcomeError(error), retryAt: new Date(Date.now() + config.youtube.hashtagAuthoring.retryDelaysMs[0]).toISOString(), candidates: [], retrievals: [], suggestions: [] };
     }
   };
