@@ -52,12 +52,19 @@ const validEvidence: TrailerRenderEvidence = {
 };
 
 const run = (): void => {
+  const originalFetch = globalThis.fetch;
+  let networkCalls = 0;
+  globalThis.fetch = (() => { networkCalls += 1; throw new Error("network tripwire"); }) as typeof fetch;
   assert.deepEqual(validateTrailerRenderEvidence(validEvidence), validEvidence);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, concurrency: 2 } as unknown as TrailerRenderEvidence), /concurrency/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, approved: true } as unknown as TrailerRenderEvidence), /approved|measured/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, capability: { ...validEvidence.capability, filters: [] } }), /showwaves/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, provenance: { ...validEvidence.provenance, outputDurationSeconds: 4 } }), /duration/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, measuredLimit: { ...validEvidence.measuredLimit, timeoutMs: 0 } }), /timeout|measured/i);
+  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, profile: { ...validEvidence.profile, container: "webm" } } as unknown as TrailerRenderEvidence), /container|codec/i);
+  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, capability: { ...validEvidence.capability, imageDigest: "not-a-digest" } }), /digest/i);
+  assert.equal(networkCalls, 0, "offline verifier must not call fetch");
+  globalThis.fetch = originalFetch;
   console.log("Trailer render profile verification passed.");
 };
 
