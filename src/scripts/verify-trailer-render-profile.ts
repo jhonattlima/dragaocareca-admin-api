@@ -53,8 +53,8 @@ const validEvidence: TrailerRenderEvidence = {
 
 const run = (): void => {
   assert.deepEqual(validateTrailerRenderEvidence(validEvidence), validEvidence);
-  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, concurrency: 2 }), /concurrency/i);
-  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, approved: true }), /approval|measured/i);
+  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, concurrency: 2 } as unknown as TrailerRenderEvidence), /concurrency/i);
+  assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, approved: true } as unknown as TrailerRenderEvidence), /approved|measured/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, capability: { ...validEvidence.capability, filters: [] } }), /showwaves/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, provenance: { ...validEvidence.provenance, outputDurationSeconds: 4 } }), /duration/i);
   assertThrows(() => validateTrailerRenderEvidence({ ...validEvidence, measuredLimit: { ...validEvidence.measuredLimit, timeoutMs: 0 } }), /timeout|measured/i);
