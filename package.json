@@ -22,6 +22,7 @@
     "verify:episode-hashtag-authoring": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-hashtag-authoring.js",
     "verify:episode-audio-contract": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-audio-contract.js",
     "verify:trailer-render-profile": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-trailer-render-profile.js",
+    "verify:trailer-candidate-lifecycle": "NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-trailer-candidate-lifecycle.js",
     "verify:episode-hashtag-authoring:full": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-hashtag-authoring.js",
     "verify:meta-connection": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-meta-connection.js --fake-only",
     "verify:meta-provider-contract": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-meta-provider-contract.js",

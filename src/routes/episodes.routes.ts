@@ -41,6 +41,7 @@ import {
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
+import { enqueueTrailerCandidate } from "../services/trailer-candidate.service";
 import {
   createYoutubeTrailerJob,
   cleanupYoutubeTrailerVideos,
@@ -280,22 +281,24 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
   const upload = buildUploader(spec);
 
   episodesRouter.post(`/:episodeId/${pathSuffix}`, requireAuth, (req, res, next) => {
-    upload(req, res, async (error) => {
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ message: "Invalid episodeId" });
+      return;
+    }
+    const reserveNewEpisode = async (): Promise<void> => {
+      const episode = episodeRepository.findByEpisodeId(episodeId);
+      if (!episode || episode.isDraft) await reserveTrailerVideoDraft(episodeId, req.user?.email ?? "");
+    };
+    void reserveNewEpisode().then(() => upload(req, res, async (error) => {
       if (error) {
         next(error);
         return;
       }
 
       const file = req.file;
-      const episodeId = Number(req.params.episodeId);
 
       try {
-        if (!Number.isInteger(episodeId) || episodeId <= 0) {
-          if (file) await fs.promises.unlink(file.path).catch(() => undefined);
-          res.status(400).json({ message: "Invalid episodeId" });
-          return;
-        }
-
         if (!file) {
           res.status(400).json({ message: "File upload is required" });
           return;
@@ -307,7 +310,8 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
           ? await extractEpisodeAudioMetadata(file.path)
           : null;
         console.info(`[episodes] upload ${spec.kind} episode=${episodeId} current=${Boolean(currentEpisode)}`);
-        if (!currentEpisode) {
+        const isDraftEpisode = !currentEpisode || currentEpisode.isDraft;
+        if (isDraftEpisode) {
           if (spec.kind === "audio") {
             await abortDraftEpisodeTranscription(episodeId);
             const draftState = await queueDraftEpisodeTranscription(episodeId);
@@ -333,10 +337,15 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
             return;
           }
 
+          const candidate = spec.kind === "cover" || spec.kind === "trailer"
+            ? await enqueueCandidateAfterUpload(spec.kind, episodeId, req.user?.email ?? "")
+            : null;
+
           res.json({
             episodeId,
             [spec.field]: fileName,
             message: "File staged.",
+            ...(candidate ? { trailerCandidate: candidate } : {}),
           });
           return;
         }
@@ -369,10 +378,14 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
           return;
         }
         const refreshed = episodeRepository.findByEpisodeId(episodeId);
+        const candidate = spec.kind === "cover" || spec.kind === "trailer"
+          ? await enqueueCandidateAfterUpload(spec.kind, episodeId, req.user?.email ?? "")
+          : null;
         res.json({
           ...(refreshed ?? updated ?? currentEpisode),
           [spec.field]: fileName,
           message: "File staged.",
+          ...(candidate ? { trailerCandidate: candidate } : {}),
         });
       } catch (error) {
         if (file) {
@@ -380,8 +393,25 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
         }
         next(error);
       }
+    })).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Episode upload could not be authorized";
+      if (message === "Episode already exists" || message === "Episode draft is already reserved") {
+        res.status(409).json({ message });
+        return;
+      }
+      next(error);
     });
   });
+};
+
+const enqueueCandidateAfterUpload = async (kind: "cover" | "trailer", episodeId: number, ownerEmail: string) => {
+  try {
+    const result = await enqueueTrailerCandidate(episodeId, ownerEmail);
+    return result.waitingForInput ? null : result.candidate;
+  } catch (error) {
+    console.warn(`[trailer-candidate] enqueue failed after ${kind} upload episode=${episodeId}`, error instanceof Error ? error.message : String(error));
+    return null;
+  }
 };
 
 const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
@@ -1122,8 +1152,13 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
   let createdEpisodeId: number | null = null;
   let draftForRetry: { draftId: string; episodeId: number; ownerEmail: string } | null = null;
   try {
-    const draftId = typeof req.body?.draftId === "string" ? req.body.draftId : undefined;
     const requestedEpisodeId = Number(req.body?.episodeId);
+    const requestedDraftId = typeof req.body?.draftId === "string" ? req.body.draftId : undefined;
+    const currentEpisode = episodeRepository.findByEpisodeId(requestedEpisodeId);
+    const activeDraft = !requestedDraftId && currentEpisode?.isDraft
+      ? episodeRepository.findActiveTrailerVideoDraftByEpisodeId(requestedEpisodeId)
+      : null;
+    const draftId = requestedDraftId ?? activeDraft?.draftId;
     const draftCheck = draftId !== undefined
       ? checkTrailerVideoDraft(draftId, requestedEpisodeId, req.user?.email ?? "", { allowStaged: true })
       : null;

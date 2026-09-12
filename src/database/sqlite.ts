@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS trailer_candidate_versions (
   duration_seconds REAL CHECK (duration_seconds IS NULL OR duration_seconds > 0),
   probe_json TEXT,
   status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready', 'stale', 'superseded')),
-  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 99),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
   error_category TEXT,
   error_message TEXT,
   attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),

@@ -227,7 +227,7 @@ export const trailerCandidateRepository = {
 
   markReady(candidateId: string, output: { relativePath: string; sha256: string; bytes: number; durationSeconds: number; probeJson: string }): boolean {
     const db = getDb(); const now = nowIso();
-    const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'ready', progress = 99,
+    const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'ready', progress = 100,
       output_relative_path = ?, output_sha256 = ?, output_bytes = ?, duration_seconds = ?, probe_json = ?,
       error_category = NULL, error_message = NULL, ready_at = ?, updated_at = ?
       WHERE candidate_id = ? AND status = 'processing'`).run(
@@ -285,7 +285,7 @@ export const trailerCandidateRepository = {
 
   hasActiveForDraft(draftId: string): boolean {
     return Boolean(getDb().prepare(`SELECT 1 FROM trailer_candidate_versions WHERE draft_id = ?
-      AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable') LIMIT 1`).get(draftId));
+      AND status IN ('pending', 'processing', 'waiting_capacity') LIMIT 1`).get(draftId));
   },
 
   hasHistoryForEpisode(episodeId: number): boolean {
