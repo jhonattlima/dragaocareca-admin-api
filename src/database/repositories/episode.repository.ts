@@ -609,10 +609,15 @@ export const episodeRepository = {
     const rows = getDb().prepare(`
       SELECT draft_id AS draftId, episode_id AS episodeId, owner_email AS ownerEmail,
         created_at AS createdAt, expires_at AS expiresAt, state
-      FROM episode_trailer_video_drafts WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)
+      FROM episode_trailer_video_drafts d WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)
+        AND NOT EXISTS (SELECT 1 FROM trailer_candidate_versions c WHERE c.draft_id = d.draft_id
+          AND c.status IN ('pending', 'processing', 'waiting_capacity'))
     `).all(now.toISOString()) as EpisodeTrailerVideoDraftReservation[];
     if (rows.length > 0) {
-      getDb().prepare("UPDATE episode_trailer_video_drafts SET state = 'expired' WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)").run(now.toISOString());
+      getDb().prepare(`UPDATE episode_trailer_video_drafts SET state = 'expired'
+        WHERE state IN ('reserved', 'staged') AND datetime(expires_at) <= datetime(?)
+          AND NOT EXISTS (SELECT 1 FROM trailer_candidate_versions c WHERE c.draft_id = episode_trailer_video_drafts.draft_id
+            AND c.status IN ('pending', 'processing', 'waiting_capacity'))`).run(now.toISOString());
     }
     return rows.map((row) => ({ ...row, state: row.state as EpisodeTrailerVideoDraftLifecycle }));
   },
@@ -860,7 +865,9 @@ export const episodeRepository = {
     getDb().prepare("DELETE FROM episodes WHERE episode_id = ?").run(episodeId);
   },
   deleteDraftEpisodeIfUnused(episodeId: number): void {
-    getDb().prepare("DELETE FROM episodes WHERE episode_id = ? AND is_draft = 1 AND NOT EXISTS (SELECT 1 FROM youtube_trailer_jobs WHERE episode_id = ?)").run(episodeId, episodeId);
+    getDb().prepare(`DELETE FROM episodes WHERE episode_id = ? AND is_draft = 1
+      AND NOT EXISTS (SELECT 1 FROM youtube_trailer_jobs WHERE episode_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM trailer_candidate_versions WHERE episode_id = ?)`).run(episodeId, episodeId, episodeId);
   },
   updateMedia(
     episodeId: number,

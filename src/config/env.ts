@@ -64,6 +64,12 @@ const parsePromotionRetryDelays = (env: Record<string, string | undefined>): [nu
 
 const promotionEnabled = parseBoolean(process.env.PROMOTION_ENABLED);
 const legacyLaunchEnabled = parseBoolean(process.env.PROMOTION_LEGACY_LAUNCH_ENABLED, true);
+const configuredMediaStorageRoot = process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media");
+const configuredTrailerCandidatesRoot = path.resolve(process.env.TRAILER_CANDIDATES_ROOT ?? path.resolve(process.cwd(), "data", "generated", "trailer-candidates"));
+const relativeCandidateRoot = path.relative(path.resolve(configuredMediaStorageRoot), configuredTrailerCandidatesRoot);
+if (relativeCandidateRoot === "" || (!relativeCandidateRoot.startsWith(`..${path.sep}`) && relativeCandidateRoot !== ".." && !path.isAbsolute(relativeCandidateRoot))) {
+  throw new Error("TRAILER_CANDIDATES_ROOT must be outside MEDIA_STORAGE_ROOT");
+}
 
 export type HashtagAuthoringConfig = {
   enabled: boolean;
@@ -370,7 +376,8 @@ export const config = {
   },
   media: {
     trailerVideoMaxBytes: parseTrailerVideoMaxBytes(process.env.EPISODE_TRAILER_VIDEO_MAX_BYTES),
-    storageRoot: process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
+    storageRoot: configuredMediaStorageRoot,
+    trailerCandidatesRoot: configuredTrailerCandidatesRoot,
     backupRoot:
       process.env.MEDIA_BACKUP_ROOT ??
       path.resolve(process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"), "backups"),

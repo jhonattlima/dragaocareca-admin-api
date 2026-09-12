@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { episodeRepository } from "../database/repositories/episode.repository";
+import { trailerCandidateRepository } from "../database/repositories/trailer-candidate.repository";
 import type { EpisodeTrailerVideoDraftDto, EpisodeTrailerVideoDraftReservation } from "../schemas/episode-draft-state";
 import { cleanupEpisodeMediaStaging } from "./episode-media-layout.service";
 
@@ -60,7 +61,9 @@ export const checkTrailerVideoDraft = (draftId: unknown, episodeId: number, owne
   if (typeof draftId !== "string" || !draftId.trim()) return { ok: false, status: 401, message: "Episode draft reservation is required" };
   const reservation = episodeRepository.findTrailerVideoDraft(draftId);
   if (!reservation) return { ok: false, status: 409, message: "Episode draft reservation is invalid" };
-  if (new Date(reservation.expiresAt).getTime() <= Date.now()) return { ok: false, status: 409, message: "Episode draft reservation has expired" };
+  if (new Date(reservation.expiresAt).getTime() <= Date.now() && !trailerCandidateRepository.hasActiveForDraft(reservation.draftId)) {
+    return { ok: false, status: 409, message: "Episode draft reservation has expired" };
+  }
   if (reservation.episodeId !== episodeId) return { ok: false, status: 403, message: "Episode draft reservation does not match episodeId" };
   if (reservation.ownerEmail !== normalizeOwner(ownerEmail)) return { ok: false, status: 403, message: "Episode draft reservation belongs to another user" };
   if (reservation.state === "consumed" || reservation.state === "expired") return { ok: false, status: 409, message: "Episode draft reservation is no longer usable" };
