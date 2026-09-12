@@ -319,6 +319,12 @@ const main = async (): Promise<void> => {
         actorEmail: "operator@example.test", faultAt: scenario.faultAt,
       });
       assert.deepEqual(failed, { status: "conflict", code: "finalization_blocked" });
+      const retry = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+        episodeId: interrupted.episodeId, candidateId: interrupted.candidateId, decision: "approve",
+        expectedSourceFingerprint: interrupted.sourceFingerprint, expectedVersion: interrupted.version,
+        actorEmail: "operator@example.test",
+      });
+      assert.deepEqual(retry, { status: "conflict", code: "finalization_blocked" }, "an aborted approval must never be reported as a successful replay");
       assert.equal(await fs.promises.readFile(interruptedFinal, "utf8").catch(() => null), scenario.expectedBeforeRecovery);
       assert.equal(episodePublicationRepository.list(scenario.episodeId).length, 0, "an interrupted approval cannot expose replacement effects before SQLite finalization");
       if (scenario.faultAt === "after_backup") {
@@ -330,6 +336,12 @@ const main = async (): Promise<void> => {
       await recoverTrailerPromotionJournals();
       assert.equal(await fs.promises.readFile(interruptedFinal, "utf8"), `candidate-output-${scenario.episodeId}`);
       assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(interrupted.candidateId)?.phase, "committed");
+      const recoveredReplay = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+        episodeId: interrupted.episodeId, candidateId: interrupted.candidateId, decision: "approve",
+        expectedSourceFingerprint: interrupted.sourceFingerprint, expectedVersion: interrupted.version,
+        actorEmail: "operator@example.test",
+      });
+      assert.equal(recoveredReplay.status, "replayed", "only a recovered committed journal with matching canonical hash may replay successfully");
       const effectsBeforeReplay = getDb().prepare("SELECT COUNT(*) AS count FROM promotion_effects WHERE episode_id = ?").get(scenario.episodeId)?.count;
       const backupNames = (await fs.promises.readdir(path.dirname(interruptedFinal))).filter((name) => name.startsWith(".trailer.mp4.backup-"));
       assert.equal(backupNames.length, 0, "committed journal may clean up the backup only after SQLite finalization");

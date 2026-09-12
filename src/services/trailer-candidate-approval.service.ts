@@ -275,9 +275,10 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
   if (prior) {
     if (prior.decision === "approved" && input.decision === "approve") {
       const journal = trailerPromotionJournalRepository.findByCandidate(candidate.candidateId);
-      if (journal && journal.phase !== "committed") {
-        try { await reconcileTrailerPromotionJournal(journal.journalId); } catch { return { status: "conflict", code: "finalization_blocked" }; }
-      }
+      if (!journal || journal.phase === "aborted") return { status: "conflict", code: "finalization_blocked" };
+      try { await reconcileTrailerPromotionJournal(journal.journalId); } catch { return { status: "conflict", code: "finalization_blocked" }; }
+      const finalized = trailerPromotionJournalRepository.findById(journal.journalId);
+      if (finalized?.phase !== "committed") return { status: "conflict", code: "finalization_blocked" };
       return { status: "replayed", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint };
     }
     return { status: "conflict", code: "already_decided" };
