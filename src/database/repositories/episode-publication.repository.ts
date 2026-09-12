@@ -1,7 +1,7 @@
 import { getDb, nowIso } from "../sqlite";
 import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
 
-type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight };
+type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight; withinTransaction?: boolean };
 type Row = { effect_key: string; episode_id: number; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null };
 
 const map = (row: Row): PublicationEffectProjection => ({
@@ -25,16 +25,21 @@ export const episodePublicationRepository = {
     const db = getDb();
     const now = nowIso();
     const intentId = `episode:${input.episodeId}:${input.sourceRevision}`;
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    const persist = (): void => {
       db.prepare(`INSERT INTO episode_publication_intents (intent_id, episode_id, source_revision, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(episode_id, source_revision) DO UPDATE SET updated_at = excluded.updated_at`).run(intentId, input.episodeId, input.sourceRevision, JSON.stringify(input.source), now, now);
       for (const destination of input.destinations) {
         const blocked = destination !== "telegram" && input.preflight.status !== "ready";
         const effectKey = `${intentId}:${destination}`;
         db.prepare(`INSERT INTO episode_publication_effects (effect_key, intent_id, episode_id, destination, source_revision, source_json, metadata_json, eligibility, lifecycle, diagnostics_json, preflight_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(intent_id, destination, source_revision) DO NOTHING`).run(effectKey, intentId, input.episodeId, destination, input.sourceRevision, JSON.stringify(input.source), JSON.stringify(input.metadata), blocked ? "blocked" : "eligible", blocked ? "blocked" : "eligible", JSON.stringify(blocked ? ["Finalized trailer/provider media preflight is not ready."] : []), JSON.stringify(input.preflight), now, now);
       }
-      db.exec("COMMIT");
-    } catch (error) { db.exec("ROLLBACK"); throw error; }
+    };
+    if (input.withinTransaction) {
+      persist();
+    } else {
+      db.exec("BEGIN IMMEDIATE");
+      try { persist(); db.exec("COMMIT"); }
+      catch (error) { db.exec("ROLLBACK"); throw error; }
+    }
     return this.list(input.episodeId, input.sourceRevision);
   },
   list(episodeId: number, sourceRevision?: string): PublicationEffectProjection[] {
@@ -48,13 +53,31 @@ export const episodePublicationRepository = {
       SELECT * FROM episode_publication_effects
       WHERE destination IN ('instagram_reel', 'facebook_native_video')
         AND eligibility = 'eligible'
-        AND lifecycle = 'failed'
+        AND (lifecycle = 'eligible' OR lifecycle = 'failed' OR (lifecycle = 'delivering' AND datetime(updated_at) <= datetime(?, '-60 seconds')))
         AND attempts < 12
-        AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+        AND (lifecycle = 'eligible' OR next_attempt_at IS NULL OR next_attempt_at <= ?)
       ORDER BY COALESCE(next_attempt_at, updated_at), updated_at
       LIMIT ?
-    `).all(now.toISOString(), limit) as Row[];
+    `).all(now.toISOString(), now.toISOString(), limit) as Row[];
     return rows.map((row) => ({ episodeId: row.episode_id, effect: map(row) }));
+  },
+  claimSocialEffect(effectKey: string, now = new Date()): PublicationEffectProjection | null {
+    const db = getDb();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const changed = db.prepare(`UPDATE episode_publication_effects
+        SET lifecycle = 'delivering', updated_at = ?
+        WHERE effect_key = ? AND destination IN ('instagram_reel', 'facebook_native_video')
+          AND eligibility = 'eligible'
+          AND (lifecycle = 'eligible'
+            OR (lifecycle = 'failed' AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?)))
+            OR (lifecycle = 'delivering' AND datetime(updated_at) <= datetime(?, '-60 seconds')))`)
+        .run(now.toISOString(), effectKey, now.toISOString(), now.toISOString()).changes;
+      if (changed !== 1) { db.exec("COMMIT"); return null; }
+      const row = db.prepare("SELECT * FROM episode_publication_effects WHERE effect_key = ?").get(effectKey) as Row | undefined;
+      db.exec("COMMIT");
+      return row ? map(row) : null;
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
   },
   markTelegramDelivered(episodeId: number, sourceRevision: string): void {
     getDb().prepare("UPDATE episode_publication_effects SET lifecycle = 'published', updated_at = ? WHERE episode_id = ? AND source_revision = ? AND destination = 'telegram' AND lifecycle = 'eligible'").run(nowIso(), episodeId, sourceRevision);

@@ -40,6 +40,52 @@ export const createEpisodePublication = async (episode: EpisodeRow): Promise<{ s
   return { sourceRevision, effects };
 };
 
+export const createEpisodeReplacementPublicationInTransaction = (input: {
+  episode: EpisodeRow;
+  source: PublicationSource;
+}): { sourceRevision: string; effects: PublicationEffectProjection[] } => {
+  const destinations = [
+    ...(config.meta.instagramEnabled ? ["instagram_reel" as const] : []),
+    ...(config.meta.facebookReelEnabled ? ["facebook_native_video" as const] : []),
+  ];
+  const sourceRevision = publicationSourceRevision(input.episode.episodeId, input.source);
+  if (destinations.length === 0) return { sourceRevision, effects: [] };
+  const now = new Date().toISOString();
+  const preflight: PublicationPreflight = {
+    status: "ready",
+    checkedAt: now,
+    providerReachability: "not_checked",
+    contentType: "video/mp4",
+    contentLength: input.source.byteCount,
+    rangeSupported: null,
+    failureCategory: null,
+  };
+  const effects = episodePublicationRepository.createOrGet({
+    episodeId: input.episode.episodeId,
+    sourceRevision,
+    source: input.source,
+    metadata: metadataFor(input.episode),
+    destinations,
+    preflight,
+    withinTransaction: true,
+  });
+  return { sourceRevision, effects };
+};
+
+export const dispatchEpisodeReplacementPublication = async (
+  episodeId: number,
+  sourceRevision: string,
+  provider?: MetaPublicationProvider,
+): Promise<PublicationEffectProjection[]> => {
+  const effects = episodePublicationRepository.list(episodeId, sourceRevision);
+  await Promise.all(effects.map((effect) => {
+    if (effect.destination === "instagram_reel" && config.meta.instagramEnabled) return deliverInstagramReel(episodeId, effect, provider);
+    if (effect.destination === "facebook_native_video" && config.meta.facebookReelEnabled) return deliverFacebookNativeVideo(episodeId, effect, provider);
+    return Promise.resolve();
+  }));
+  return episodePublicationRepository.list(episodeId, sourceRevision);
+};
+
 export const deliverEpisodePublication = async (episode: EpisodeRow): Promise<{ delivered: boolean; effects: PublicationEffectProjection[] }> => {
   const publication = await createEpisodePublication(episode);
   const instagram = publication.effects.find((effect) => effect.destination === "instagram_reel");

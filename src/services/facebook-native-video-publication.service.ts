@@ -10,6 +10,9 @@ const MAX_PROVIDER_ATTEMPTS = 12;
 export const deliverFacebookNativeVideo = async (episodeId: number, effect: PublicationEffectProjection, provider: MetaPublicationProvider = metaPublicationProvider): Promise<void> => {
   if (!config.meta.facebookReelEnabled || effect.eligibility !== "eligible") return;
   const key = keyFor(effect, episodeId);
+  const claimed = episodePublicationRepository.claimSocialEffect(key);
+  if (!claimed) return;
+  effect = claimed;
   if (effect.lifecycle === "published" && effect.remoteId) return;
   let currentCheckpoint = effect.checkpoint;
   try {

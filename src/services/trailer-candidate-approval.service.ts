@@ -11,6 +11,9 @@ import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath, getEpisodeMediaS
 import { getPromotionRequestFingerprint, buildEpisodePromotionRequest, type PromotionTransport } from "./episode-promotion.service";
 import { dispatchPromotionAfterCommit } from "./episode-promotion-save.service";
 import { trailerCandidateStoragePath, trailerCandidateSourcesStillCurrent } from "./trailer-candidate.service";
+import { createEpisodeReplacementPublicationInTransaction, dispatchEpisodeReplacementPublication } from "./episode-publication.service";
+import type { MetaPublicationProvider } from "./meta-publication.provider";
+import { obsoleteYoutubeTrailerJobsForCurrentSource, cleanupYoutubeTrailerVideos } from "./youtube-trailer-job.service";
 
 export type TrailerCandidateDecision = "approve" | "reject";
 export type TrailerCandidateDecisionInput = {
@@ -21,7 +24,8 @@ export type TrailerCandidateDecisionInput = {
   expectedVersion: number;
   actorEmail: string;
   transport?: PromotionTransport;
-  faultAt?: "after_journal" | "after_backup" | "after_install";
+  metaProvider?: MetaPublicationProvider;
+  faultAt?: "after_journal" | "after_backup" | "after_install" | "after_commit";
 };
 export type TrailerCandidateDecisionResult =
   | { status: "approved" | "rejected" | "replayed"; candidateId: string; episodeId: number; version: number; sourceFingerprint: string }
@@ -62,6 +66,29 @@ const sourcePathFor = async (journal: TrailerPromotionJournal): Promise<string> 
 };
 
 const currentHash = async (filePath: string): Promise<string | null> => (await hashFile(filePath))?.sha256 ?? null;
+const canonicalHash = async (filePath: string): Promise<string | null> => {
+  const stat = await fs.promises.lstat(filePath).catch(() => null);
+  if (!stat) return null;
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0) throw new Error("Canonical trailer is not a regular file");
+  const actual = await hashFile(filePath);
+  if (!actual) throw new Error("Canonical trailer changed while hashing");
+  return actual.sha256;
+};
+
+const episodeFinalizationLocks = new Map<number, Promise<void>>();
+export const withEpisodeTrailerFinalizationLock = async <T>(episodeId: number, work: () => Promise<T>): Promise<T> => {
+  const previous = episodeFinalizationLocks.get(episodeId) ?? Promise.resolve();
+  let release = (): void => undefined;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  episodeFinalizationLocks.set(episodeId, current);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (episodeFinalizationLocks.get(episodeId) === current) episodeFinalizationLocks.delete(episodeId);
+  }
+};
 
 const commitFinalization = (journal: TrailerPromotionJournal): void => {
   withImmediateTransaction(() => {
@@ -93,6 +120,15 @@ const commitFinalization = (journal: TrailerPromotionJournal): void => {
         requestFingerprint: getPromotionRequestFingerprint(request),
         withinTransaction: true,
       });
+      createEpisodeReplacementPublicationInTransaction({
+        episode: updated,
+        source: {
+          mediaReference: getEpisodeMediaRelativePath(episode.episodeId, "trailerVideo"),
+          sha256: journal.newSha256,
+          byteCount: candidate.outputBytes ?? 1,
+          mimeType: "video/mp4",
+        },
+      });
     }
     getDb().prepare("UPDATE trailer_promotion_journals SET phase = 'committed', updated_at = ? WHERE journal_id = ?").run(nowIso(), journal.journalId);
   });
@@ -100,13 +136,28 @@ const commitFinalization = (journal: TrailerPromotionJournal): void => {
 
 export const reconcileTrailerPromotionJournal = async (journalId: string, faultAt?: TrailerCandidateDecisionInput["faultAt"]): Promise<void> => {
   const journal = trailerPromotionJournalRepository.findById(journalId);
-  if (!journal || journal.phase === "committed" || journal.phase === "aborted") return;
+  if (!journal || journal.phase === "aborted") return;
   const finalPath = getEpisodeMediaFinalPath(journal.episodeId, "trailerVideo");
   const preparedPath = tempPath(journal.episodeId, journal.journalId, "prepared");
   const backupPath = tempPath(journal.episodeId, journal.journalId, "backup");
   await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
 
-  let finalHash = await currentHash(finalPath);
+  if (journal.phase === "committed") {
+    if (await canonicalHash(finalPath) !== journal.newSha256) throw new Error("Committed trailer does not match its journal");
+    const backupHash = await currentHash(backupPath);
+    if (backupHash && backupHash !== journal.oldSha256) throw new Error("Committed trailer backup does not match its journal");
+    if (backupHash === journal.oldSha256) await fs.promises.rm(backupPath, { force: true });
+    const preparedHash = await currentHash(preparedPath);
+    if (preparedHash === journal.newSha256) await fs.promises.rm(preparedPath, { force: true });
+    if (!journal.candidateId) {
+      await fs.promises.rm(getEpisodeMediaStagingPath(journal.episodeId, "trailerVideo"), { force: true }).catch(() => undefined);
+      const obsoleteJobs = await obsoleteYoutubeTrailerJobsForCurrentSource(journal.episodeId).catch(() => []);
+      await cleanupYoutubeTrailerVideos(obsoleteJobs).catch(() => undefined);
+    }
+    return;
+  }
+
+  let finalHash = await canonicalHash(finalPath);
   if (finalHash !== journal.newSha256) {
     let preparedHash = await currentHash(preparedPath);
     if (preparedHash !== journal.newSha256) {
@@ -118,7 +169,7 @@ export const reconcileTrailerPromotionJournal = async (journalId: string, faultA
       if (preparedHash !== journal.newSha256) throw new Error("Prepared trailer hash does not match the journal");
     }
 
-    finalHash = await currentHash(finalPath);
+    finalHash = await canonicalHash(finalPath);
     if (finalHash !== null) {
       if (!journal.oldPresent || finalHash !== journal.oldSha256) throw new Error("Canonical trailer changed while promotion was pending");
       const backupHash = await currentHash(backupPath);
@@ -132,7 +183,7 @@ export const reconcileTrailerPromotionJournal = async (journalId: string, faultA
       if (backupHash !== journal.oldSha256) throw new Error("Last-known-good trailer is unavailable during recovery");
     }
 
-    const nowFinalHash = await currentHash(finalPath);
+    const nowFinalHash = await canonicalHash(finalPath);
     if (nowFinalHash !== journal.newSha256) {
       const nowPreparedHash = await currentHash(preparedPath);
       if (nowPreparedHash !== journal.newSha256) throw new Error("Prepared trailer is unavailable during recovery");
@@ -142,14 +193,28 @@ export const reconcileTrailerPromotionJournal = async (journalId: string, faultA
     if (faultAt === "after_install") throw new Error("Injected trailer promotion failure after canonical rename");
   }
 
-  if (await currentHash(finalPath) !== journal.newSha256) throw new Error("Canonical trailer does not match approved output");
+  if (await canonicalHash(finalPath) !== journal.newSha256) throw new Error("Canonical trailer does not match approved output");
   commitFinalization(journal);
+  if (faultAt === "after_commit") throw new Error("Injected trailer promotion failure after SQLite finalization");
   await fs.promises.rm(preparedPath, { force: true }).catch(() => undefined);
   await fs.promises.rm(backupPath, { force: true }).catch(() => undefined);
+  if (!journal.candidateId) {
+    await fs.promises.rm(getEpisodeMediaStagingPath(journal.episodeId, "trailerVideo"), { force: true }).catch(() => undefined);
+    const obsoleteJobs = await obsoleteYoutubeTrailerJobsForCurrentSource(journal.episodeId).catch((error: unknown) => {
+      console.warn("YouTube trailer jobs could not be invalidated after manual replacement", error instanceof Error ? error.message : String(error));
+      return [];
+    });
+    await cleanupYoutubeTrailerVideos(obsoleteJobs).catch((error: unknown) => {
+      console.warn("Obsolete YouTube trailer videos could not be cleaned after manual replacement", error instanceof Error ? error.message : String(error));
+    });
+  }
 };
 
 export const recoverTrailerPromotionJournals = async (): Promise<void> => {
   for (const journal of trailerPromotionJournalRepository.listUnfinished()) {
+    await reconcileTrailerPromotionJournal(journal.journalId);
+  }
+  for (const journal of trailerPromotionJournalRepository.listCommitted()) {
     await reconcileTrailerPromotionJournal(journal.journalId);
   }
 };
@@ -177,7 +242,7 @@ const persistDecisionAndJournal = (candidate: TrailerCandidateRow, actorEmail: s
   });
 };
 
-export const decideTrailerCandidate = async (input: TrailerCandidateDecisionInput): Promise<TrailerCandidateDecisionResult> => {
+const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionInput): Promise<TrailerCandidateDecisionResult> => {
   if (!config.trailerCandidateRenderEnabled) return { status: "conflict", code: "not_ready" };
   const actorEmail = input.actorEmail.trim().toLowerCase();
   if (!actorEmail) return { status: "conflict", code: "unauthorized" };
@@ -209,13 +274,26 @@ export const decideTrailerCandidate = async (input: TrailerCandidateDecisionInpu
     const output = await hashFile(sourcePath);
     if (!output || output.sha256 !== candidate.outputSha256 || output.bytes !== candidate.outputBytes) return { status: "conflict", code: "integrity_mismatch" };
     const finalPath = getEpisodeMediaFinalPath(candidate.episodeId, "trailerVideo");
-    const old = await hashFile(finalPath);
+    let old: { sha256: string; bytes: number } | null;
+    try {
+      const oldHash = await canonicalHash(finalPath);
+      old = oldHash ? await hashFile(finalPath) : null;
+    } catch {
+      throw new Error("Canonical trailer is not a valid last-known-good file");
+    }
     const journalId = randomUUID();
     persistDecisionAndJournal(candidate, actorEmail, "approve", journalId, old?.sha256 ?? null, old !== null);
     if (input.faultAt === "after_journal") throw new Error("Injected trailer promotion failure after journal commit");
     await reconcileTrailerPromotionJournal(journalId, input.faultAt);
     const requestId = `episode:${candidate.episodeId}`;
     await dispatchPromotionAfterCommit(requestId, input.transport);
+    const sourceRevision = (await import("../schemas/episode-publication.js")).publicationSourceRevision(candidate.episodeId, {
+      mediaReference: getEpisodeMediaRelativePath(candidate.episodeId, "trailerVideo"),
+      sha256: candidate.outputSha256 as string,
+      byteCount: candidate.outputBytes as number,
+      mimeType: "video/mp4",
+    });
+    await dispatchEpisodeReplacementPublication(candidate.episodeId, sourceRevision, input.metaProvider);
     return { status: "approved", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint };
   } catch (error) {
     const journal = trailerPromotionJournalRepository.findByCandidate(candidate.candidateId);
@@ -223,3 +301,41 @@ export const decideTrailerCandidate = async (input: TrailerCandidateDecisionInpu
     return { status: "conflict", code: "finalization_blocked" };
   }
 };
+
+export const decideTrailerCandidate = (input: TrailerCandidateDecisionInput): Promise<TrailerCandidateDecisionResult> =>
+  withEpisodeTrailerFinalizationLock(input.episodeId, () => decideTrailerCandidateExclusive(input));
+
+export const finalizeManualTrailerVideo = async (episodeId: number, stagedFilePath: string): Promise<void> =>
+  withEpisodeTrailerFinalizationLock(episodeId, async () => {
+    const expectedStagingPath = getEpisodeMediaStagingPath(episodeId, "trailerVideo");
+    if (path.resolve(stagedFilePath) !== path.resolve(expectedStagingPath)) throw new Error("Invalid trailer-video upload staging file");
+    const episode = episodeRepository.findByEpisodeId(episodeId);
+    if (!episode) throw new Error("Episode not found");
+    const stagedHash = await hashFile(stagedFilePath);
+    if (!stagedHash) throw new Error("Trailer-video upload is missing");
+    const finalPath = getEpisodeMediaFinalPath(episodeId, "trailerVideo");
+    let old: { sha256: string; bytes: number } | null;
+    try {
+      const oldHash = await canonicalHash(finalPath);
+      old = oldHash ? await hashFile(finalPath) : null;
+    } catch {
+      throw new Error("Canonical trailer is not a valid last-known-good file");
+    }
+    const journalId = randomUUID();
+    try {
+      withImmediateTransaction(() => {
+        trailerPromotionJournalRepository.create({
+          journalId,
+          episodeId,
+          candidateId: null,
+          oldSha256: old?.sha256 ?? null,
+          newSha256: stagedHash.sha256,
+          oldPresent: old !== null,
+        });
+      });
+      await reconcileTrailerPromotionJournal(journalId);
+    } catch (error) {
+      // Keep both the staged source and any journaled backup for startup recovery.
+      throw error;
+    }
+  });

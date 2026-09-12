@@ -645,7 +645,8 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
         message: "Trailer video finalized.",
       } satisfies EpisodeTrailerVideoUploadResponse);
     } catch (caught) {
-      if (file) await fs.promises.unlink(file.path).catch(() => undefined);
+      const preserveForRecovery = caught && typeof caught === "object" && "preserveTrailerVideoStaging" in caught;
+      if (file && !preserveForRecovery) await fs.promises.unlink(file.path).catch(() => undefined);
       next(caught);
     }
   });

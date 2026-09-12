@@ -53,6 +53,9 @@ export const trailerPromotionJournalRepository = {
   listUnfinished(): TrailerPromotionJournal[] {
     return (getDb().prepare("SELECT * FROM trailer_promotion_journals WHERE phase NOT IN ('committed', 'aborted') ORDER BY created_at, journal_id").all() as JournalSqlRow[]).map((row) => map(row) as TrailerPromotionJournal);
   },
+  listCommitted(): TrailerPromotionJournal[] {
+    return (getDb().prepare("SELECT * FROM trailer_promotion_journals WHERE phase = 'committed' ORDER BY updated_at, journal_id").all() as JournalSqlRow[]).map((row) => map(row) as TrailerPromotionJournal);
+  },
   setPhase(journalId: string, phase: TrailerPromotionJournalPhase): TrailerPromotionJournal | null {
     getDb().prepare("UPDATE trailer_promotion_journals SET phase = ?, updated_at = ? WHERE journal_id = ? AND phase NOT IN ('committed', 'aborted')").run(phase, nowIso(), journalId);
     return find(journalId);
