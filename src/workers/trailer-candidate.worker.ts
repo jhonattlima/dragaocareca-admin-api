@@ -93,7 +93,13 @@ export const processTrailerCandidate = async (
   }
 
   const neededBytes = requiredTrailerCandidateFreeBytes(snapshot.sourceBytes, durationSeconds);
-  const freeBytes = await (seams.availableBytes ?? availableBytes)(rootPath);
+  let freeBytes: number;
+  try {
+    freeBytes = await (seams.availableBytes ?? availableBytes)(rootPath);
+  } catch {
+    trailerCandidateRepository.waitForCapacity(candidate.candidateId, "capacity_unavailable");
+    return;
+  }
   if (freeBytes < neededBytes) {
     trailerCandidateRepository.waitForCapacity(candidate.candidateId);
     return;

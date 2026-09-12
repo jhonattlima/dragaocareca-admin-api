@@ -236,6 +236,9 @@ const main = async (): Promise<void> => {
     await candidateWorker.processTrailerCandidate(renderCandidate as NonNullable<typeof renderCandidate>, { availableBytes: async () => 0 });
     assert.equal(trailerCandidateRepository.findById(renderResult.candidate.candidateId)?.status, "waiting_capacity");
     assert.equal(trailerCandidateRepository.findById(renderResult.candidate.candidateId)?.attemptCount, 0, "capacity waits must not consume render attempts");
+    await candidateWorker.processTrailerCandidate(renderCandidate as NonNullable<typeof renderCandidate>, { availableBytes: async () => { throw new Error("statfs unavailable"); } });
+    assert.equal(trailerCandidateRepository.findById(renderResult.candidate.candidateId)?.errorCategory, "capacity_unavailable");
+    assert.equal(trailerCandidateRepository.findById(renderResult.candidate.candidateId)?.attemptCount, 0, "unknown free space must also avoid render attempts");
     await candidateWorker.processTrailerCandidate(renderCandidate as NonNullable<typeof renderCandidate>, { availableBytes: async () => 20 * 1024 ** 3 });
     const rendered = trailerCandidateRepository.findById(renderResult.candidate.candidateId);
     assert.equal(rendered?.status, "ready", "real FFmpeg output should become ready only after validation");
