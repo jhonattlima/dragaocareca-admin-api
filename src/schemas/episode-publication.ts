@@ -6,6 +6,8 @@ export const publicationDestinationSchema = z.enum(["telegram", "instagram_reel"
 export type PublicationDestination = z.infer<typeof publicationDestinationSchema>;
 export const publicationLifecycleSchema = z.enum(["pending", "eligible", "delivering", "processing", "published", "failed", "blocked", "uncertain"]);
 export type PublicationLifecycle = z.infer<typeof publicationLifecycleSchema>;
+export const publicationRetirementStatusSchema = z.enum(["waiting_for_successor", "manual_retirement_required", "confirmed_manually", "retired_automatically", "not_applicable"]);
+export type PublicationRetirementStatus = z.infer<typeof publicationRetirementStatusSchema>;
 
 export const publicationSourceSchema = z.object({
   mediaReference: z.string().regex(/^episodes\/[1-9][0-9]*\/trailer\.mp4$/),
@@ -49,6 +51,11 @@ export type PublicationEffectProjection = {
   checkpoint: PublicationCheckpoint;
   attempts: number;
   nextAttemptAt: string | null;
+  predecessor: { remoteId: string; permalink: string | null } | null;
+  retirementStatus: PublicationRetirementStatus;
+  retirementActorEmail: string | null;
+  retirementConfirmedAt: string | null;
+  replacementComplete: boolean;
 };
 
 export const publicationCheckpointSchema = z.object({

@@ -11,6 +11,7 @@ const effect = (destination: "instagram_reel" | "facebook_native_video"): Public
   eligibility: "eligible", diagnostics: [], remoteId: null, permalink: null,
   preflight: { status: "ready", checkedAt: new Date().toISOString(), providerReachability: "ready", contentType: "video/mp4", contentLength: 10, rangeSupported: true, failureCategory: null },
   checkpoint: { stage: "none", providerId: null, uploadId: null, updatedAt: null }, attempts: 0, nextAttemptAt: null,
+  predecessor: null, retirementStatus: "not_applicable", retirementActorEmail: null, retirementConfirmedAt: null, replacementComplete: true,
 });
 
 const run = async (): Promise<void> => {

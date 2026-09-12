@@ -636,6 +636,11 @@ const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
   if (!names.has("attempts")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
   if (!names.has("next_attempt_at")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN next_attempt_at TEXT");
   if (!names.has("lease_id")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN lease_id TEXT");
+  if (!names.has("predecessor_remote_id")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN predecessor_remote_id TEXT");
+  if (!names.has("predecessor_permalink")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN predecessor_permalink TEXT");
+  if (!names.has("retirement_status")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN retirement_status TEXT NOT NULL DEFAULT 'waiting_for_successor' CHECK (retirement_status IN ('waiting_for_successor', 'manual_retirement_required', 'confirmed_manually', 'retired_automatically', 'not_applicable'))");
+  if (!names.has("retirement_actor_email")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN retirement_actor_email TEXT");
+  if (!names.has("retirement_confirmed_at")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN retirement_confirmed_at TEXT");
 };
 
 const ensureEpisodeSocialMetadataColumns = (database: DatabaseSync): void => {

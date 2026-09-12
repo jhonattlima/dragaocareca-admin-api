@@ -1,8 +1,8 @@
 import { getDb, nowIso } from "../sqlite";
-import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
+import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationRetirementStatusSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
 
 type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight; withinTransaction?: boolean };
-type Row = { effect_key: string; episode_id: number; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null };
+type Row = { effect_key: string; episode_id: number; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null; predecessor_remote_id: string | null; predecessor_permalink: string | null; retirement_status: string; retirement_actor_email: string | null; retirement_confirmed_at: string | null };
 
 const map = (row: Row): PublicationEffectProjection => ({
   destination: publicationDestinationSchema.parse(row.destination),
@@ -18,6 +18,11 @@ const map = (row: Row): PublicationEffectProjection => ({
   checkpoint: publicationCheckpointSchema.parse(JSON.parse(row.checkpoint_json)),
   attempts: row.attempts,
   nextAttemptAt: row.next_attempt_at,
+  predecessor: row.predecessor_remote_id ? { remoteId: row.predecessor_remote_id, permalink: row.predecessor_permalink } : null,
+  retirementStatus: publicationRetirementStatusSchema.parse(row.retirement_status),
+  retirementActorEmail: row.retirement_actor_email,
+  retirementConfirmedAt: row.retirement_confirmed_at,
+  replacementComplete: ["confirmed_manually", "retired_automatically", "not_applicable"].includes(row.retirement_status),
 });
 
 export const episodePublicationRepository = {
@@ -30,7 +35,12 @@ export const episodePublicationRepository = {
       for (const destination of input.destinations) {
         const blocked = destination !== "telegram" && input.preflight.status !== "ready";
         const effectKey = `${intentId}:${destination}`;
-        db.prepare(`INSERT INTO episode_publication_effects (effect_key, intent_id, episode_id, destination, source_revision, source_json, metadata_json, eligibility, lifecycle, diagnostics_json, preflight_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(intent_id, destination, source_revision) DO NOTHING`).run(effectKey, intentId, input.episodeId, destination, input.sourceRevision, JSON.stringify(input.source), JSON.stringify(input.metadata), blocked ? "blocked" : "eligible", blocked ? "blocked" : "eligible", JSON.stringify(blocked ? ["Finalized trailer/provider media preflight is not ready."] : []), JSON.stringify(input.preflight), now, now);
+        const predecessor = db.prepare(`SELECT remote_id, permalink FROM episode_publication_effects
+          WHERE episode_id = ? AND destination = ? AND source_revision <> ? AND lifecycle = 'published' AND remote_id IS NOT NULL
+          ORDER BY created_at DESC, effect_key DESC LIMIT 1`).get(input.episodeId, destination, input.sourceRevision) as { remote_id: string; permalink: string | null } | undefined;
+        db.prepare(`INSERT INTO episode_publication_effects (effect_key, intent_id, episode_id, destination, source_revision, source_json, metadata_json, eligibility, lifecycle, diagnostics_json, preflight_json, predecessor_remote_id, predecessor_permalink, retirement_status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting_for_successor', ?, ?)
+          ON CONFLICT(intent_id, destination, source_revision) DO NOTHING`).run(effectKey, intentId, input.episodeId, destination, input.sourceRevision, JSON.stringify(input.source), JSON.stringify(input.metadata), blocked ? "blocked" : "eligible", blocked ? "blocked" : "eligible", JSON.stringify(blocked ? ["Finalized trailer/provider media preflight is not ready."] : []), JSON.stringify(input.preflight), predecessor?.remote_id ?? null, predecessor?.permalink ?? null, now, now);
       }
     };
     if (input.withinTransaction) {
@@ -85,7 +95,33 @@ export const episodePublicationRepository = {
   updateCheckpoint(effectKey: string, checkpoint: PublicationCheckpoint, lifecycle: string, diagnostics: string[] = [], remoteId: string | null = null, permalink: string | null = null): void {
     publicationCheckpointSchema.parse(checkpoint);
     publicationLifecycleSchema.parse(lifecycle);
-    getDb().prepare("UPDATE episode_publication_effects SET checkpoint_json = ?, lifecycle = ?, diagnostics_json = ?, remote_id = COALESCE(?, remote_id), permalink = COALESCE(?, permalink), updated_at = ? WHERE effect_key = ?").run(JSON.stringify(checkpoint), lifecycle, JSON.stringify(diagnostics), remoteId, permalink, nowIso(), effectKey);
+    const db = getDb();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = db.prepare("SELECT episode_id, destination, source_revision, predecessor_remote_id, retirement_status FROM episode_publication_effects WHERE effect_key = ?").get(effectKey) as { episode_id: number; destination: PublicationDestination; source_revision: string; predecessor_remote_id: string | null; retirement_status: PublicationEffectProjection["retirementStatus"] } | undefined;
+      let predecessor = current?.predecessor_remote_id ?? null;
+      let predecessorPermalink: string | null = null;
+      let retirementStatus = current?.retirement_status;
+      if (lifecycle === "published" && current) {
+        if (!predecessor) {
+          const previous = db.prepare(`SELECT remote_id, permalink FROM episode_publication_effects
+            WHERE episode_id = ? AND destination = ? AND source_revision <> ? AND lifecycle = 'published' AND remote_id IS NOT NULL
+            ORDER BY created_at DESC, effect_key DESC LIMIT 1`).get(current.episode_id, current.destination, current.source_revision) as { remote_id: string; permalink: string | null } | undefined;
+          predecessor = previous?.remote_id ?? null;
+          predecessorPermalink = previous?.permalink ?? null;
+        } else {
+          const previous = db.prepare("SELECT permalink FROM episode_publication_effects WHERE episode_id = ? AND destination = ? AND remote_id = ? ORDER BY created_at DESC LIMIT 1").get(current.episode_id, current.destination, predecessor) as { permalink: string | null } | undefined;
+          predecessorPermalink = previous?.permalink ?? null;
+        }
+        if (retirementStatus === "waiting_for_successor") retirementStatus = predecessor ? "manual_retirement_required" : "not_applicable";
+      }
+      db.prepare(`UPDATE episode_publication_effects
+        SET checkpoint_json = ?, lifecycle = ?, diagnostics_json = ?, remote_id = COALESCE(?, remote_id), permalink = COALESCE(?, permalink),
+            predecessor_remote_id = COALESCE(predecessor_remote_id, ?), predecessor_permalink = COALESCE(predecessor_permalink, ?),
+            retirement_status = COALESCE(?, retirement_status), updated_at = ? WHERE effect_key = ?`)
+        .run(JSON.stringify(checkpoint), lifecycle, JSON.stringify(diagnostics), remoteId, permalink, predecessor, predecessorPermalink, retirementStatus ?? null, nowIso(), effectKey);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
   },
   recordAttempt(effectKey: string, nextAttemptAt: string | null, diagnostics: string[]): number {
     const row = getDb().prepare("SELECT attempts FROM episode_publication_effects WHERE effect_key = ?").get(effectKey) as { attempts: number } | undefined;
