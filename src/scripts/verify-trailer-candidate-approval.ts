@@ -213,6 +213,25 @@ const main = async (): Promise<void> => {
     assert.equal(await fs.promises.readFile(racedFinal, "utf8"), "keep-raced-canonical");
     assert.equal(getDb().prepare("SELECT 1 FROM trailer_candidate_decisions WHERE candidate_id = ?").get(raced.candidateId), undefined);
 
+    const { episodeSourceMutationLockMiddleware } = await import("../services/episode-source-mutation-lock.service.js");
+    const guardedResponse = new MemoryResponse();
+    let middlewareNext: () => void = () => undefined;
+    const middlewareEntered = new Promise<void>((resolve) => { middlewareNext = resolve; });
+    episodeSourceMutationLockMiddleware(
+      { params: { episodeId: "981014" } } as any,
+      guardedResponse as any,
+      () => middlewareNext(),
+    );
+    await middlewareEntered;
+    guardedResponse.emit("close");
+    let waitingWriterEntered = false;
+    const waitingWriter = withEpisodeSourceMutationLock(981014, async () => { waitingWriterEntered = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(waitingWriterEntered, false, "a disconnected response must not release the source guard before its handler completes");
+    guardedResponse.json({ done: true });
+    await waitingWriter;
+    assert.equal(waitingWriterEntered, true);
+
     const rejected = await createReadyCandidate(981003, "cover-reject", "audio-reject");
     const rejectFinal = media.getEpisodeMediaFinalPath(rejected.episodeId, "trailerVideo");
     await fs.promises.mkdir(path.dirname(rejectFinal), { recursive: true });

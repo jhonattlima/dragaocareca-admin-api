@@ -26,6 +26,8 @@ export const episodeSourceMutationLockMiddleware: RequestHandler = (req, res, ne
   void withEpisodeSourceMutationLock(episodeId, async () => {
     await new Promise<void>((resolve) => {
       let released = false;
+      let responseClosed = false;
+      let handlerCompleted = false;
       const release = (): void => {
         if (released) return;
         released = true;
@@ -33,8 +35,25 @@ export const episodeSourceMutationLockMiddleware: RequestHandler = (req, res, ne
         res.off("close", release);
         resolve();
       };
+      const completeHandler = (): void => {
+        handlerCompleted = true;
+        if (responseClosed) release();
+      };
+      const originalJson = res.json.bind(res);
+      res.json = ((...args: Parameters<typeof res.json>) => {
+        completeHandler();
+        return originalJson(...args);
+      }) as typeof res.json;
+      const originalEnd = res.end.bind(res);
+      res.end = ((...args: Parameters<typeof res.end>) => {
+        completeHandler();
+        return originalEnd(...args);
+      }) as typeof res.end;
       res.once("finish", release);
-      res.once("close", release);
+      res.once("close", () => {
+        responseClosed = true;
+        if (handlerCompleted) release();
+      });
       next();
     });
   }).catch(next);
