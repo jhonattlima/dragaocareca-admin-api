@@ -346,7 +346,7 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
             res.status(503).json({
               episodeId,
               [spec.field]: fileName,
-              message: "Media was stored, but trailer generation could not be queued. Retry Generate trailer.",
+              message: "Media was stored, but trailer generation could not be queued. The staged files are retained; after correcting the issue, re-upload the cover or trailer to retry.",
               trailerCandidateEnqueue: { status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true },
             });
             return;
@@ -396,7 +396,7 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
           res.status(503).json({
             episodeId,
             [spec.field]: fileName,
-            message: "Media was stored, but trailer generation could not be queued. Retry Generate trailer.",
+            message: "Media was stored, but trailer generation could not be queued. The staged files are retained; after correcting the issue, re-upload the cover or trailer to retry.",
             trailerCandidateEnqueue: { status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true },
           });
           return;

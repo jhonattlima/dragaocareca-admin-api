@@ -375,6 +375,7 @@ const main = async (): Promise<void> => {
     assert.deepEqual(failedUploadBody.trailerCandidateEnqueue, {
       status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true,
     });
+    assert.equal(failedUploadBody.message, "Media was stored, but trailer generation could not be queued. The staged files are retained; after correcting the issue, re-upload the cover or trailer to retry.");
     assert.equal(failedUploadBody.coverFileName, "episodes/987654301/cover.jpeg");
     assert.equal(JSON.stringify(failedUploadBody).includes(fixture.root), false, "failure response must redact filesystem paths");
     assert.equal(await fs.promises.readFile(mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "cover"), "utf8"), failedUploadBytes.toString(), "failed enqueue must preserve uploaded staging bytes for retry");
