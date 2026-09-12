@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { episodeRepository } from "../database/repositories/episode.repository";
+import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
 import {
   youtubeTrailerJobRepository,
   type YoutubeTrailerJobRow,
@@ -60,6 +61,23 @@ const persist = (lease: YoutubeTrailerPublicationLease, update: Parameters<typeo
   return row;
 };
 
+const retireYoutubePredecessor = async (episodeId: number, jobId: string, provider: YoutubeTrailerUploadProvider): Promise<void> => {
+  const replacement = episodePublicationRepository.claimYoutubePredecessorRetirement(episodeId, jobId);
+  if (!replacement?.predecessor) return;
+  try {
+    const deleteVideo = providerMethod(provider, "deleteVideo") as (providerVideoId: string) => Promise<void>;
+    await deleteVideo(replacement.predecessor.remoteId);
+    episodePublicationRepository.finishYoutubePredecessorRetirement({ episodeId, jobId, status: "complete" });
+  } catch {
+    episodePublicationRepository.finishYoutubePredecessorRetirement({
+      episodeId,
+      jobId,
+      status: "retirement_retryable_error",
+      error: "YouTube predecessor retirement failed; retry the explicit publication action.",
+    });
+  }
+};
+
 const failure = (lease: YoutubeTrailerPublicationLease, category: string, message: string): YoutubeTrailerPublicationDto => {
   const row = youtubeTrailerJobRepository.updatePublication(lease, {
     errorCategory: category,
@@ -93,6 +111,7 @@ export const publishYoutubeTrailer = async (
       const accepted = await updateMetadata(initial.providerVideoId, { title, description: episode.summary, categoryId: currentVideo.categoryId ?? undefined });
       if (accepted.privacyStatus !== "public") throw new Error("YouTube public trailer metadata update could not be confirmed.");
     }
+    await retireYoutubePredecessor(episodeId, jobId, provider);
     if (initial.retentionStatus !== "complete") {
       const cleanup = await retainEpisodeTrailerVersions(episodeId);
       const cleanupRow = youtubeTrailerJobRepository.updatePublication(
@@ -143,6 +162,7 @@ export const publishYoutubeTrailer = async (
     const url = `https://www.youtube.com/watch?v=${providerId}`;
     const confirmed = persist(publicationLease, { publicationStatus: "public_confirmed", publicConfirmedAt: new Date().toISOString(), canonicalUrl: url });
     episodeRepository.updateYoutubePublication(episodeId, url, "synced");
+    await retireYoutubePredecessor(episodeId, jobId, provider);
     const cleanup = await retainEpisodeTrailerVersions(episodeId);
     const final = youtubeTrailerJobRepository.updatePublication(
       { ...publicationLease, revision: confirmed.revision },

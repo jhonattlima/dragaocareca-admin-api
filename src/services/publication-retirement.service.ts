@@ -1,4 +1,5 @@
 import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
+import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
 import type { PublicationEffectProjection } from "../schemas/episode-publication";
 
 export type TrailerReplacementDestination = {
@@ -17,9 +18,15 @@ export type TrailerReplacementDestination = {
 export type TrailerReplacementStatus = {
   episodeId: number;
   sourceRevision: string;
-  status: "complete" | "waiting_for_successor" | "waiting_for_operator_retirement";
+  status: "complete" | "waiting_for_successor" | "waiting_for_operator_retirement" | "waiting_for_youtube_action" | "waiting_for_youtube_public_success" | "waiting_for_youtube_retirement";
   replacementComplete: boolean;
   destinations: Partial<Record<TrailerReplacementDestination["destination"], TrailerReplacementDestination>>;
+  youtube: null | {
+    status: string;
+    predecessor: { remoteId: string; permalink: string | null } | null;
+    successor: { remoteId: string | null; permalink: string | null; jobId: string } | null;
+    retirementError: string | null;
+  };
 };
 
 const destinationStatus = (effect: PublicationEffectProjection): TrailerReplacementDestination => ({
@@ -39,20 +46,40 @@ const destinationStatus = (effect: PublicationEffectProjection): TrailerReplacem
   retirementConfirmedAt: effect.retirementConfirmedAt,
 });
 
-const aggregateStatus = (effects: PublicationEffectProjection[]): TrailerReplacementStatus["status"] => {
-  if (effects.every((effect) => effect.replacementComplete)) return "complete";
+const aggregateStatus = (effects: PublicationEffectProjection[], youtube: TrailerReplacementStatus["youtube"]): TrailerReplacementStatus["status"] => {
+  const metaComplete = effects.every((effect) => effect.replacementComplete);
+  const youtubeComplete = !youtube || youtube.status === "complete" || youtube.status === "not_applicable";
+  if (metaComplete && youtubeComplete) return "complete";
   if (effects.some((effect) => effect.retirementStatus === "manual_retirement_required")) return "waiting_for_operator_retirement";
-  return "waiting_for_successor";
+  if (!metaComplete) return "waiting_for_successor";
+  if (youtube?.status === "waiting_for_operator_upload") return "waiting_for_youtube_action";
+  if (youtube?.status === "waiting_for_public_success") return "waiting_for_youtube_public_success";
+  if (youtube) return "waiting_for_youtube_retirement";
+  return "complete";
 };
 
 export const getTrailerReplacementStatus = (episodeId: number, sourceRevision: string): TrailerReplacementStatus | null => {
   if (!episodePublicationRepository.hasIntent(episodeId, sourceRevision)) return null;
   const effects = episodePublicationRepository.list(episodeId, sourceRevision)
     .filter((effect) => effect.destination === "instagram_reel" || effect.destination === "facebook_native_video");
+  const youtubeReplacement = episodePublicationRepository.getYoutubeReplacement(episodeId, sourceRevision);
+  const youtubeSuccessor = youtubeReplacement?.successorJobId
+    ? youtubeTrailerJobRepository.findByJobId(episodeId, youtubeReplacement.successorJobId)
+    : null;
+  const youtube: TrailerReplacementStatus["youtube"] = youtubeReplacement ? {
+    status: youtubeReplacement.status,
+    predecessor: youtubeReplacement.predecessor,
+    successor: youtubeReplacement.successorJobId ? {
+      jobId: youtubeReplacement.successorJobId,
+      remoteId: youtubeSuccessor?.providerVideoId ?? null,
+      permalink: youtubeSuccessor?.canonicalUrl ?? null,
+    } : null,
+    retirementError: youtubeReplacement.retirementError,
+  } : null;
   const destinations: TrailerReplacementStatus["destinations"] = {};
   for (const effect of effects) destinations[effect.destination as TrailerReplacementDestination["destination"]] = destinationStatus(effect);
-  const status = aggregateStatus(effects);
-  return { episodeId, sourceRevision, status, replacementComplete: status === "complete", destinations };
+  const status = aggregateStatus(effects, youtube);
+  return { episodeId, sourceRevision, status, replacementComplete: status === "complete", destinations, youtube };
 };
 
 export const confirmManualTrailerRetirement = (input: {

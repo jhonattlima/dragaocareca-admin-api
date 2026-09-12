@@ -49,7 +49,6 @@ export const createEpisodeReplacementPublicationInTransaction = (input: {
     ...(config.meta.facebookReelEnabled ? ["facebook_native_video" as const] : []),
   ];
   const sourceRevision = publicationSourceRevision(input.episode.episodeId, input.source);
-  if (destinations.length === 0) return { sourceRevision, effects: [] };
   const now = new Date().toISOString();
   const preflight: PublicationPreflight = {
     status: "ready",
@@ -68,6 +67,7 @@ export const createEpisodeReplacementPublicationInTransaction = (input: {
     destinations,
     preflight,
     withinTransaction: true,
+    youtubeReplacement: true,
   });
   return { sourceRevision, effects };
 };

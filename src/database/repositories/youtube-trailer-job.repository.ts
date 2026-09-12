@@ -1,4 +1,5 @@
 import { getDb, nowIso } from "../sqlite";
+import { episodePublicationRepository } from "./episode-publication.repository";
 
 export type YoutubeTrailerJobStatus =
   | "queued"
@@ -298,7 +299,9 @@ export const youtubeTrailerJobRepository = {
       ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
       ON CONFLICT DO NOTHING
     `).run(input.jobId, input.episodeId, input.sourceFileName, input.sourceSha256, input.sourceBytes, now, input.metadataSnapshotJson ?? null, now, now);
-    return youtubeTrailerJobRepository.findActive(input) as YoutubeTrailerJobRow;
+    const job = youtubeTrailerJobRepository.findActive(input) as YoutubeTrailerJobRow;
+    episodePublicationRepository.bindYoutubeReplacementJob({ episodeId: input.episodeId, sourceSha256: input.sourceSha256, sourceBytes: input.sourceBytes, jobId: job.jobId });
+    return job;
   },
 
   findByJobId(episodeId: number, jobId: string): YoutubeTrailerJobRow | null {

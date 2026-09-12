@@ -632,6 +632,14 @@ const ensureEpisodePublicationTables = (database: DatabaseSync): void => {
   `);
   const columns = database.prepare("PRAGMA table_info(episode_publication_effects)").all() as Array<{ name: string }>;
   const names = new Set(columns.map((column) => column.name));
+  const intentColumns = database.prepare("PRAGMA table_info(episode_publication_intents)").all() as Array<{ name: string }>;
+  const intentNames = new Set(intentColumns.map((column) => column.name));
+  if (!intentNames.has("youtube_predecessor_remote_id")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_predecessor_remote_id TEXT");
+  if (!intentNames.has("youtube_predecessor_permalink")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_predecessor_permalink TEXT");
+  if (!intentNames.has("youtube_successor_job_id")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_successor_job_id TEXT");
+  if (!intentNames.has("youtube_retirement_status")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_retirement_status TEXT");
+  if (!intentNames.has("youtube_retirement_error")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_retirement_error TEXT");
+  if (!intentNames.has("youtube_retirement_updated_at")) database.exec("ALTER TABLE episode_publication_intents ADD COLUMN youtube_retirement_updated_at TEXT");
   if (!names.has("checkpoint_json")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT '{\"stage\":\"none\",\"providerId\":null,\"uploadId\":null,\"updatedAt\":null}'");
   if (!names.has("attempts")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
   if (!names.has("next_attempt_at")) database.exec("ALTER TABLE episode_publication_effects ADD COLUMN next_attempt_at TEXT");

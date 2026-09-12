@@ -168,6 +168,8 @@ const run = async (): Promise<void> => {
     assert.equal(gated.statusCode, 503, "replacement status remains behind the default-off candidate gate");
 
     config.trailerCandidateRenderEnabled = true;
+    config.meta.instagramEnabled = false;
+    config.meta.facebookReelEnabled = false;
     episodeRepository.create(episodeSchema.parse({
       episodeId: 981904,
       title: "YouTube replacement fixture",
@@ -197,7 +199,7 @@ const run = async (): Promise<void> => {
     const waiting = getYoutubeReplacement(981904, youtubeReplacement.sourceRevision);
     assert.equal(waiting.status, "waiting_for_operator_upload", "approval records a YouTube marker but waits for the explicit upload action");
     assert.equal(waiting.predecessor.remoteId, "old-youtube-video");
-    assert.equal(youtubeReplacement.effects.length, 2, "Meta remains independently enabled for its own destinations");
+    assert.equal(youtubeReplacement.effects.length, 0, "disabled Meta destinations do not receive effects");
 
     const explicitJob = await createYoutubeTrailerJob(981904);
     const linked = getYoutubeReplacement(981904, youtubeReplacement.sourceRevision);
@@ -242,7 +244,7 @@ const run = async (): Promise<void> => {
     assert.equal(youtubeCalls.filter((call) => call === "public-update").length, publicUpdatesBeforeRetry, "retirement retry never republishes the successor");
     assert.equal(getYoutubeReplacement(981904, youtubeReplacement.sourceRevision).status, "complete");
     assert.equal(getTrailerReplacementStatus(981904, youtubeReplacement.sourceRevision)?.replacementComplete, true);
-    console.log("Fake destination replacement lifecycle passed: Instagram and Facebook preserve predecessor identity until retirement confirmation.");
+    console.log("Fake destination replacement lifecycle passed: Meta predecessors remain audited until confirmation; YouTube waits for explicit upload and public-success before retirement.");
   } finally {
     globalThis.fetch = originalFetch;
     await fs.promises.rm(root, { recursive: true, force: true });

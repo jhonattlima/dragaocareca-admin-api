@@ -1,8 +1,11 @@
 import { getDb, nowIso } from "../sqlite";
 import { publicationCheckpointSchema, publicationDestinationSchema, publicationLifecycleSchema, publicationMetadataSchema, publicationPreflightSchema, publicationRetirementStatusSchema, publicationSourceSchema, type PublicationCheckpoint, type PublicationDestination, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../../schemas/episode-publication";
 
-type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight; withinTransaction?: boolean };
+type Input = { episodeId: number; sourceRevision: string; source: PublicationSource; metadata: PublicationMetadata; destinations: PublicationDestination[]; preflight: PublicationPreflight; withinTransaction?: boolean; youtubeReplacement?: boolean };
 type Row = { effect_key: string; episode_id: number; destination: PublicationDestination; source_revision: string; source_json: string; metadata_json: string; eligibility: "eligible" | "blocked"; lifecycle: string; diagnostics_json: string; preflight_json: string; remote_id: string | null; permalink: string | null; checkpoint_json: string; attempts: number; next_attempt_at: string | null; predecessor_remote_id: string | null; predecessor_permalink: string | null; retirement_status: string; retirement_actor_email: string | null; retirement_confirmed_at: string | null };
+export type YoutubeReplacementStatus = "waiting_for_operator_upload" | "waiting_for_public_success" | "retirement_pending" | "retirement_retryable_error" | "complete" | "not_applicable";
+export type YoutubeReplacementProjection = { sourceRevision: string; status: YoutubeReplacementStatus; predecessor: { remoteId: string; permalink: string | null } | null; successorJobId: string | null; retirementError: string | null; updatedAt: string | null };
+type YoutubeReplacementRow = { source_revision: string; youtube_retirement_status: string | null; youtube_predecessor_remote_id: string | null; youtube_predecessor_permalink: string | null; youtube_successor_job_id: string | null; youtube_retirement_error: string | null; youtube_retirement_updated_at: string | null };
 
 const map = (row: Row): PublicationEffectProjection => ({
   destination: publicationDestinationSchema.parse(row.destination),
@@ -32,6 +35,17 @@ export const episodePublicationRepository = {
     const intentId = `episode:${input.episodeId}:${input.sourceRevision}`;
     const persist = (): void => {
       db.prepare(`INSERT INTO episode_publication_intents (intent_id, episode_id, source_revision, source_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(episode_id, source_revision) DO UPDATE SET updated_at = excluded.updated_at`).run(intentId, input.episodeId, input.sourceRevision, JSON.stringify(input.source), now, now);
+      if (input.youtubeReplacement) {
+        const predecessor = db.prepare(`SELECT provider_video_id, canonical_url FROM youtube_trailer_jobs
+          WHERE episode_id = ? AND publication_status = 'public_confirmed' AND provider_video_id IS NOT NULL
+            AND (source_sha256 <> ? OR source_bytes <> ?)
+          ORDER BY datetime(public_confirmed_at) DESC, datetime(updated_at) DESC, job_id DESC LIMIT 1`)
+          .get(input.episodeId, input.source.sha256, input.source.byteCount) as { provider_video_id: string; canonical_url: string | null } | undefined;
+        db.prepare(`UPDATE episode_publication_intents SET youtube_predecessor_remote_id = ?, youtube_predecessor_permalink = ?,
+          youtube_retirement_status = COALESCE(youtube_retirement_status, ?), youtube_retirement_updated_at = COALESCE(youtube_retirement_updated_at, ?), updated_at = ?
+          WHERE episode_id = ? AND source_revision = ?`)
+          .run(predecessor?.provider_video_id ?? null, predecessor?.canonical_url ?? null, predecessor ? "waiting_for_operator_upload" : "not_applicable", now, now, input.episodeId, input.sourceRevision);
+      }
       for (const destination of input.destinations) {
         const blocked = destination !== "telegram" && input.preflight.status !== "ready";
         const effectKey = `${intentId}:${destination}`;
@@ -60,6 +74,73 @@ export const episodePublicationRepository = {
   },
   hasIntent(episodeId: number, sourceRevision: string): boolean {
     return Boolean(getDb().prepare("SELECT 1 AS found FROM episode_publication_intents WHERE episode_id = ? AND source_revision = ?").get(episodeId, sourceRevision));
+  },
+  getYoutubeReplacement(episodeId: number, sourceRevision: string): YoutubeReplacementProjection | null {
+    const row = getDb().prepare(`SELECT source_revision, youtube_retirement_status, youtube_predecessor_remote_id, youtube_predecessor_permalink,
+      youtube_successor_job_id, youtube_retirement_error, youtube_retirement_updated_at
+      FROM episode_publication_intents WHERE episode_id = ? AND source_revision = ?`)
+      .get(episodeId, sourceRevision) as YoutubeReplacementRow | undefined;
+    if (!row?.youtube_retirement_status) return null;
+    return {
+      sourceRevision: row.source_revision,
+      status: row.youtube_retirement_status as YoutubeReplacementStatus,
+      predecessor: row.youtube_predecessor_remote_id ? { remoteId: row.youtube_predecessor_remote_id, permalink: row.youtube_predecessor_permalink } : null,
+      successorJobId: row.youtube_successor_job_id,
+      retirementError: row.youtube_retirement_error,
+      updatedAt: row.youtube_retirement_updated_at,
+    };
+  },
+  getYoutubeReplacementForSuccessorJob(episodeId: number, jobId: string): YoutubeReplacementProjection | null {
+    const row = getDb().prepare(`SELECT source_revision, youtube_retirement_status, youtube_predecessor_remote_id, youtube_predecessor_permalink,
+      youtube_successor_job_id, youtube_retirement_error, youtube_retirement_updated_at
+      FROM episode_publication_intents WHERE episode_id = ? AND youtube_successor_job_id = ?`)
+      .get(episodeId, jobId) as YoutubeReplacementRow | undefined;
+    return row ? this.getYoutubeReplacement(episodeId, row.source_revision) : null;
+  },
+  bindYoutubeReplacementJob(input: { episodeId: number; sourceSha256: string; sourceBytes: number; jobId: string }): YoutubeReplacementProjection | null {
+    const db = getDb();
+    const candidates = db.prepare(`SELECT source_revision, source_json FROM episode_publication_intents
+      WHERE episode_id = ? AND youtube_retirement_status = 'waiting_for_operator_upload'
+        AND youtube_predecessor_remote_id IS NOT NULL ORDER BY created_at DESC, source_revision DESC`).all(input.episodeId) as Array<{ source_revision: string; source_json: string }>;
+    const match = candidates.find((candidate) => {
+      try {
+        const source = JSON.parse(candidate.source_json) as PublicationSource;
+        return source.sha256 === input.sourceSha256 && source.byteCount === input.sourceBytes;
+      } catch { return false; }
+    });
+    if (!match) return null;
+    const now = nowIso();
+    const changed = db.prepare(`UPDATE episode_publication_intents SET youtube_successor_job_id = ?, youtube_retirement_status = 'waiting_for_public_success',
+      youtube_retirement_error = NULL, youtube_retirement_updated_at = ?, updated_at = ?
+      WHERE episode_id = ? AND source_revision = ? AND youtube_retirement_status = 'waiting_for_operator_upload'
+        AND youtube_predecessor_remote_id IS NOT NULL`)
+      .run(input.jobId, now, now, input.episodeId, match.source_revision).changes;
+    if (changed === 0) {
+      const current = this.getYoutubeReplacement(input.episodeId, match.source_revision);
+      return current?.successorJobId === input.jobId ? current : null;
+    }
+    return this.getYoutubeReplacement(input.episodeId, match.source_revision);
+  },
+  claimYoutubePredecessorRetirement(episodeId: number, jobId: string): YoutubeReplacementProjection | null {
+    const now = nowIso();
+    const changed = getDb().prepare(`UPDATE episode_publication_intents SET youtube_retirement_status = 'retirement_pending',
+      youtube_retirement_error = NULL, youtube_retirement_updated_at = ?, updated_at = ?
+      WHERE episode_id = ? AND youtube_successor_job_id = ? AND youtube_predecessor_remote_id IS NOT NULL
+        AND (youtube_retirement_status IN ('waiting_for_public_success', 'retirement_retryable_error')
+          OR (youtube_retirement_status = 'retirement_pending' AND datetime(youtube_retirement_updated_at) <= datetime(?, '-60 seconds')))
+        AND EXISTS (SELECT 1 FROM youtube_trailer_jobs job WHERE job.episode_id = episode_publication_intents.episode_id
+          AND job.job_id = episode_publication_intents.youtube_successor_job_id AND job.publication_status = 'public_confirmed'
+          AND job.provider_video_id IS NOT NULL)`)
+      .run(now, now, episodeId, jobId, now).changes;
+    return changed === 1 ? this.getYoutubeReplacementForSuccessorJob(episodeId, jobId) : null;
+  },
+  finishYoutubePredecessorRetirement(input: { episodeId: number; jobId: string; status: "complete" | "retirement_retryable_error"; error?: string | null }): YoutubeReplacementProjection | null {
+    const now = nowIso();
+    const changed = getDb().prepare(`UPDATE episode_publication_intents SET youtube_retirement_status = ?, youtube_retirement_error = ?,
+      youtube_retirement_updated_at = ?, updated_at = ? WHERE episode_id = ? AND youtube_successor_job_id = ?
+        AND youtube_retirement_status = 'retirement_pending'`)
+      .run(input.status, input.error ?? null, now, now, input.episodeId, input.jobId).changes;
+    return changed === 1 ? this.getYoutubeReplacementForSuccessorJob(input.episodeId, input.jobId) : null;
   },
   confirmManualRetirement(input: { episodeId: number; sourceRevision: string; destination: Extract<PublicationDestination, "instagram_reel" | "facebook_native_video">; predecessorRemoteId: string; actorEmail: string }): { status: "confirmed" | "replayed" | "conflict" | "not_found"; effect: PublicationEffectProjection | null } {
     const db = getDb();
