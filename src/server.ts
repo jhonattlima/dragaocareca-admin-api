@@ -14,6 +14,7 @@ import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-au
 import { startEpisodePromotionWorker } from "./workers/episode-promotion.worker";
 import { startSocialPublicationRetryWorker } from "./workers/social-publication-retry.worker";
 import { startSpotifyEpisodeResolutionWorker } from "./workers/spotify-episode-resolution.worker";
+import { startTrailerCandidateWorker } from "./workers/trailer-candidate.worker";
 
 type ConsoleMethod = (...args: unknown[]) => void;
 
@@ -50,6 +51,9 @@ const bootstrap = async (): Promise<void> => {
   // Artifact jobs only prepare local episode files. Keep this worker available even when
   // integrations that depend on external credentials are intentionally disabled.
   await startEpisodeArtifactPreparationWorker();
+  if (config.trailerCandidateRenderEnabled) {
+    await startTrailerCandidateWorker();
+  }
   if (!backgroundWorkersDisabled || hashtagAuthoringWorkerEnabled) {
     await startEpisodeHashtagAuthoringWorker();
   }

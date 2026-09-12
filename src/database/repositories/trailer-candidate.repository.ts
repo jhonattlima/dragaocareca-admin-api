@@ -215,10 +215,15 @@ export const trailerCandidateRepository = {
       WHERE candidate_id = ? AND status = 'processing'`).run(bounded, nowIso(), candidateId).changes > 0;
   },
 
+  setAttemptPartialPath(candidateId: string, attemptNumber: number, relativePath: string): boolean {
+    return getDb().prepare(`UPDATE trailer_candidate_attempts SET output_partial_relative_path = ?
+      WHERE candidate_id = ? AND attempt_number = ? AND status = 'processing'`).run(relativePath, candidateId, attemptNumber).changes > 0;
+  },
+
   waitForCapacity(candidateId: string, category = "capacity"): boolean {
     const db = getDb(); const now = nowIso();
     const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'waiting_capacity', error_category = ?,
-      error_message = NULL, updated_at = ? WHERE candidate_id = ? AND status = 'processing'`).run(category, now, candidateId).changes;
+      error_message = NULL, updated_at = ? WHERE candidate_id = ? AND status IN ('pending', 'waiting_capacity')`).run(category, now, candidateId).changes;
     if (changed) db.prepare(`UPDATE trailer_candidate_attempts SET status = 'waiting_capacity', ended_at = ?
       WHERE candidate_id = ? AND attempt_number = (SELECT attempt_count FROM trailer_candidate_versions WHERE candidate_id = ?)
         AND status = 'processing'`).run(now, candidateId, candidateId);
@@ -237,6 +242,12 @@ export const trailerCandidateRepository = {
       WHERE candidate_id = ? AND attempt_number = (SELECT attempt_count FROM trailer_candidate_versions WHERE candidate_id = ?)
         AND status IN ('processing', 'waiting_capacity')`).run(now, candidateId, candidateId);
     return changed > 0;
+  },
+
+  supersedeReady(candidateId: string): TrailerCandidateRow | null {
+    getDb().prepare(`UPDATE trailer_candidate_versions SET status = 'superseded', output_relative_path = NULL, updated_at = ?
+      WHERE candidate_id = ? AND status = 'ready'`).run(nowIso(), candidateId);
+    return byId(candidateId);
   },
 
   markRetryable(candidateId: string, category: string, message: string): boolean {

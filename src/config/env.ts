@@ -154,6 +154,7 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
 
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
+  trailerCandidateRenderEnabled: (process.env.TRAILER_CANDIDATE_RENDER_ENABLED ?? "false").toLowerCase() === "true",
   port: Number(process.env.PORT ?? 3000),
   sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "database", "dragaocareca-admin.sqlite"),
   sqliteReset: (process.env.SQLITE_RESET ?? "false").toLowerCase() === "true",
