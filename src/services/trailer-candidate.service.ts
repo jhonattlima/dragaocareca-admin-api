@@ -8,7 +8,6 @@ import { TRAILER_RENDER_VISUAL_PROFILE } from "./trailer-render-profile.service"
 import {
   findExistingEpisodeMediaPath,
   getEpisodeMediaDraftTranscriptPath,
-  getEpisodeMediaFinalPath,
   getEpisodeMediaStagingPath,
 } from "./episode-media-layout.service";
 import { checkTrailerVideoDraft, reserveTrailerVideoDraft } from "./episode-draft-reservation.service";
@@ -97,9 +96,9 @@ const resolveSources = async (episodeId: number): Promise<{ cover: string | null
     };
   }
   const [cover, audio, transcript] = await Promise.all([
-    findExistingEpisodeMediaPath(episodeId, "cover", episode.coverFileName ?? null),
-    findExistingEpisodeMediaPath(episodeId, "trailer", episode.trailerFileName ?? null),
-    findExistingEpisodeMediaPath(episodeId, "transcript", episode.transcriptFileName ?? null),
+    findExistingEpisodeMediaPath(episodeId, "cover"),
+    findExistingEpisodeMediaPath(episodeId, "trailer"),
+    findExistingEpisodeMediaPath(episodeId, "transcript"),
   ]);
   return { cover, audio, transcript, draftId: null };
 };
