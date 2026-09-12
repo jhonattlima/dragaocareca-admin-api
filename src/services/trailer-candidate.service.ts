@@ -200,6 +200,41 @@ export const trailerCandidateStoragePath = async (relativePath: string): Promise
   return target;
 };
 
+export type TrailerCandidateSnapshotPaths = { coverPath: string; audioPath: string; transcriptPath: string | null; sourceBytes: number };
+
+export const getTrailerCandidateSnapshotPaths = async (candidate: TrailerCandidateRow): Promise<TrailerCandidateSnapshotPaths> => {
+  const base = candidate.snapshotRelativePath.replace(/[\\/]+$/, "");
+  const coverPath = await trailerCandidateStoragePath(path.posix.join(base, "cover.jpeg"));
+  const audioPath = await trailerCandidateStoragePath(path.posix.join(base, "trailer.mp3"));
+  const transcriptPath = candidate.transcriptSha256
+    ? await trailerCandidateStoragePath(path.posix.join(base, "transcript.txt"))
+    : null;
+  const expected: Array<{ path: string; sha256: string }> = [
+    { path: coverPath, sha256: candidate.coverSha256 },
+    { path: audioPath, sha256: candidate.audioSha256 },
+  ];
+  if (transcriptPath && candidate.transcriptSha256) expected.push({ path: transcriptPath, sha256: candidate.transcriptSha256 });
+  let sourceBytes = 0;
+  for (const source of expected) {
+    const actual = await hashFile(source.path);
+    if (actual.sha256 !== source.sha256) throw new Error("Trailer candidate snapshot hash mismatch");
+    sourceBytes += actual.bytes;
+  }
+  return { coverPath, audioPath, transcriptPath, sourceBytes };
+};
+
+export const trailerCandidateSourcesStillCurrent = async (candidate: TrailerCandidateRow): Promise<boolean> => {
+  const resolved = await resolveSources(candidate.episodeId);
+  if (!resolved.cover || !resolved.audio) return false;
+  const sources: Source[] = [];
+  for (const [kind, filePath] of [["cover", resolved.cover], ["audio", resolved.audio], ["transcript", resolved.transcript]] as const) {
+    if (!filePath) continue;
+    const evidence = await hashFile(filePath);
+    sources.push({ kind, path: filePath, ...evidence });
+  }
+  return fingerprint(sources) === candidate.sourceFingerprint;
+};
+
 export const trailerCandidatePublicMediaBoundary = (): boolean => {
   return !isWithin(path.resolve(config.media.storageRoot), path.resolve(config.media.trailerCandidatesRoot));
 };
