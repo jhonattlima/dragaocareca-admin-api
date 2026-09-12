@@ -75,6 +75,22 @@ const canonicalHash = async (filePath: string): Promise<string | null> => {
   return actual.sha256;
 };
 
+const rollbackUncommittedPromotion = async (journal: TrailerPromotionJournal): Promise<void> => {
+  const current = trailerPromotionJournalRepository.findById(journal.journalId);
+  if (!current || current.phase === "committed" || current.phase === "aborted") return;
+  const finalPath = getEpisodeMediaFinalPath(journal.episodeId, "trailerVideo");
+  if (await canonicalHash(finalPath) !== journal.newSha256) throw new Error("Cannot rollback trailer promotion because the installed file changed");
+  const backupPath = tempPath(journal.episodeId, journal.journalId, "backup");
+  if (journal.oldPresent) {
+    if (await currentHash(backupPath) !== journal.oldSha256) throw new Error("Cannot rollback trailer promotion because the last-known-good backup is unavailable");
+    await fs.promises.rename(backupPath, finalPath);
+  } else {
+    await fs.promises.rm(finalPath, { force: true });
+  }
+  await fs.promises.rm(tempPath(journal.episodeId, journal.journalId, "prepared"), { force: true }).catch(() => undefined);
+  trailerPromotionJournalRepository.setPhase(journal.journalId, "aborted");
+};
+
 const episodeFinalizationLocks = new Map<number, Promise<void>>();
 export const withEpisodeTrailerFinalizationLock = async <T>(episodeId: number, work: () => Promise<T>): Promise<T> => {
   const previous = episodeFinalizationLocks.get(episodeId) ?? Promise.resolve();
@@ -194,7 +210,12 @@ export const reconcileTrailerPromotionJournal = async (journalId: string, faultA
   }
 
   if (await canonicalHash(finalPath) !== journal.newSha256) throw new Error("Canonical trailer does not match approved output");
-  commitFinalization(journal);
+  try {
+    commitFinalization(journal);
+  } catch (error) {
+    await rollbackUncommittedPromotion(journal);
+    throw error;
+  }
   if (faultAt === "after_commit") throw new Error("Injected trailer promotion failure after SQLite finalization");
   await fs.promises.rm(preparedPath, { force: true }).catch(() => undefined);
   await fs.promises.rm(backupPath, { force: true }).catch(() => undefined);
