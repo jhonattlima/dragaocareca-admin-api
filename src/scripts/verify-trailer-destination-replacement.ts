@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import type { YoutubeTrailerUploadProvider, YoutubeTrailerVideoRecord } from "../services/youtube-trailer-upload.provider";
 
 class MemoryResponse extends Writable {
   statusCode = 200;
@@ -68,6 +69,13 @@ const run = async (): Promise<void> => {
       import("../services/instagram-reel-publication.service.js"),
       import("../services/facebook-native-video-publication.service.js"),
       import("../services/episode-media-layout.service.js"),
+    ]);
+    const [{ getDb }, { youtubeTrailerJobRepository }, { fingerprintYoutubeTrailerSource, createYoutubeTrailerJob }, { publishYoutubeTrailer }, { getTrailerReplacementStatus }] = await Promise.all([
+      import("../database/sqlite.js"),
+      import("../database/repositories/youtube-trailer-job.repository.js"),
+      import("../services/youtube-trailer-job.service.js"),
+      import("../services/youtube-trailer-publication.service.js"),
+      import("../services/publication-retirement.service.js"),
     ]);
     await connectDb();
     config.meta.instagramEnabled = true;
@@ -158,6 +166,82 @@ const run = async (): Promise<void> => {
     config.trailerCandidateRenderEnabled = false;
     const gated = await invoke(episodesRouter as unknown as Router, "get", "/:episodeId/trailer-replacements/:sourceRevision", new Request({ episodeId: "981903", sourceRevision: second.sourceRevision }, {}));
     assert.equal(gated.statusCode, 503, "replacement status remains behind the default-off candidate gate");
+
+    config.trailerCandidateRenderEnabled = true;
+    episodeRepository.create(episodeSchema.parse({
+      episodeId: 981904,
+      title: "YouTube replacement fixture",
+      summary: "Offline YouTube lifecycle fixture",
+      pubDate: new Date("2026-01-01T00:00:00.000Z"),
+      explicit: "no",
+      authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Fixture", links: [{ url: "https://example.test/fixture" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    const youtubeFinalPath = getEpisodeMediaFinalPath(981904, "trailerVideo");
+    await fs.promises.mkdir(path.dirname(youtubeFinalPath), { recursive: true });
+    await fs.promises.writeFile(youtubeFinalPath, "previous-youtube-trailer");
+    const oldSource = await fingerprintYoutubeTrailerSource(981904);
+    const oldJob = youtubeTrailerJobRepository.createOrReuse({ jobId: "old-youtube-job", ...oldSource });
+    getDb().prepare(`UPDATE youtube_trailer_jobs SET status = 'ready', provider_video_id = ?, publication_status = 'public_confirmed', public_confirmed_at = ?, canonical_url = ? WHERE episode_id = ? AND job_id = ?`)
+      .run("old-youtube-video", new Date().toISOString(), "https://www.youtube.com/watch?v=old-youtube-video", 981904, oldJob.jobId);
+    await fs.promises.writeFile(youtubeFinalPath, "approved-youtube-successor");
+    const replacementSource = await fingerprintYoutubeTrailerSource(981904);
+    const youtubeEpisode = episodeRepository.findByEpisodeId(981904);
+    assert.ok(youtubeEpisode);
+    const youtubeReplacement = createEpisodeReplacementPublicationInTransaction({
+      episode: youtubeEpisode,
+      source: { mediaReference: `episodes/981904/trailer.mp4`, sha256: replacementSource.sourceSha256, byteCount: replacementSource.sourceBytes, mimeType: "video/mp4" },
+    });
+    const getYoutubeReplacement = (episodePublicationRepository as any).getYoutubeReplacement as (episodeId: number, sourceRevision: string) => any;
+    const waiting = getYoutubeReplacement(981904, youtubeReplacement.sourceRevision);
+    assert.equal(waiting.status, "waiting_for_operator_upload", "approval records a YouTube marker but waits for the explicit upload action");
+    assert.equal(waiting.predecessor.remoteId, "old-youtube-video");
+    assert.equal(youtubeReplacement.effects.length, 2, "Meta remains independently enabled for its own destinations");
+
+    const explicitJob = await createYoutubeTrailerJob(981904);
+    const linked = getYoutubeReplacement(981904, youtubeReplacement.sourceRevision);
+    assert.equal(linked.status, "waiting_for_public_success");
+    assert.equal(linked.successorJobId, explicitJob.jobId, "only the explicit YouTube job binds the successor");
+    getDb().prepare(`UPDATE youtube_trailer_jobs SET status = 'ready', provider_video_id = ?, provider_privacy_status = 'private', provider_upload_status = 'processed', provider_processing_status = 'succeeded' WHERE episode_id = ? AND job_id = ?`)
+      .run("new-youtube-video", 981904, explicitJob.jobId);
+    const youtubeCalls: string[] = [];
+    let youtubeIsPublic = false;
+    let failYoutubeDelete = true;
+    let youtubeMetadata: { title: string; description: string; categoryId?: string } | null = null;
+    const videoRecord = (id: string): YoutubeTrailerVideoRecord => ({ videoId: id, channelId: "fixture", privacyStatus: youtubeIsPublic ? "public" : "private", uploadStatus: "processed", processingStatus: "succeeded", title: youtubeMetadata?.title ?? null, description: youtubeMetadata?.description ?? null, categoryId: "22" });
+    const youtubeFake: YoutubeTrailerUploadProvider = {
+      async checkReadiness() {},
+      async beginPrivateSession() { throw new Error("unexpected YouTube upload"); },
+      async resumeRange() { throw new Error("unexpected YouTube resume"); },
+      async uploadChunk() { throw new Error("unexpected YouTube upload"); },
+      async pollProcessing() { throw new Error("unexpected YouTube polling"); },
+      async cancel() { return { accepted: false, boundary: "provider-video-retained" }; },
+      normalizeFailure(error) { return { code: "retryable", message: error instanceof Error ? error.message : "fake failure" }; },
+      async getVideo(id: string) { assert.equal(id, "new-youtube-video"); youtubeCalls.push("read"); return videoRecord(id); },
+      async updateMetadata(_id: string, metadata: { title: string; description: string; categoryId?: string }) { youtubeCalls.push("metadata"); youtubeMetadata = metadata; return videoRecord("new-youtube-video"); },
+      async findPlaylistMembership() { youtubeCalls.push("playlist-read"); return null; },
+      async insertPlaylistItem() { youtubeCalls.push("playlist-insert"); return { playlistId: "fixture", videoId: "new-youtube-video", itemId: "fixture-item" }; },
+      async publishVideo(id: string) { assert.equal(id, "new-youtube-video"); youtubeCalls.push("public-update"); youtubeIsPublic = true; return videoRecord(id); },
+      async deleteVideo(id: string) {
+        youtubeCalls.push(`delete:${id}`);
+        assert.equal(id, "old-youtube-video", "retirement uses the persisted predecessor ID");
+        assert.equal(youtubeTrailerJobRepository.findByJobId(981904, explicitJob.jobId)?.publicationStatus, "public_confirmed", "old video cannot be deleted before durable public success");
+        if (failYoutubeDelete) throw new Error("fake predecessor deletion failure");
+      },
+    };
+    const firstYoutubePublish = await publishYoutubeTrailer(981904, explicitJob.jobId, { title: "Approved Trailer", hashtags: [] }, youtubeFake);
+    assert.equal(firstYoutubePublish.status, "public_confirmed");
+    assert.equal(getYoutubeReplacement(981904, youtubeReplacement.sourceRevision).status, "retirement_retryable_error");
+    assert.equal(getTrailerReplacementStatus(981904, youtubeReplacement.sourceRevision)?.replacementComplete, false, "YouTube retirement failure remains incomplete");
+    assert.ok(youtubeCalls.includes("delete:old-youtube-video"));
+    const publicUpdatesBeforeRetry = youtubeCalls.filter((call) => call === "public-update").length;
+    failYoutubeDelete = false;
+    const retriedYoutubePublish = await publishYoutubeTrailer(981904, explicitJob.jobId, { title: "Approved Trailer", hashtags: [] }, youtubeFake);
+    assert.equal(retriedYoutubePublish.status, "public_confirmed");
+    assert.equal(youtubeCalls.filter((call) => call === "public-update").length, publicUpdatesBeforeRetry, "retirement retry never republishes the successor");
+    assert.equal(getYoutubeReplacement(981904, youtubeReplacement.sourceRevision).status, "complete");
+    assert.equal(getTrailerReplacementStatus(981904, youtubeReplacement.sourceRevision)?.replacementComplete, true);
     console.log("Fake destination replacement lifecycle passed: Instagram and Facebook preserve predecessor identity until retirement confirmation.");
   } finally {
     globalThis.fetch = originalFetch;
