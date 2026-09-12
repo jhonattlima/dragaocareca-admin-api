@@ -89,6 +89,11 @@ const episodeInput = (episodeId: number) => ({
 const main = async (): Promise<void> => {
   if (process.argv.includes("--fake-only") === false) throw new Error("Approval verifier requires --fake-only");
   if (process.env.NODE_ENV && process.env.NODE_ENV !== "development") throw new Error("Approval verifier is development-only");
+  const serverSource = await fs.promises.readFile(path.resolve(process.cwd(), "src/server.ts"), "utf8");
+  const recoveryImport = serverSource.indexOf("recoverTrailerPromotionJournals");
+  const recoveryCall = serverSource.indexOf("await recoverTrailerPromotionJournals()");
+  const workerStart = serverSource.indexOf("await startEpisodeArtifactPreparationWorker()");
+  assert.ok(recoveryImport >= 0 && recoveryCall > recoveryImport && workerStart > recoveryCall, "startup must reconcile unfinished trailer journals before workers start");
   const fixture = await createFixture();
   const originalFetch = globalThis.fetch;
   let transportCalls = 0;
@@ -210,6 +215,41 @@ const main = async (): Promise<void> => {
     });
     assert.equal(fakeDispatch.status, "approved");
     assert.equal(transportCalls, 1, "the after-commit transport seam dispatches exactly once");
+
+    const { recoverTrailerPromotionJournals } = await import("../services/trailer-candidate-approval.service.js");
+    const recoveryCases = [
+      { episodeId: 981005, faultAt: "after_journal" as const, previous: "keep-before-rename", expectedBeforeRecovery: "keep-before-rename" },
+      { episodeId: 981006, faultAt: "after_backup" as const, previous: "keep-in-backup", expectedBeforeRecovery: null },
+      { episodeId: 981007, faultAt: "after_install" as const, previous: null, expectedBeforeRecovery: "candidate-output-981007" },
+    ];
+    for (const scenario of recoveryCases) {
+      const interrupted = await createReadyCandidate(scenario.episodeId, `cover-${scenario.episodeId}`, `audio-${scenario.episodeId}`);
+      const interruptedFinal = media.getEpisodeMediaFinalPath(scenario.episodeId, "trailerVideo");
+      await fs.promises.mkdir(path.dirname(interruptedFinal), { recursive: true });
+      if (scenario.previous) await fs.promises.writeFile(interruptedFinal, scenario.previous);
+      const failed = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+        episodeId: interrupted.episodeId, candidateId: interrupted.candidateId, decision: "approve",
+        expectedSourceFingerprint: interrupted.sourceFingerprint, expectedVersion: interrupted.version,
+        actorEmail: "operator@example.test", faultAt: scenario.faultAt,
+      });
+      assert.deepEqual(failed, { status: "conflict", code: "finalization_blocked" });
+      assert.equal(await fs.promises.readFile(interruptedFinal, "utf8").catch(() => null), scenario.expectedBeforeRecovery);
+      if (scenario.faultAt === "after_backup") {
+        const siblings = await fs.promises.readdir(path.dirname(interruptedFinal));
+        const backups = siblings.filter((name) => name.startsWith(".trailer.mp4.backup-"));
+        assert.equal(backups.length, 1);
+        assert.equal(await fs.promises.readFile(path.join(path.dirname(interruptedFinal), backups[0]), "utf8"), scenario.previous);
+      }
+      await recoverTrailerPromotionJournals();
+      assert.equal(await fs.promises.readFile(interruptedFinal, "utf8"), `candidate-output-${scenario.episodeId}`);
+      assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(interrupted.candidateId)?.phase, "committed");
+      const effectsBeforeReplay = getDb().prepare("SELECT COUNT(*) AS count FROM promotion_effects WHERE episode_id = ?").get(scenario.episodeId)?.count;
+      const backupNames = (await fs.promises.readdir(path.dirname(interruptedFinal))).filter((name) => name.startsWith(".trailer.mp4.backup-"));
+      assert.equal(backupNames.length, 0, "committed journal may clean up the backup only after SQLite finalization");
+      await recoverTrailerPromotionJournals();
+      assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM promotion_effects WHERE episode_id = ?").get(scenario.episodeId)?.count, effectsBeforeReplay);
+      assert.equal(await fs.promises.readFile(interruptedFinal, "utf8"), `candidate-output-${scenario.episodeId}`);
+    }
     config.auth.bypassInDev = false;
     const unauthorized = await invoke(episodesRouter as unknown as Router, "/:episodeId/trailer-candidates/:candidateId/decision", new Request({
       episodeId: String(rejected.episodeId), candidateId: rejected.candidateId,
@@ -218,7 +258,7 @@ const main = async (): Promise<void> => {
     config.auth.bypassInDev = true;
     assert.equal(transportCalls, 1, "rejection, stale, replay, and invalid decisions must not dispatch effects");
     assert.equal((await fs.promises.readdir(fixture.root)).some((name) => name.includes("production")), false);
-    console.log("trailer candidate approval passed: authenticated CAS, output/source validation, canonical replacement, replay, rejection isolation, stale conflicts, and fake-only after-commit handoff");
+    console.log("trailer candidate approval passed: authenticated CAS, output/source validation, canonical replacement, journal restart recovery, replay, rejection isolation, stale conflicts, and fake-only after-commit handoff");
   } finally {
     globalThis.fetch = originalFetch;
     await fs.promises.rm(fixture.root, { recursive: true, force: true });
