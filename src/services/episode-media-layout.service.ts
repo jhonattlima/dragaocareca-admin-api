@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config/env";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
+import { withEpisodeSourceMutationLock } from "./episode-source-mutation-lock.service";
 
 export type EpisodeMediaKind = "audio" | "trailer" | "trailerVideo" | "cover" | "coverLow" | "transcript";
 type PersistedEpisodeMediaKind = Exclude<EpisodeMediaKind, "transcript">;
@@ -177,6 +178,7 @@ export const migrateEpisodeMediaLayout = async (): Promise<{ episodesProcessed: 
   let filesMoved = 0;
 
   for (const episode of episodes) {
+    await withEpisodeSourceMutationLock(episode.episodeId, async () => {
     const updates: Partial<Record<"fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName" | "transcriptFileName", string | null>> = {};
 
     const mediaKinds: Array<{ kind: PersistedEpisodeMediaKind; field: "fileName" | "trailerFileName" | "trailerVideoFileName" | "coverFileName" | "coverLowFileName" }> = [
@@ -234,6 +236,7 @@ export const migrateEpisodeMediaLayout = async (): Promise<{ episodesProcessed: 
         episodeRepository.markTranscriptionDone(episode.episodeId, updates.transcriptFileName);
       }
     }
+    });
   }
 
   return {

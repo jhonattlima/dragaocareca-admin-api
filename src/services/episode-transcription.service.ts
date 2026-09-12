@@ -14,6 +14,7 @@ import {
   getEpisodeMediaFinalPath,
   getEpisodeMediaRelativePath,
 } from "./episode-media-layout.service";
+import { withEpisodeSourceMutationLock } from "./episode-source-mutation-lock.service";
 import {
   abortDraftEpisodeSummary,
   queueDraftEpisodeSummary,
@@ -700,8 +701,10 @@ const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
   const audioPath = await buildAudioPath(episode);
   const transcript = await transcribeAudio(audioPath);
   const transcriptPath = buildTranscriptPath(episode.episodeId);
-  fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
-  fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
+  await withEpisodeSourceMutationLock(episode.episodeId, async () => {
+    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
+    fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
+  });
   return transcriptPath;
 };
 
@@ -761,8 +764,12 @@ const transcribeDraftEpisode = async (episodeId: number, version: number, provid
 
     const episodeExists = Boolean(episodeRepository.findByEpisodeId(episodeId));
     const transcriptPath = episodeExists ? buildTranscriptPath(episodeId) : buildDraftTranscriptPath(episodeId);
-    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
-    fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
+    await withEpisodeSourceMutationLock(episodeId, async () => {
+      if (!isDraftStateCurrent(episodeId, version)) return;
+      fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
+      fs.writeFileSync(transcriptPath, `${transcript}\n`, "utf8");
+    });
+    if (!isDraftStateCurrent(episodeId, version)) return;
 
     const doneState = nextDraftState(episodeId, "done", version);
     doneState.transcript.provider = activeProvider;
@@ -870,7 +877,7 @@ export const abortDraftEpisodeTranscription = async (episodeId: number): Promise
   await fs.promises.rm(buildDraftTranscriptPath(episodeId), { force: true }).catch(() => undefined);
 };
 
-export const syncDraftEpisodeTranscription = async (episodeId: number): Promise<{
+const syncDraftEpisodeTranscriptionExclusive = async (episodeId: number): Promise<{
   status: DraftTranscriptionStatus;
   transcriptFileName: string | null;
   transcriptStartedAt: string | null;
@@ -904,6 +911,13 @@ export const syncDraftEpisodeTranscription = async (episodeId: number): Promise<
     progress: current.transcript.progress ?? (current.transcript.status === "done" ? 100 : null),
   };
 };
+
+export const syncDraftEpisodeTranscription = async (episodeId: number): Promise<{
+  status: DraftTranscriptionStatus;
+  transcriptFileName: string | null;
+  transcriptStartedAt: string | null;
+  progress: number | null;
+}> => withEpisodeSourceMutationLock(episodeId, () => syncDraftEpisodeTranscriptionExclusive(episodeId));
 
 export const getEpisodeTranscriptionStatus = (episodeId: number): EpisodeTranscriptionStatusSnapshot => {
   const episode = episodeRepository.findByEpisodeId(episodeId);

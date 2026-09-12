@@ -11,6 +11,7 @@ import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath, getEpisodeMediaS
 import { getPromotionRequestFingerprint, buildEpisodePromotionRequest, type PromotionTransport } from "./episode-promotion.service";
 import { dispatchPromotionAfterCommit } from "./episode-promotion-save.service";
 import { trailerCandidateStoragePath, trailerCandidateSourcesStillCurrent } from "./trailer-candidate.service";
+import { withEpisodeSourceMutationLock } from "./episode-source-mutation-lock.service";
 import { createEpisodeReplacementPublicationInTransaction, dispatchEpisodeReplacementPublication } from "./episode-publication.service";
 import type { MetaPublicationProvider } from "./meta-publication.provider";
 import { obsoleteYoutubeTrailerJobsForCurrentSource, cleanupYoutubeTrailerVideos } from "./youtube-trailer-job.service";
@@ -89,21 +90,6 @@ const rollbackUncommittedPromotion = async (journal: TrailerPromotionJournal): P
   }
   await fs.promises.rm(tempPath(journal.episodeId, journal.journalId, "prepared"), { force: true }).catch(() => undefined);
   trailerPromotionJournalRepository.setPhase(journal.journalId, "aborted");
-};
-
-const episodeFinalizationLocks = new Map<number, Promise<void>>();
-export const withEpisodeTrailerFinalizationLock = async <T>(episodeId: number, work: () => Promise<T>): Promise<T> => {
-  const previous = episodeFinalizationLocks.get(episodeId) ?? Promise.resolve();
-  let release = (): void => undefined;
-  const current = new Promise<void>((resolve) => { release = resolve; });
-  episodeFinalizationLocks.set(episodeId, current);
-  await previous;
-  try {
-    return await work();
-  } finally {
-    release();
-    if (episodeFinalizationLocks.get(episodeId) === current) episodeFinalizationLocks.delete(episodeId);
-  }
 };
 
 const commitFinalization = (journal: TrailerPromotionJournal): void => {
@@ -291,7 +277,6 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
   }
 
   try {
-    if (!await trailerCandidateSourcesStillCurrent(candidate)) return { status: "conflict", code: "stale" };
     const sourcePath = await candidateOutputPath(candidate);
     const output = await hashFile(sourcePath);
     if (!output || output.sha256 !== candidate.outputSha256 || output.bytes !== candidate.outputBytes) return { status: "conflict", code: "integrity_mismatch" };
@@ -303,6 +288,9 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
     } catch {
       throw new Error("Canonical trailer is not a valid last-known-good file");
     }
+    // Writers use this same episode guard, so no source can change between
+    // this asynchronous fingerprint check and the synchronous journal CAS.
+    if (!await trailerCandidateSourcesStillCurrent(candidate)) return { status: "conflict", code: "stale" };
     const journalId = randomUUID();
     persistDecisionAndJournal(candidate, actorEmail, "approve", journalId, old?.sha256 ?? null, old !== null);
     if (input.faultAt === "after_journal") throw new Error("Injected trailer promotion failure after journal commit");
@@ -325,10 +313,10 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
 };
 
 export const decideTrailerCandidate = (input: TrailerCandidateDecisionInput): Promise<TrailerCandidateDecisionResult> =>
-  withEpisodeTrailerFinalizationLock(input.episodeId, () => decideTrailerCandidateExclusive(input));
+  withEpisodeSourceMutationLock(input.episodeId, () => decideTrailerCandidateExclusive(input));
 
 export const finalizeManualTrailerVideo = async (episodeId: number, stagedFilePath: string): Promise<void> =>
-  withEpisodeTrailerFinalizationLock(episodeId, async () => {
+  withEpisodeSourceMutationLock(episodeId, async () => {
     const expectedStagingPath = getEpisodeMediaStagingPath(episodeId, "trailerVideo");
     if (path.resolve(stagedFilePath) !== path.resolve(expectedStagingPath)) throw new Error("Invalid trailer-video upload staging file");
     const episode = episodeRepository.findByEpisodeId(episodeId);

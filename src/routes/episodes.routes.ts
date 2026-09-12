@@ -57,6 +57,7 @@ import {
 import { assembleYoutubeTrailerTitle, publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
 import { extractEpisodeAudioMetadata } from "../services/episode-audio-metadata.service";
 import { buildCanonicalEpisodeTitle } from "../services/episode-title.service";
+import { episodeSourceMutationLockMiddleware, withEpisodeSourceMutationLock } from "../services/episode-source-mutation-lock.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
 
 export const episodesRouter = Router();
@@ -294,7 +295,7 @@ const buildUploader = (spec: UploadSpec) =>
 const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
   const upload = buildUploader(spec);
 
-  episodesRouter.post(`/:episodeId/${pathSuffix}`, requireAuth, (req, res, next) => {
+  episodesRouter.post(`/:episodeId/${pathSuffix}`, requireAuth, episodeSourceMutationLockMiddleware, (req, res, next) => {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
       res.status(400).json({ message: "Invalid episodeId" });
@@ -450,7 +451,7 @@ const enqueueCandidateAfterUpload = async (kind: "cover" | "trailer", episodeId:
 };
 
 const makeDeleteRoute = (pathSuffix: string, spec: UploadSpec) => {
-  episodesRouter.delete(`/:episodeId/${pathSuffix}`, requireAuth, async (req, res, next) => {
+  episodesRouter.delete(`/:episodeId/${pathSuffix}`, requireAuth, episodeSourceMutationLockMiddleware, async (req, res, next) => {
     try {
       const episodeId = Number(req.params.episodeId);
       if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -721,7 +722,7 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
   }
 });
 
-episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, async (req, res, next) => {
+episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, episodeSourceMutationLockMiddleware, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -1336,7 +1337,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
         };
       }
     }
-    const mediaUpdates = await promoteStagedMedia(created.episodeId);
+    const mediaUpdates = await withEpisodeSourceMutationLock(created.episodeId, () => promoteStagedMedia(created.episodeId));
     const transcriptState = await syncDraftEpisodeTranscription(created.episodeId);
 
     if (transcriptState.status === "done" && transcriptState.transcriptFileName) {
@@ -1390,7 +1391,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
   }
 });
 
-episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
+episodesRouter.put("/:episodeId", requireAuth, episodeSourceMutationLockMiddleware, async (req, res, next) => {
   try {
     const routeId = Number(req.params.episodeId);
     const payload = episodeSchema.parse({ ...req.body, episodeId: routeId });
@@ -1429,7 +1430,7 @@ episodesRouter.put("/:episodeId", requireAuth, async (req, res, next) => {
   }
 });
 
-episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
+episodesRouter.delete("/:episodeId", requireAuth, episodeSourceMutationLockMiddleware, async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {

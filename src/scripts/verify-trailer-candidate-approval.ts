@@ -188,6 +188,31 @@ const main = async (): Promise<void> => {
     assert.equal(getDb().prepare("SELECT 1 FROM trailer_candidate_decisions WHERE candidate_id = ?").get(stale.candidateId), undefined);
     assert.equal(episodePublicationRepository.list(stale.episodeId).length, 0, "stale approval must create zero publication effects");
 
+    const raced = await createReadyCandidate(981012, "cover-race", "audio-race");
+    const racedFinal = media.getEpisodeMediaFinalPath(raced.episodeId, "trailerVideo");
+    await fs.promises.mkdir(path.dirname(racedFinal), { recursive: true });
+    await fs.promises.writeFile(racedFinal, "keep-raced-canonical");
+    const { withEpisodeSourceMutationLock } = await import("../services/episode-source-mutation-lock.service.js");
+    let sourceWriteStarted: () => void = () => undefined;
+    const sourceStarted = new Promise<void>((resolve) => { sourceWriteStarted = resolve; });
+    let releaseSourceWrite: () => void = () => undefined;
+    const sourceWriteRelease = new Promise<void>((resolve) => { releaseSourceWrite = resolve; });
+    const sourceWrite = withEpisodeSourceMutationLock(raced.episodeId, async () => {
+      await fs.promises.writeFile(media.getEpisodeMediaStagingPath(raced.episodeId, "trailer"), "audio-changed-under-guard");
+      sourceWriteStarted();
+      await sourceWriteRelease;
+    });
+    await sourceStarted;
+    const racedApproval = (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+      episodeId: raced.episodeId, candidateId: raced.candidateId, decision: "approve",
+      expectedSourceFingerprint: raced.sourceFingerprint, expectedVersion: raced.version, actorEmail: "operator@example.test",
+    });
+    releaseSourceWrite();
+    await sourceWrite;
+    assert.deepEqual(await racedApproval, { status: "conflict", code: "stale" }, "approval must wait for a source writer using the shared episode guard, then reject its now-stale render");
+    assert.equal(await fs.promises.readFile(racedFinal, "utf8"), "keep-raced-canonical");
+    assert.equal(getDb().prepare("SELECT 1 FROM trailer_candidate_decisions WHERE candidate_id = ?").get(raced.candidateId), undefined);
+
     const rejected = await createReadyCandidate(981003, "cover-reject", "audio-reject");
     const rejectFinal = media.getEpisodeMediaFinalPath(rejected.episodeId, "trailerVideo");
     await fs.promises.mkdir(path.dirname(rejectFinal), { recursive: true });
