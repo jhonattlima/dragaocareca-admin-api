@@ -100,7 +100,19 @@ const resolveSources = async (episodeId: number): Promise<{ cover: string | null
     findExistingEpisodeMediaPath(episodeId, "trailer"),
     findExistingEpisodeMediaPath(episodeId, "transcript"),
   ]);
-  return { cover, audio, transcript, draftId: null };
+  const stagedCover = getEpisodeMediaStagingPath(episodeId, "cover");
+  const stagedAudio = getEpisodeMediaStagingPath(episodeId, "trailer");
+  const stagedTranscript = getEpisodeMediaDraftTranscriptPath(episodeId);
+  const exists = (filePath: string): Promise<boolean> => fs.promises.access(filePath).then(() => true).catch(() => false);
+  const [hasStagedCover, hasStagedAudio, hasStagedTranscript] = await Promise.all([
+    exists(stagedCover), exists(stagedAudio), exists(stagedTranscript),
+  ]);
+  return {
+    cover: hasStagedCover ? stagedCover : cover,
+    audio: hasStagedAudio ? stagedAudio : audio,
+    transcript: hasStagedTranscript ? stagedTranscript : transcript,
+    draftId: null,
+  };
 };
 
 const fingerprint = (sources: readonly Source[]): string => createHash("sha256").update(JSON.stringify({

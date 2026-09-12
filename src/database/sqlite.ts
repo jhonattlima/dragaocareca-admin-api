@@ -333,6 +333,16 @@ CREATE TABLE IF NOT EXISTS trailer_candidate_attempts (
   UNIQUE (candidate_id, attempt_number)
 );
 
+-- File cleanup is durable and intentionally has no FK: episode deletion cascades
+-- candidate rows, but their private directories still need restart-safe cleanup.
+CREATE TABLE IF NOT EXISTS trailer_candidate_file_cleanup (
+  candidate_id TEXT PRIMARY KEY,
+  relative_directory TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_candidate_episode_fingerprint_current
   ON trailer_candidate_versions(episode_id, source_fingerprint)
   WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready');

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config/env";
 import { trailerCandidateRepository, type TrailerCandidateRow } from "../database/repositories/trailer-candidate.repository";
+import { acquireTrailerCandidateFileUse, cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
 import {
   getTrailerCandidateSnapshotPaths,
   trailerCandidateStoragePath,
@@ -62,20 +63,7 @@ export const recoverTrailerCandidateJobs = async (): Promise<TrailerCandidateRow
   return interrupted;
 };
 
-const retainOnlyNewestReadyBytes = async (episodeId: number, currentCandidateId: string): Promise<void> => {
-  const previous = trailerCandidateRepository.findPreviousReady(episodeId, currentCandidateId);
-  if (!previous?.outputRelativePath) return;
-  const previousPath = await trailerCandidateStoragePath(previous.outputRelativePath);
-  trailerCandidateRepository.supersedeReady(previous.candidateId);
-  const stat = await fs.promises.lstat(previousPath).catch(() => null);
-  if (stat?.isFile() && !stat.isSymbolicLink()) {
-    await fs.promises.unlink(previousPath).catch((error: unknown) => {
-      console.warn("Could not remove superseded trailer candidate bytes", error instanceof Error ? error.message : String(error));
-    });
-  }
-};
-
-export const processTrailerCandidate = async (
+const processTrailerCandidateInternal = async (
   candidate: TrailerCandidateRow,
   seams: TrailerCandidateWorkerSeams = {},
 ): Promise<void> => {
@@ -119,7 +107,9 @@ export const processTrailerCandidate = async (
     const evidence = await validateTrailerCandidateOutput(outputPaths.partial, durationSeconds, runner);
     if (!await trailerCandidateSourcesStillCurrent(candidate)) {
       await fs.promises.unlink(outputPaths.partial).catch(() => undefined);
-      trailerCandidateRepository.markStale(candidate.candidateId);
+      if (trailerCandidateRepository.markStale(candidate.candidateId)) {
+        trailerCandidateRepository.queueFileCleanup(candidate.candidateId, candidate.snapshotRelativePath);
+      }
       return;
     }
 
@@ -136,10 +126,23 @@ export const processTrailerCandidate = async (
       await fs.promises.unlink(outputPaths.ready).catch(() => undefined);
       return;
     }
-    await retainOnlyNewestReadyBytes(candidate.episodeId, candidate.candidateId);
+    trailerCandidateRepository.supersedeTerminalAndQueueCleanup(candidate.episodeId, candidate.candidateId);
   } catch (error) {
     await fs.promises.unlink(outputPaths.partial).catch(() => undefined);
     trailerCandidateRepository.markRetryable(candidate.candidateId, "render_failed", error instanceof Error ? error.message.slice(0, 2_000) : String(error));
+  }
+};
+
+export const processTrailerCandidate = async (
+  candidate: TrailerCandidateRow,
+  seams: TrailerCandidateWorkerSeams = {},
+): Promise<void> => {
+  const release = acquireTrailerCandidateFileUse(candidate.candidateId);
+  try {
+    await processTrailerCandidateInternal(candidate, seams);
+  } finally {
+    release();
+    await cleanupTrailerCandidateFiles();
   }
 };
 

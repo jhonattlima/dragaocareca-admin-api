@@ -862,7 +862,19 @@ export const episodeRepository = {
     return this.findByEpisodeId(episodeId);
   },
   delete(episodeId: number): void {
-    getDb().prepare("DELETE FROM episodes WHERE episode_id = ?").run(episodeId);
+    const db = getDb();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const now = nowIso();
+      db.prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup (candidate_id, relative_directory, created_at)
+        SELECT candidate_id, snapshot_relative_path, ? FROM trailer_candidate_versions WHERE episode_id = ?`)
+        .run(now, episodeId);
+      db.prepare("DELETE FROM episodes WHERE episode_id = ?").run(episodeId);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   },
   deleteDraftEpisodeIfUnused(episodeId: number): void {
     getDb().prepare(`DELETE FROM episodes WHERE episode_id = ? AND is_draft = 1

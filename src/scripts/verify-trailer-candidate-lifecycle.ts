@@ -110,13 +110,14 @@ const main = async (): Promise<void> => {
   let fetchCalls = 0;
   globalThis.fetch = (async () => { fetchCalls += 1; throw new Error("network access is prohibited by candidate verifier"); }) as typeof fetch;
   try {
-    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, draftService, { config }, renderer, candidateWorker] = await Promise.all([
+    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, { config }, renderer, candidateWorker] = await Promise.all([
       import("../database/connect.js"),
       import("../database/sqlite.js"),
       import("../database/repositories/episode.repository.js"),
       import("../database/repositories/trailer-candidate.repository.js"),
       import("../services/episode-media-layout.service.js"),
       import("../services/trailer-candidate.service.js"),
+      import("../services/trailer-candidate-file-cleanup.service.js"),
       import("../services/episode-draft-reservation.service.js"),
       import("../config/env.js"),
       import("../services/trailer-candidate-renderer.service.js"),
@@ -142,6 +143,7 @@ const main = async (): Promise<void> => {
     const coverOnly = await invoke(router, "/:episodeId/cover", new MultipartRequest(routeEpisodeId, Buffer.from("cover-one"), "cover.jpeg", "image/jpeg"));
     assert.equal(coverOnly.response.statusCode, 200);
     assert.equal((coverOnly.response.jsonBody as any).trailerCandidate, undefined, "single input must wait without a candidate job");
+    assert.equal((coverOnly.response.jsonBody as any).trailerCandidateEnqueue.status, "waiting_for_input");
     const secondInput = await invoke(router, "/:episodeId/trailer", new MultipartRequest(routeEpisodeId, Buffer.from("trailer-one"), "trailer.mp3", "audio/mpeg"));
     assert.equal(secondInput.response.statusCode, 200);
     const routeBody = secondInput.response.jsonBody as Record<string, any>;
@@ -257,6 +259,7 @@ const main = async (): Promise<void> => {
     assert.equal(historicalReady?.outputRelativePath, null);
     assert.equal(historicalReady?.outputSha256, "a".repeat(64), "history retains the old output hash");
     assert.equal(await fs.promises.access(readyVideo).then(() => true).catch(() => false), false, "validated replacement should reclaim old ready bytes");
+    assert.equal(await fs.promises.access(await candidateService.trailerCandidateStoragePath(`${firstId}/cover.jpeg`)).then(() => true).catch(() => false), false, "supersession should reclaim the complete prior candidate directory");
 
     const retryMedia = await createSyntheticMedia(path.join(fixture.root), "yellow", 660);
     await fs.promises.copyFile(retryMedia.cover, mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "cover"));
@@ -279,8 +282,25 @@ const main = async (): Promise<void> => {
     const retryable = trailerCandidateRepository.findById(retryResult.candidate.candidateId);
     assert.equal(retryable?.status, "retryable");
     assert.equal(retryable?.attemptCount, 1);
-    assert.equal(await fs.promises.access(await candidateService.trailerCandidateStoragePath(`${retryCandidate?.snapshotRelativePath}attempts/1/candidate.partial.mp4`)).then(() => true).catch(() => false), false, "failed render must clean its partial bytes");
+    assert.equal(await fs.promises.access(await candidateService.trailerCandidateStoragePath(path.posix.join(retryCandidate?.snapshotRelativePath ?? "", "attempts", "1", "candidate.partial.mp4"))).then(() => true).catch(() => false), false, "failed render must clean its partial bytes");
     assert.equal(await fs.promises.access(renderedPath).then(() => true).catch(() => false), true, "failed replacement must preserve the last ready bytes");
+    const retrySnapshotCover = await candidateService.trailerCandidateStoragePath(path.posix.join(retryCandidate?.snapshotRelativePath ?? "", "cover.jpeg"));
+    const newerMedia = await createSyntheticMedia(path.join(fixture.root), "orange", 700);
+    await fs.promises.copyFile(newerMedia.cover, mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "cover"));
+    await fs.promises.copyFile(newerMedia.audio, mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "trailer"));
+    const newerResult = await candidateService.enqueueTrailerCandidate(routeEpisodeId, "dev-bypass@local");
+    assert.equal(newerResult.waitingForInput, false);
+    if (newerResult.waitingForInput) throw new Error("newer replacement unexpectedly waited for input");
+    const newerCandidate = trailerCandidateRepository.findById(newerResult.candidate.candidateId);
+    assert.ok(newerCandidate);
+    await candidateWorker.processTrailerCandidate(newerCandidate as NonNullable<typeof newerCandidate>, { availableBytes: async () => 20 * 1024 ** 3 });
+    const newerReady = trailerCandidateRepository.findById(newerResult.candidate.candidateId);
+    assert.equal(newerReady?.status, "ready");
+    const newerReadyPath = await candidateService.trailerCandidateStoragePath(newerReady?.outputRelativePath as string);
+    assert.equal(await fs.promises.access(retrySnapshotCover).then(() => true).catch(() => false), true, "retryable candidate snapshots must survive cleanup after a newer candidate becomes ready");
+    assert.equal(await fs.promises.access(newerReadyPath).then(() => true).catch(() => false), true, "current ready candidate bytes must remain available");
+    await fs.promises.copyFile(retryMedia.cover, mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "cover"));
+    await fs.promises.copyFile(retryMedia.audio, mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "trailer"));
     trailerCandidateRepository.retry(retryResult.candidate.candidateId);
     await candidateWorker.processTrailerCandidate(retryCandidate as NonNullable<typeof retryCandidate>, { availableBytes: async () => 20 * 1024 ** 3 });
     const retried = trailerCandidateRepository.findById(retryResult.candidate.candidateId);
@@ -289,6 +309,7 @@ const main = async (): Promise<void> => {
     assert.deepEqual(trailerCandidateRepository.listAttempts(retryResult.candidate.candidateId).map((attempt: any) => attempt.status), ["failed", "ready"]);
     assert.equal(await fs.promises.access(renderedPath).then(() => true).catch(() => false), false, "old bytes are removed only after successful replacement validation");
     assert.equal(trailerCandidateRepository.findById(renderResult.candidate.candidateId)?.outputSha256, rendered?.outputSha256, "superseded candidate keeps its output hash");
+    assert.equal(await fs.promises.access(newerReadyPath).then(() => true).catch(() => false), false, "previous ready candidate directory should be reclaimed only after replacement validation");
 
     const wrongSizePath = path.join(fixture.root, "wrong-size.mp4");
     await renderer.runTrailerProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=1", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-profile:v", "main", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-y", wrongSizePath], 60_000);
@@ -326,10 +347,56 @@ const main = async (): Promise<void> => {
     assert.equal(episodeRepository.findByEpisodeId(routeEpisodeId)?.isDraft, false);
     assert.equal(episodeRepository.findTrailerVideoDraft(reservation?.draftId)?.state, "consumed", "save must consume API-created owner reservation even if client did not supply draftId");
 
+    const finalCoverPath = mediaLayout.getEpisodeMediaFinalPath(routeEpisodeId, "cover");
+    const finalTrailerPath = mediaLayout.getEpisodeMediaFinalPath(routeEpisodeId, "trailer");
+    await fs.promises.mkdir(path.dirname(finalCoverPath), { recursive: true });
+    await fs.promises.writeFile(finalCoverPath, "old-final-cover");
+    await fs.promises.writeFile(finalTrailerPath, "old-final-trailer");
+    const uploadedCover = Buffer.from("new-staged-cover");
+    const uploadedTrailer = Buffer.from("new-staged-trailer");
+    await invoke(router, "/:episodeId/cover", new MultipartRequest(routeEpisodeId, uploadedCover, "cover.jpeg", "image/jpeg"));
+    const savedUpload = await invoke(router, "/:episodeId/trailer", new MultipartRequest(routeEpisodeId, uploadedTrailer, "trailer.mp3", "audio/mpeg"));
+    assert.equal(savedUpload.response.statusCode, 200);
+    const savedUploadCandidateId = (savedUpload.response.jsonBody as any).trailerCandidate.candidateId as string;
+    const savedUploadCandidate = trailerCandidateRepository.findById(savedUploadCandidateId);
+    assert.ok(savedUploadCandidate);
+    assert.equal(savedUploadCandidate?.coverSha256, createHash("sha256").update(uploadedCover).digest("hex"));
+    assert.equal(savedUploadCandidate?.audioSha256, createHash("sha256").update(uploadedTrailer).digest("hex"));
+    assert.equal(await fs.promises.readFile(await candidateService.trailerCandidateStoragePath(`${savedUploadCandidateId}/cover.jpeg`), "utf8"), "new-staged-cover");
+    assert.equal(await fs.promises.readFile(await candidateService.trailerCandidateStoragePath(`${savedUploadCandidateId}/trailer.mp3`), "utf8"), "new-staged-trailer");
+
+    const priorCandidateRootForFailure = config.media.trailerCandidatesRoot;
+    config.media.trailerCandidatesRoot = path.join(fixture.media, "public-invalid-candidate-root");
+    const failedUploadBytes = Buffer.from("stored-even-when-enqueue-fails");
+    const failedUpload = await invoke(router, "/:episodeId/cover", new MultipartRequest(routeEpisodeId, failedUploadBytes, "cover.jpeg", "image/jpeg"));
+    config.media.trailerCandidatesRoot = priorCandidateRootForFailure;
+    assert.equal(failedUpload.response.statusCode, 503, "candidate enqueue failure must not look like successful upload processing");
+    const failedUploadBody = failedUpload.response.jsonBody as any;
+    assert.deepEqual(failedUploadBody.trailerCandidateEnqueue, {
+      status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true,
+    });
+    assert.equal(failedUploadBody.coverFileName, "episodes/987654301/cover.jpeg");
+    assert.equal(JSON.stringify(failedUploadBody).includes(fixture.root), false, "failure response must redact filesystem paths");
+    assert.equal(await fs.promises.readFile(mediaLayout.getEpisodeMediaStagingPath(routeEpisodeId, "cover"), "utf8"), failedUploadBytes.toString(), "failed enqueue must preserve uploaded staging bytes for retry");
+
+    const deletingCandidateDirectory = await candidateService.trailerCandidateStoragePath(interruptedCandidate?.snapshotRelativePath.replace(/[\\/]+$/, "") ?? "");
+    assert.equal(await fs.promises.access(deletingCandidateDirectory).then(() => true).catch(() => false), true);
+    const releaseActiveFiles = candidateCleanup.acquireTrailerCandidateFileUse(interruptedCandidate?.candidateId as string);
+    episodeRepository.delete(routeEpisodeId);
+    assert.equal(episodeRepository.findByEpisodeId(routeEpisodeId), null, "episode deletion should remove its record");
+    assert.ok(trailerCandidateRepository.listFileCleanup(500).some((item: any) => item.candidateId === interruptedCandidate?.candidateId), "episode deletion must durably queue its candidate directory before cascading metadata");
+    const deferredCleanup = await candidateCleanup.cleanupTrailerCandidateFiles();
+    assert.equal(deferredCleanup.deferred, 1, "cleanup must defer a directory still leased by an active renderer");
+    assert.equal(await fs.promises.access(deletingCandidateDirectory).then(() => true).catch(() => false), true, "active candidate files must remain untouched");
+    releaseActiveFiles();
+    await candidateCleanup.cleanupTrailerCandidateFiles();
+    assert.equal(await fs.promises.access(deletingCandidateDirectory).then(() => true).catch(() => false), false, "episode deletion cleanup should remove private candidate files");
+    assert.equal(trailerCandidateRepository.listFileCleanup(500).length, 0, "successful cleanup should consume durable intents");
+
     const restartSnapshotHash = firstCandidate?.sourceFingerprint;
     assert.match(restartSnapshotHash ?? "", /^[a-f0-9]{64}$/);
     assert.equal(fetchCalls, 0, "candidate enqueue must not call external providers or services");
-    console.log("trailer candidate lifecycle passed: automatic second-input enqueue, private snapshot, idempotency, versioning, draft pinning, restart, retention, and no network side effects");
+    console.log("trailer candidate lifecycle passed: draft and saved staged-source enqueue, visible retryable enqueue failure, private snapshots, idempotency, versioning, draft pinning, restart, retention, and no network side effects");
   } finally {
     globalThis.fetch = originalFetch;
     await fs.promises.rm(fixture.root, { recursive: true, force: true });

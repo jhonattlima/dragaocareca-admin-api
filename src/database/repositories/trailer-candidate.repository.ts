@@ -250,6 +250,43 @@ export const trailerCandidateRepository = {
     return byId(candidateId);
   },
 
+  supersedeTerminalAndQueueCleanup(episodeId: number, exceptCandidateId: string): void {
+    const db = getDb();
+    inImmediateTransaction(() => {
+      const rows = db.prepare(`SELECT candidate_id, snapshot_relative_path FROM trailer_candidate_versions
+        WHERE episode_id = ? AND candidate_id <> ? AND status IN ('ready', 'stale', 'superseded')`)
+        .all(episodeId, exceptCandidateId) as Array<{ candidate_id: string; snapshot_relative_path: string }>;
+      const now = nowIso();
+      db.prepare(`UPDATE trailer_candidate_versions SET status = 'superseded', output_relative_path = NULL, updated_at = ?
+        WHERE episode_id = ? AND candidate_id <> ? AND status = 'ready'`).run(now, episodeId, exceptCandidateId);
+      const enqueue = db.prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup
+        (candidate_id, relative_directory, created_at) VALUES (?, ?, ?)`);
+      for (const row of rows) enqueue.run(row.candidate_id, row.snapshot_relative_path, now);
+    });
+  },
+
+  queueFileCleanup(candidateId: string, relativeDirectory: string): void {
+    getDb().prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup
+      (candidate_id, relative_directory, created_at) VALUES (?, ?, ?)`)
+      .run(candidateId, relativeDirectory, nowIso());
+  },
+
+  listFileCleanup(limit = 100): Array<{ candidateId: string; relativeDirectory: string }> {
+    const bounded = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    return (getDb().prepare(`SELECT candidate_id, relative_directory FROM trailer_candidate_file_cleanup
+      ORDER BY datetime(created_at), candidate_id LIMIT ?`).all(bounded) as Array<{ candidate_id: string; relative_directory: string }>)
+      .map((row) => ({ candidateId: row.candidate_id, relativeDirectory: row.relative_directory }));
+  },
+
+  completeFileCleanup(candidateId: string): void {
+    getDb().prepare("DELETE FROM trailer_candidate_file_cleanup WHERE candidate_id = ?").run(candidateId);
+  },
+
+  failFileCleanup(candidateId: string, message: string): void {
+    getDb().prepare(`UPDATE trailer_candidate_file_cleanup SET attempts = attempts + 1, last_error = ?
+      WHERE candidate_id = ?`).run(message.slice(0, 500), candidateId);
+  },
+
   markRetryable(candidateId: string, category: string, message: string): boolean {
     const db = getDb(); const now = nowIso();
     const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'retryable', error_category = ?,

@@ -42,6 +42,7 @@ import {
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import { enqueueTrailerCandidate } from "../services/trailer-candidate.service";
+import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
 import {
   createYoutubeTrailerJob,
   cleanupYoutubeTrailerVideos,
@@ -337,15 +338,25 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
             return;
           }
 
-          const candidate = spec.kind === "cover" || spec.kind === "trailer"
+          const enqueue = spec.kind === "cover" || spec.kind === "trailer"
             ? await enqueueCandidateAfterUpload(spec.kind, episodeId, req.user?.email ?? "")
             : null;
+
+          if (enqueue?.status === "failed") {
+            res.status(503).json({
+              episodeId,
+              [spec.field]: fileName,
+              message: "Media was stored, but trailer generation could not be queued. Retry Generate trailer.",
+              trailerCandidateEnqueue: { status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true },
+            });
+            return;
+          }
 
           res.json({
             episodeId,
             [spec.field]: fileName,
             message: "File staged.",
-            ...(candidate ? { trailerCandidate: candidate } : {}),
+            ...(enqueue ? { trailerCandidateEnqueue: { status: enqueue.status }, ...(enqueue.status === "queued" ? { trailerCandidate: enqueue.candidate } : {}) } : {}),
           });
           return;
         }
@@ -378,14 +389,23 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
           return;
         }
         const refreshed = episodeRepository.findByEpisodeId(episodeId);
-        const candidate = spec.kind === "cover" || spec.kind === "trailer"
+        const enqueue = spec.kind === "cover" || spec.kind === "trailer"
           ? await enqueueCandidateAfterUpload(spec.kind, episodeId, req.user?.email ?? "")
           : null;
+        if (enqueue?.status === "failed") {
+          res.status(503).json({
+            episodeId,
+            [spec.field]: fileName,
+            message: "Media was stored, but trailer generation could not be queued. Retry Generate trailer.",
+            trailerCandidateEnqueue: { status: "failed", code: "trailer_candidate_enqueue_failed", retryable: true, mediaStored: true },
+          });
+          return;
+        }
         res.json({
           ...(refreshed ?? updated ?? currentEpisode),
           [spec.field]: fileName,
           message: "File staged.",
-          ...(candidate ? { trailerCandidate: candidate } : {}),
+          ...(enqueue ? { trailerCandidateEnqueue: { status: enqueue.status }, ...(enqueue.status === "queued" ? { trailerCandidate: enqueue.candidate } : {}) } : {}),
         });
       } catch (error) {
         if (file) {
@@ -407,10 +427,12 @@ const makeUploadRoute = (pathSuffix: string, spec: UploadSpec) => {
 const enqueueCandidateAfterUpload = async (kind: "cover" | "trailer", episodeId: number, ownerEmail: string) => {
   try {
     const result = await enqueueTrailerCandidate(episodeId, ownerEmail);
-    return result.waitingForInput ? null : result.candidate;
+    return result.waitingForInput
+      ? { status: "waiting_for_input" as const }
+      : { status: "queued" as const, candidate: result.candidate };
   } catch (error) {
     console.warn(`[trailer-candidate] enqueue failed after ${kind} upload episode=${episodeId}`, error instanceof Error ? error.message : String(error));
-    return null;
+    return { status: "failed" as const };
   }
 };
 
@@ -1317,6 +1339,7 @@ episodesRouter.delete("/:episodeId", requireAuth, async (req, res, next) => {
     }
 
     episodeRepository.delete(episodeId);
+    await cleanupTrailerCandidateFiles();
     queueCoverMosaicRefresh();
     res.json({ episodeId, message: "Episode deleted" });
   } catch (error) {

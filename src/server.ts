@@ -15,6 +15,7 @@ import { startEpisodePromotionWorker } from "./workers/episode-promotion.worker"
 import { startSocialPublicationRetryWorker } from "./workers/social-publication-retry.worker";
 import { startSpotifyEpisodeResolutionWorker } from "./workers/spotify-episode-resolution.worker";
 import { startTrailerCandidateWorker } from "./workers/trailer-candidate.worker";
+import { cleanupTrailerCandidateFiles } from "./services/trailer-candidate-file-cleanup.service";
 
 type ConsoleMethod = (...args: unknown[]) => void;
 
@@ -44,6 +45,7 @@ const bootstrap = async (): Promise<void> => {
   await migrateEpisodeMediaLayout().catch((error: unknown) => {
     console.warn("Episode media layout migration skipped", error instanceof Error ? error.message : String(error));
   });
+  await cleanupTrailerCandidateFiles();
   await refreshCoverMosaicBackground().catch((error: unknown) => {
     console.warn("Cover mosaic background generation skipped", error instanceof Error ? error.message : String(error));
   });

@@ -1315,7 +1315,7 @@ export const swaggerSpec = swaggerJsdoc({
         post: {
           tags: ["Episodes"],
           summary: "Upload episode trailer file",
-          description: "Trailer-audio upload preserves the existing filename/message response contract and does not require episode-audio duration or byte metadata.",
+          description: "Trailer-audio upload stages the new bytes and enqueues a private trailer candidate when cover and trailer inputs exist. A retryable enqueue failure returns 503 while preserving the staged media.",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer" } }],
           requestBody: {
@@ -1332,7 +1332,7 @@ export const swaggerSpec = swaggerJsdoc({
               },
             },
           },
-          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+          responses: { "200": { description: "Updated or staged; trailerCandidateEnqueue distinguishes queued from waiting_for_input." }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" }, "503": { description: "Media was stored but candidate enqueue failed; response is redacted and marked retryable." } },
         },
       },
       "/v1/episodes/{episodeId}/trailer-video": {
@@ -1394,7 +1394,7 @@ export const swaggerSpec = swaggerJsdoc({
               },
             },
           },
-          responses: { "200": { description: "Updated" }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" } },
+          responses: { "200": { description: "Updated or staged; trailerCandidateEnqueue distinguishes queued from waiting_for_input." }, "400": { description: "Invalid file" }, "401": { description: "Unauthorized" }, "404": { description: "Not found" }, "503": { description: "Media was stored but candidate enqueue failed; response is redacted and marked retryable." } },
         },
       },
       "/v1/episodes/{episodeId}/cover-webp": {
