@@ -42,6 +42,7 @@ import {
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import { enqueueTrailerCandidate } from "../services/trailer-candidate.service";
+import { decideTrailerCandidate } from "../services/trailer-candidate-approval.service";
 import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
 import {
   createYoutubeTrailerJob,
@@ -106,6 +107,12 @@ const youtubeTrailerJobIdSchema = z.uuid();
 const youtubeTrailerPublicationSchema = z.object({
   title: z.string().trim().min(1).max(100),
   hashtags: z.array(z.string().trim().regex(/^#[\p{L}\p{N}_-]+$/u)).max(3),
+}).strict();
+
+const trailerCandidateDecisionSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+  expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  expectedVersion: z.number().int().positive(),
 }).strict();
 const youtubeTrailerCommitSchema = z.object({
   jobId: z.uuid().optional(),
@@ -1151,6 +1158,37 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/publish", noStoreYo
 
     const publication = await publishYoutubeTrailer(episodeId, parsedJobId.data, body.data);
     res.json(publication);
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.post("/:episodeId/trailer-candidates/:candidateId/decision", requireAuth, async (req, res, next) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_decision_disabled", message: "Trailer candidate decisions are disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    const candidateId = z.string().uuid().safeParse(req.params.candidateId);
+    const body = trailerCandidateDecisionSchema.safeParse(req.body);
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !candidateId.success || !body.success) {
+      res.status(400).json({ code: "invalid_decision_request", message: "Trailer candidate decision request is invalid." });
+      return;
+    }
+    const result = await decideTrailerCandidate({
+      episodeId,
+      candidateId: candidateId.data,
+      ...body.data,
+      actorEmail: req.user?.email ?? "",
+    });
+    if (result.status === "conflict") {
+      const status = result.code === "unauthorized" ? 401 : result.code === "not_found" ? 404 : 409;
+      res.status(status).json({ code: result.code, message: "Trailer candidate decision could not be applied." });
+      return;
+    }
+    res.json(result);
   } catch (error) {
     next(error);
   }

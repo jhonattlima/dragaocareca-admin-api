@@ -343,6 +343,34 @@ CREATE TABLE IF NOT EXISTS trailer_candidate_file_cleanup (
   last_error TEXT
 );
 
+-- Actor-attributed, compare-and-swap decisions and the durable cross-resource
+-- journal used when private candidate bytes become canonical trailer media.
+CREATE TABLE IF NOT EXISTS trailer_candidate_decisions (
+  candidate_id TEXT PRIMARY KEY REFERENCES trailer_candidate_versions(candidate_id) ON DELETE CASCADE,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+  expected_source_fingerprint TEXT NOT NULL,
+  expected_version INTEGER NOT NULL CHECK (expected_version > 0),
+  output_sha256 TEXT NOT NULL,
+  actor_email TEXT NOT NULL,
+  decided_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trailer_promotion_journals (
+  journal_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  candidate_id TEXT REFERENCES trailer_candidate_versions(candidate_id) ON DELETE SET NULL,
+  old_sha256 TEXT,
+  new_sha256 TEXT NOT NULL,
+  old_present INTEGER NOT NULL CHECK (old_present IN (0, 1)),
+  phase TEXT NOT NULL CHECK (phase IN ('prepared', 'old_backed_up', 'new_installed', 'committed', 'aborted')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_promotion_one_active_per_episode
+  ON trailer_promotion_journals(episode_id) WHERE phase NOT IN ('committed', 'aborted');
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_candidate_episode_fingerprint_current
   ON trailer_candidate_versions(episode_id, source_fingerprint)
   WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready');
