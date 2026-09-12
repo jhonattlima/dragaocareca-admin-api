@@ -288,6 +288,63 @@ CREATE TABLE IF NOT EXISTS youtube_trailer_jobs (
   completed_at TEXT
 );
 
+-- Private, immutable render candidates are independent of both the public
+-- episode media and the YouTube transfer lifecycle. Paths are root-relative.
+CREATE TABLE IF NOT EXISTS trailer_candidate_versions (
+  candidate_id TEXT PRIMARY KEY,
+  episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  draft_id TEXT,
+  version INTEGER NOT NULL CHECK (version > 0),
+  source_fingerprint TEXT NOT NULL,
+  cover_sha256 TEXT NOT NULL,
+  audio_sha256 TEXT NOT NULL,
+  transcript_sha256 TEXT,
+  profile_id TEXT NOT NULL,
+  profile_revision INTEGER NOT NULL CHECK (profile_revision > 0),
+  snapshot_relative_path TEXT NOT NULL,
+  output_relative_path TEXT,
+  output_sha256 TEXT,
+  output_bytes INTEGER CHECK (output_bytes IS NULL OR output_bytes > 0),
+  duration_seconds REAL CHECK (duration_seconds IS NULL OR duration_seconds > 0),
+  probe_json TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready', 'stale', 'superseded')),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 99),
+  error_category TEXT,
+  error_message TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  ready_at TEXT,
+  stale_at TEXT,
+  UNIQUE (episode_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS trailer_candidate_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  candidate_id TEXT NOT NULL REFERENCES trailer_candidate_versions(candidate_id) ON DELETE CASCADE,
+  attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+  source_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('processing', 'waiting_capacity', 'ready', 'failed', 'stale', 'interrupted')),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  error_category TEXT,
+  error_message TEXT,
+  output_partial_relative_path TEXT,
+  UNIQUE (candidate_id, attempt_number)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_candidate_episode_fingerprint_current
+  ON trailer_candidate_versions(episode_id, source_fingerprint)
+  WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready');
+CREATE INDEX IF NOT EXISTS idx_trailer_candidate_versions_fifo
+  ON trailer_candidate_versions(status, created_at, candidate_id);
+CREATE INDEX IF NOT EXISTS idx_trailer_candidate_versions_episode_version
+  ON trailer_candidate_versions(episode_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_trailer_candidate_versions_draft_status
+  ON trailer_candidate_versions(draft_id, status);
+CREATE INDEX IF NOT EXISTS idx_trailer_candidate_attempts_history
+  ON trailer_candidate_attempts(candidate_id, attempt_number DESC);
+
 CREATE TABLE IF NOT EXISTS youtube_hashtag_count_cache (
   normalized_tag TEXT NOT NULL,
   region_code TEXT NOT NULL,
