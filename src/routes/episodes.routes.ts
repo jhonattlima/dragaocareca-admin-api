@@ -43,6 +43,7 @@ import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.se
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
 import { enqueueTrailerCandidate } from "../services/trailer-candidate.service";
 import { decideTrailerCandidate } from "../services/trailer-candidate-approval.service";
+import { confirmManualTrailerRetirement, getTrailerReplacementStatus } from "../services/publication-retirement.service";
 import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
 import {
   createYoutubeTrailerJob,
@@ -85,6 +86,11 @@ const noStoreYoutubeTrailerJobs: RequestHandler = (_req, res, next) => {
 };
 
 const noStoreHashtagAuthoring: RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
+const noStoreTrailerReplacement: RequestHandler = (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 };
@@ -1193,6 +1199,78 @@ episodesRouter.post("/:episodeId/trailer-candidates/:candidateId/decision", requ
   } catch (error) {
     next(error);
   }
+});
+
+const trailerReplacementRevisionSchema = z.string().regex(/^episode:([1-9][0-9]*):[a-f0-9]{64}$/u);
+const trailerRetirementConfirmationSchema = z.object({
+  predecessorRemoteId: z.string().trim().min(1).max(200),
+  confirmation: z.literal("removed_manually"),
+}).strict();
+
+episodesRouter.get("/:episodeId/trailer-replacements/:sourceRevision", noStoreTrailerReplacement, requireAuth, (req, res) => {
+  if (!config.trailerCandidateRenderEnabled) {
+    res.status(503).json({ code: "trailer_replacement_disabled", message: "Trailer replacement status is disabled." });
+    return;
+  }
+  const episodeId = Number(req.params.episodeId);
+  const revision = trailerReplacementRevisionSchema.safeParse(req.params.sourceRevision);
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !revision.success || !revision.data.startsWith(`episode:${episodeId}:`)) {
+    res.status(400).json({ code: "invalid_trailer_replacement", message: "Trailer replacement identity is invalid." });
+    return;
+  }
+  const status = getTrailerReplacementStatus(episodeId, revision.data);
+  if (!status) {
+    res.status(404).json({ code: "trailer_replacement_not_found", message: "Trailer replacement was not found." });
+    return;
+  }
+  res.json(status);
+});
+
+episodesRouter.post("/:episodeId/trailer-replacements/:sourceRevision/destinations/:destination/retirement/confirm", noStoreTrailerReplacement, requireAuth, (req, res) => {
+  if (!config.trailerCandidateRenderEnabled) {
+    res.status(503).json({ code: "trailer_replacement_disabled", message: "Trailer replacement status is disabled." });
+    return;
+  }
+  const episodeId = Number(req.params.episodeId);
+  const revision = trailerReplacementRevisionSchema.safeParse(req.params.sourceRevision);
+  const destination = req.params.destination;
+  const body = trailerRetirementConfirmationSchema.safeParse(req.body);
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !revision.success || !revision.data.startsWith(`episode:${episodeId}:`)
+    || (destination !== "instagram_reel" && destination !== "facebook_native_video") || !body.success) {
+    res.status(400).json({ code: "invalid_retirement_confirmation", message: "Trailer retirement confirmation is invalid." });
+    return;
+  }
+  const actorEmail = req.user?.email ?? "";
+  if (!actorEmail.trim()) {
+    res.status(401).json({ code: "unauthorized", message: "An authenticated operator is required." });
+    return;
+  }
+  const result = confirmManualTrailerRetirement({
+    episodeId,
+    sourceRevision: revision.data,
+    destination,
+    predecessorRemoteId: body.data.predecessorRemoteId,
+    actorEmail,
+  });
+  if (result.status === "not_found") {
+    res.status(404).json({ code: "trailer_retirement_not_found", message: "Pending trailer retirement was not found." });
+    return;
+  }
+  if (result.status === "conflict" || !result.effect) {
+    res.status(409).json({ code: "trailer_retirement_conflict", message: "Trailer retirement does not match the pending published predecessor." });
+    return;
+  }
+  res.json({
+    status: result.status,
+    sourceRevision: revision.data,
+    destination,
+    predecessor: result.effect.predecessor,
+    successor: result.effect.remoteId ? { remoteId: result.effect.remoteId, permalink: result.effect.permalink } : null,
+    retirementStatus: result.effect.retirementStatus,
+    retirementActorEmail: result.effect.retirementActorEmail,
+    retirementConfirmedAt: result.effect.retirementConfirmedAt,
+    replacementComplete: result.effect.replacementComplete,
+  });
 });
 
 episodesRouter.get("/:episodeId", requireAuth, async (req, res, next) => {

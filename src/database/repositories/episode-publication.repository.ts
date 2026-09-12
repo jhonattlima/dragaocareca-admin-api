@@ -58,6 +58,43 @@ export const episodePublicationRepository = {
       : getDb().prepare("SELECT * FROM episode_publication_effects WHERE episode_id = ? ORDER BY created_at DESC, destination").all(episodeId)) as Row[];
     return rows.map(map);
   },
+  hasIntent(episodeId: number, sourceRevision: string): boolean {
+    return Boolean(getDb().prepare("SELECT 1 AS found FROM episode_publication_intents WHERE episode_id = ? AND source_revision = ?").get(episodeId, sourceRevision));
+  },
+  confirmManualRetirement(input: { episodeId: number; sourceRevision: string; destination: Extract<PublicationDestination, "instagram_reel" | "facebook_native_video">; predecessorRemoteId: string; actorEmail: string }): { status: "confirmed" | "replayed" | "conflict" | "not_found"; effect: PublicationEffectProjection | null } {
+    const db = getDb();
+    const effectKey = `episode:${input.episodeId}:${input.sourceRevision}:${input.destination}`;
+    const actorEmail = input.actorEmail.trim().toLowerCase();
+    if (!actorEmail) return { status: "conflict", effect: null };
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = db.prepare(`SELECT lifecycle, predecessor_remote_id, retirement_status, retirement_actor_email, retirement_confirmed_at
+        FROM episode_publication_effects WHERE effect_key = ? AND episode_id = ? AND source_revision = ? AND destination = ?`)
+        .get(effectKey, input.episodeId, input.sourceRevision, input.destination) as { lifecycle: string; predecessor_remote_id: string | null; retirement_status: PublicationEffectProjection["retirementStatus"]; retirement_actor_email: string | null; retirement_confirmed_at: string | null } | undefined;
+      if (!current) { db.exec("COMMIT"); return { status: "not_found", effect: null }; }
+      if (current.lifecycle !== "published" || current.predecessor_remote_id !== input.predecessorRemoteId) {
+        db.exec("COMMIT");
+        return { status: "conflict", effect: this.list(input.episodeId, input.sourceRevision).find((effect) => effect.destination === input.destination) ?? null };
+      }
+      if (current.retirement_status === "confirmed_manually") {
+        db.exec("COMMIT");
+        return { status: "replayed", effect: this.list(input.episodeId, input.sourceRevision).find((effect) => effect.destination === input.destination) ?? null };
+      }
+      if (current.retirement_status !== "manual_retirement_required") {
+        db.exec("COMMIT");
+        return { status: "conflict", effect: this.list(input.episodeId, input.sourceRevision).find((effect) => effect.destination === input.destination) ?? null };
+      }
+      const now = nowIso();
+      const changed = db.prepare(`UPDATE episode_publication_effects SET retirement_status = 'confirmed_manually', retirement_actor_email = ?, retirement_confirmed_at = ?, updated_at = ?
+        WHERE effect_key = ? AND episode_id = ? AND source_revision = ? AND destination = ? AND lifecycle = 'published'
+          AND predecessor_remote_id = ? AND retirement_status = 'manual_retirement_required'`)
+        .run(actorEmail, now, now, effectKey, input.episodeId, input.sourceRevision, input.destination, input.predecessorRemoteId).changes;
+      if (changed !== 1) { db.exec("COMMIT"); return { status: "conflict", effect: this.list(input.episodeId, input.sourceRevision).find((effect) => effect.destination === input.destination) ?? null }; }
+      const effect = this.list(input.episodeId, input.sourceRevision).find((item) => item.destination === input.destination) ?? null;
+      db.exec("COMMIT");
+      return { status: "confirmed", effect };
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
+  },
   listDueSocialEffects(now = new Date(), limit = 20): Array<{ episodeId: number; effect: PublicationEffectProjection }> {
     const rows = getDb().prepare(`
       SELECT * FROM episode_publication_effects
