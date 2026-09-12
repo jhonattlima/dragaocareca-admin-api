@@ -26,7 +26,7 @@ export type TrailerCandidateDecisionInput = {
   actorEmail: string;
   transport?: PromotionTransport;
   metaProvider?: MetaPublicationProvider;
-  faultAt?: "after_journal" | "after_backup" | "after_install" | "after_commit";
+  faultAt?: "after_journal" | "after_backup" | "after_install" | "during_commit" | "after_commit";
 };
 export type TrailerCandidateDecisionResult =
   | { status: "approved" | "rejected" | "replayed"; candidateId: string; episodeId: number; version: number; sourceFingerprint: string }
@@ -197,6 +197,7 @@ export const reconcileTrailerPromotionJournal = async (journalId: string, faultA
 
   if (await canonicalHash(finalPath) !== journal.newSha256) throw new Error("Canonical trailer does not match approved output");
   try {
+    if (faultAt === "during_commit") throw new Error("Injected trailer promotion failure during SQLite finalization");
     commitFinalization(journal);
   } catch (error) {
     await rollbackUncommittedPromotion(journal);

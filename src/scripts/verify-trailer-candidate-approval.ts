@@ -332,6 +332,7 @@ const main = async (): Promise<void> => {
       { episodeId: 981005, faultAt: "after_journal" as const, previous: "keep-before-rename", expectedBeforeRecovery: "keep-before-rename" },
       { episodeId: 981006, faultAt: "after_backup" as const, previous: "keep-in-backup", expectedBeforeRecovery: null },
       { episodeId: 981007, faultAt: "after_install" as const, previous: null, expectedBeforeRecovery: "candidate-output-981007" },
+      { episodeId: 981013, faultAt: "during_commit" as const, previous: "keep-after-rollback", expectedBeforeRecovery: "keep-after-rollback" },
     ];
     for (const scenario of recoveryCases) {
       const interrupted = await createReadyCandidate(scenario.episodeId, `cover-${scenario.episodeId}`, `audio-${scenario.episodeId}`);
@@ -344,12 +345,15 @@ const main = async (): Promise<void> => {
         actorEmail: "operator@example.test", faultAt: scenario.faultAt,
       });
       assert.deepEqual(failed, { status: "conflict", code: "finalization_blocked" });
-      const retry = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
-        episodeId: interrupted.episodeId, candidateId: interrupted.candidateId, decision: "approve",
-        expectedSourceFingerprint: interrupted.sourceFingerprint, expectedVersion: interrupted.version,
-        actorEmail: "operator@example.test",
-      });
-      assert.deepEqual(retry, { status: "conflict", code: "finalization_blocked" }, "an aborted approval must never be reported as a successful replay");
+      if (scenario.faultAt === "during_commit") {
+        assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(interrupted.candidateId)?.phase, "aborted");
+        const retry = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+          episodeId: interrupted.episodeId, candidateId: interrupted.candidateId, decision: "approve",
+          expectedSourceFingerprint: interrupted.sourceFingerprint, expectedVersion: interrupted.version,
+          actorEmail: "operator@example.test",
+        });
+        assert.deepEqual(retry, { status: "conflict", code: "finalization_blocked" }, "an aborted approval must never be reported as a successful replay");
+      }
       assert.equal(await fs.promises.readFile(interruptedFinal, "utf8").catch(() => null), scenario.expectedBeforeRecovery);
       assert.equal(episodePublicationRepository.list(scenario.episodeId).length, 0, "an interrupted approval cannot expose replacement effects before SQLite finalization");
       if (scenario.faultAt === "after_backup") {
@@ -359,6 +363,11 @@ const main = async (): Promise<void> => {
         assert.equal(await fs.promises.readFile(path.join(path.dirname(interruptedFinal), backups[0]), "utf8"), scenario.previous);
       }
       await recoverTrailerPromotionJournals();
+      if (scenario.faultAt === "during_commit") {
+        assert.equal(await fs.promises.readFile(interruptedFinal, "utf8"), scenario.expectedBeforeRecovery);
+        assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(interrupted.candidateId)?.phase, "aborted");
+        continue;
+      }
       assert.equal(await fs.promises.readFile(interruptedFinal, "utf8"), `candidate-output-${scenario.episodeId}`);
       assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(interrupted.candidateId)?.phase, "committed");
       const recoveredReplay = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
