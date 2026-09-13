@@ -458,6 +458,12 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
     if (scenario === "contract-outbox-tracer") {
       assert.ok(first.effects.every((effect) => effect.status === "complete"));
       assert.equal(first.request.source_revision_ordinal, 1);
+      const legacyRequest = { ...first.request };
+      delete legacyRequest.source_revision_ordinal;
+      getDb().prepare("UPDATE promotion_notifications SET request_json = ?, request_fingerprint = ? WHERE notification_id = ?")
+        .run(JSON.stringify(legacyRequest), service.getPromotionRequestFingerprint(legacyRequest), request.notification_id);
+      getDb().prepare("DELETE FROM promotion_source_revision_ordinals WHERE notification_id = ? AND source_revision = ?")
+        .run(request.notification_id, request.source_revision);
       const replay = await service.createOrReusePromotionIntent(requestInput, transport);
       assert.equal(replay.effects.filter((effect) => effect.status === "complete").length, 2);
       assert.equal(replay.request.source_revision_ordinal, first.request.source_revision_ordinal, "retry must reuse the persisted source ordinal");

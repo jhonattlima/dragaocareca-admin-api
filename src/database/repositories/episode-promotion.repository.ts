@@ -288,8 +288,20 @@ export const episodePromotionRepository = {
     const request = input.withinTransaction ? assignOrdinal() : withImmediateTransaction(assignOrdinal);
     const requestFingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex");
     const existing = selectNotification(request.notification_id);
-    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== requestFingerprint && !input.allowPayloadReplacement) {
-      throw new Error(`Conflicting promotion payload fingerprint for ${request.notification_id}.`);
+    let legacyOrdinalUpgrade = false;
+    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== requestFingerprint) {
+      try {
+        const priorRequest = promotionRequestSchema.parse(JSON.parse(existing.requestJson));
+        const { source_revision_ordinal: _priorOrdinal, ...priorWithoutOrdinal } = priorRequest;
+        const { source_revision_ordinal: _currentOrdinal, ...currentWithoutOrdinal } = request;
+        legacyOrdinalUpgrade = priorRequest.source_revision_ordinal === undefined
+          && JSON.stringify(priorWithoutOrdinal) === JSON.stringify(currentWithoutOrdinal);
+      } catch {
+        legacyOrdinalUpgrade = false;
+      }
+      if (!legacyOrdinalUpgrade && !input.allowPayloadReplacement) {
+        throw new Error(`Conflicting promotion payload fingerprint for ${request.notification_id}.`);
+      }
     }
 
     const persist = (): void => {
@@ -330,7 +342,7 @@ export const episodePromotionRepository = {
           ON CONFLICT(notification_id, destination, source_revision) DO NOTHING
         `).run(effectKey, request.notification_id, request.episode_id, destination, request.source_revision, requestFingerprint, now, now);
       }
-      if (input.allowPayloadReplacement) {
+      if (input.allowPayloadReplacement || legacyOrdinalUpgrade) {
         getDb().prepare("UPDATE promotion_effects SET request_fingerprint = ?, updated_at = ? WHERE notification_id = ? AND source_revision = ?").run(requestFingerprint, now, request.notification_id, request.source_revision);
       }
     };
