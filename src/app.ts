@@ -135,6 +135,7 @@ app.get("/health", async (_req, res, next) => {
         cleanup: candidateCleanupState,
         recoverableJobs: trailerCandidateRepository.listPending(1000).length,
         pendingCleanup: trailerCandidateRepository.listFileCleanup(1000).length,
+        retentionPolicy: config.trailerCandidateRetentionDays === null ? "not_configured" : "configured",
       },
     });
   } catch (error) {

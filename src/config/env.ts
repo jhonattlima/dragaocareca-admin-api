@@ -55,6 +55,13 @@ const boundedNonNegativeInteger = (value: string | undefined, defaultValue: numb
 const parseBoolean = (value: string | undefined, defaultValue = false): boolean =>
   value === undefined ? defaultValue : value.toLowerCase() === "true";
 
+export const parseTrailerCandidateRetentionDays = (value: string | undefined): number | null => {
+  if (value === undefined || value.trim() === "") return null;
+  if (!/^\d+$/u.test(value)) return null;
+  const days = Number(value);
+  return Number.isSafeInteger(days) && days > 0 && days <= 36_500 ? days : null;
+};
+
 const parsePromotionRetryDelays = (env: Record<string, string | undefined>): [number, number, number, number] => [
   boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_1_MS, 1_000, "PROMOTION_RETRY_DELAY_1_MS", 3_600_000),
   boundedPositiveInteger(env.PROMOTION_RETRY_DELAY_2_MS, 5_000, "PROMOTION_RETRY_DELAY_2_MS", 3_600_000),
@@ -155,6 +162,7 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   trailerCandidateRenderEnabled: (process.env.TRAILER_CANDIDATE_RENDER_ENABLED ?? "false").toLowerCase() === "true",
+  trailerCandidateRetentionDays: parseTrailerCandidateRetentionDays(process.env.TRAILER_CANDIDATE_RETENTION_DAYS),
   port: Number(process.env.PORT ?? 3000),
   sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "database", "dragaocareca-admin.sqlite"),
   sqliteReset: (process.env.SQLITE_RESET ?? "false").toLowerCase() === "true",

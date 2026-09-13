@@ -867,7 +867,9 @@ export const episodeRepository = {
     try {
       const now = nowIso();
       db.prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup (candidate_id, relative_directory, created_at)
-        SELECT candidate_id, snapshot_relative_path, ? FROM trailer_candidate_versions WHERE episode_id = ?`)
+        SELECT c.candidate_id, c.snapshot_relative_path, ? FROM trailer_candidate_versions c WHERE c.episode_id = ?
+          AND NOT EXISTS (SELECT 1 FROM trailer_candidate_decisions d WHERE d.candidate_id = c.candidate_id AND d.decision = 'approved')
+          AND NOT EXISTS (SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = c.candidate_id AND j.phase <> 'aborted')`)
         .run(now, episodeId);
       db.prepare("DELETE FROM episodes WHERE episode_id = ?").run(episodeId);
       db.exec("COMMIT");

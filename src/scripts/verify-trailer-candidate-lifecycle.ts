@@ -79,6 +79,7 @@ const createFixture = async (): Promise<Fixture> => {
   process.env.MEDIA_BACKUP_EPISODES_DIR = path.join(media, "backups", "episodes");
   process.env.TRAILER_CANDIDATES_ROOT = path.join(generated, "trailer-candidates");
   process.env.TRAILER_CANDIDATE_RENDER_ENABLED = "false";
+  process.env.TRAILER_CANDIDATE_RETENTION_DAYS = "";
   process.env.PROMOTION_ENABLED = "false";
   process.env.PROMOTION_LEGACY_LAUNCH_ENABLED = "false";
   const database = resolved(process.env.SQLITE_PATH);
@@ -264,7 +265,7 @@ const main = async (): Promise<void> => {
   }) as typeof fetch;
   globalThis.fetch = blockedFetch;
   try {
-    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, { config }, renderer, candidateWorker, appModule] = await Promise.all([
+    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, envModule, renderer, candidateWorker, appModule] = await Promise.all([
       import("../database/connect.js"),
       import("../database/sqlite.js"),
       import("../database/repositories/episode.repository.js"),
@@ -278,6 +279,7 @@ const main = async (): Promise<void> => {
       import("../workers/trailer-candidate.worker.js"),
       import("../app.js"),
     ]);
+    const { config } = envModule;
     fixtureDbReader = getDb;
     const originalWorkingDirectory = process.cwd();
     process.chdir(fixture.root);
@@ -355,7 +357,7 @@ const main = async (): Promise<void> => {
     appModule.beginCandidateLifecycleStartup();
     const beforeRecoveryHealth = await invokeHealth(appModule.app);
     assert.deepEqual(beforeRecoveryHealth.candidateLifecycle, {
-      workerStatus: "disabled", ready: false, recovery: "pending", cleanup: "pending", recoverableJobs: 0, pendingCleanup: 0,
+      workerStatus: "disabled", ready: false, recovery: "pending", cleanup: "pending", recoverableJobs: 0, pendingCleanup: 0, retentionPolicy: "not_configured",
     }, "health must report disabled and not ready before startup recovery");
     config.trailerCandidateRenderEnabled = true;
     appModule.markCandidateRecoveryReady();
@@ -416,7 +418,7 @@ const main = async (): Promise<void> => {
     assert.equal(candidateService.trailerCandidatePublicMediaBoundary(), true);
     const lifecycleHealth = await invokeHealth(appModule.app);
     const candidateHealth = lifecycleHealth.candidateLifecycle;
-    assert.deepEqual(Object.keys(candidateHealth).sort(), ["cleanup", "pendingCleanup", "ready", "recoverableJobs", "recovery", "workerStatus"].sort());
+    assert.deepEqual(Object.keys(candidateHealth).sort(), ["cleanup", "pendingCleanup", "ready", "recoverableJobs", "recovery", "retentionPolicy", "workerStatus"].sort());
     assert.ok(candidateHealth.recoverableJobs >= 1 && candidateHealth.recoverableJobs <= 1000);
     assert.equal(candidateHealth.pendingCleanup, 0);
     const candidateHealthJson = JSON.stringify(candidateHealth);
@@ -673,10 +675,97 @@ const main = async (): Promise<void> => {
 
     const restartSnapshotHash = firstCandidate?.sourceFingerprint;
     assert.match(restartSnapshotHash ?? "", /^[a-f0-9]{64}$/);
+    const retentionNow = new Date("2026-09-13T12:00:00.000Z");
+    const retentionDays = 30;
+    const retentionCutoff = new Date(retentionNow.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+    const retentionFixtureIds = {
+      eligible: "90000000-0000-4000-8000-000000000001",
+      newer: "90000000-0000-4000-8000-000000000002",
+      approved: "90000000-0000-4000-8000-000000000003",
+      referenced: "90000000-0000-4000-8000-000000000004",
+    };
+    const retentionEpisodeId = 987654300;
+    const createRetentionFixture = async (candidateId: string, updatedAt: string, protection: "none" | "approved" | "referenced") => {
+      const coverBytes = Buffer.from(`synthetic-cover-${candidateId}`);
+      const audioBytes = Buffer.from(`synthetic-audio-${candidateId}`);
+      const outputBytes = Buffer.from(`synthetic-output-${candidateId}`);
+      const sha = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+      const sourceFingerprint = sha(Buffer.from(`synthetic-source-${candidateId}`));
+      const coverSha256 = sha(coverBytes);
+      const audioSha256 = sha(audioBytes);
+      const outputSha256 = sha(outputBytes);
+      const created = trailerCandidateRepository.createOrReuse({
+        candidateId,
+        episodeId: retentionEpisodeId,
+        draftId: reservation?.draftId ?? null,
+        sourceFingerprint,
+        coverSha256,
+        audioSha256,
+        profileId: "square-reels-karaoke-v2",
+        profileRevision: 2,
+        snapshotRelativePath: candidateId,
+      });
+      assert.equal(created.candidate.candidateId, candidateId);
+      const candidateDirectory = await candidateService.trailerCandidateStoragePath(candidateId);
+      await fs.promises.mkdir(candidateDirectory, { recursive: true });
+      await fs.promises.writeFile(path.join(candidateDirectory, "cover.jpeg"), coverBytes);
+      await fs.promises.writeFile(path.join(candidateDirectory, "trailer.mp3"), audioBytes);
+      const outputRelativePath = path.posix.join(candidateId, "candidate.mp4");
+      await fs.promises.writeFile(await candidateService.trailerCandidateStoragePath(outputRelativePath), outputBytes);
+      getDb().prepare(`UPDATE trailer_candidate_versions SET status = 'superseded', updated_at = ?,
+        output_relative_path = ?, output_sha256 = ?, output_bytes = ? WHERE candidate_id = ?`)
+        .run(updatedAt, outputRelativePath, outputSha256, outputBytes.length, candidateId);
+      if (protection === "approved") {
+        getDb().prepare(`INSERT INTO trailer_candidate_decisions (
+          candidate_id, episode_id, decision, expected_source_fingerprint, expected_version, output_sha256, actor_email, decided_at
+        ) VALUES (?, ?, 'approved', ?, ?, ?, ?, ?)`)
+          .run(candidateId, retentionEpisodeId, sourceFingerprint, created.candidate.version, outputSha256, "synthetic-owner@example.test", updatedAt);
+      }
+      if (protection === "referenced") {
+        const canonicalPath = mediaLayout.getEpisodeMediaFinalPath(retentionEpisodeId, "trailerVideo");
+        await fs.promises.mkdir(path.dirname(canonicalPath), { recursive: true });
+        await fs.promises.writeFile(canonicalPath, outputBytes);
+        getDb().prepare("UPDATE episodes SET trailer_video_file_name = ? WHERE episode_id = ?")
+          .run(mediaLayout.getEpisodeMediaRelativePath(retentionEpisodeId, "trailerVideo"), retentionEpisodeId);
+        getDb().prepare(`INSERT INTO trailer_promotion_journals (
+          journal_id, episode_id, candidate_id, old_sha256, new_sha256, old_present, phase, created_at, updated_at
+        ) VALUES (?, ?, ?, NULL, ?, 0, 'committed', ?, ?)`)
+          .run(`synthetic-journal-${candidateId}`, retentionEpisodeId, candidateId, outputSha256, updatedAt, updatedAt);
+      }
+      return { candidateDirectory, outputSha256, sourceFingerprint, coverSha256, audioSha256 };
+    };
+    const eligibleRetention = await createRetentionFixture(retentionFixtureIds.eligible, retentionCutoff.toISOString(), "none");
+    const newerRetention = await createRetentionFixture(retentionFixtureIds.newer, new Date(retentionCutoff.getTime() + 1_000).toISOString(), "none");
+    const approvedRetention = await createRetentionFixture(retentionFixtureIds.approved, new Date(retentionCutoff.getTime() - 1_000).toISOString(), "approved");
+    const referencedRetention = await createRetentionFixture(retentionFixtureIds.referenced, new Date(retentionCutoff.getTime() - 1_000).toISOString(), "referenced");
+    assert.equal(envModule.parseTrailerCandidateRetentionDays(undefined), null);
+    assert.equal(envModule.parseTrailerCandidateRetentionDays(""), null);
+    assert.equal(envModule.parseTrailerCandidateRetentionDays("invalid"), null);
+    assert.equal(envModule.parseTrailerCandidateRetentionDays("0"), null);
+    assert.equal(envModule.parseTrailerCandidateRetentionDays("30"), retentionDays);
+    assert.equal(config.trailerCandidateRetentionDays, null, "fixture config must leave owner retention policy unconfigured by default");
+    await candidateCleanup.cleanupTrailerCandidateFiles(retentionNow);
+    assert.equal(await fs.promises.access(eligibleRetention.candidateDirectory).then(() => true).catch(() => false), true, "missing retention policy must keep old candidate artifacts");
+    assert.equal(trailerCandidateRepository.listFileCleanup(500).some((item: any) => item.candidateId === retentionFixtureIds.eligible), false, "missing policy must not enqueue age-based cleanup");
+    config.trailerCandidateRetentionDays = retentionDays;
+    await candidateCleanup.cleanupTrailerCandidateFiles(retentionNow);
+    assert.equal(await fs.promises.access(eligibleRetention.candidateDirectory).then(() => true).catch(() => false), false, "an artifact exactly at the configured cutoff is eligible for cleanup");
+    assert.equal(await fs.promises.access(newerRetention.candidateDirectory).then(() => true).catch(() => false), true, "an artifact newer than the configured cutoff must be preserved");
+    assert.equal(await fs.promises.access(approvedRetention.candidateDirectory).then(() => true).catch(() => false), true, "approved candidate artifacts must never enter retention cleanup");
+    assert.equal(await fs.promises.access(referencedRetention.candidateDirectory).then(() => true).catch(() => false), true, "canonical-referenced candidate artifacts must never enter retention cleanup");
+    assert.equal(trailerCandidateRepository.listFileCleanup(500).some((item: any) => [retentionFixtureIds.approved, retentionFixtureIds.referenced].includes(item.candidateId)), false, "protected candidates must not receive cleanup intents");
+    const canonicalRetentionPath = mediaLayout.getEpisodeMediaFinalPath(retentionEpisodeId, "trailerVideo");
+    assert.equal(createHash("sha256").update(await fs.promises.readFile(canonicalRetentionPath)).digest("hex"), referencedRetention.outputSha256, "retention must preserve canonical trailer bytes");
+    config.trailerCandidateRetentionDays = null;
     const foreignFixtureEpisode = episodeRepository.findByEpisodeId(987654300);
     assert.equal(foreignFixtureEpisode?.title, "[Draft episode 987654300]", "foreign-owner fixture must still have its exact synthetic draft identity before deletion");
     episodeRepository.delete(987654300);
     assert.equal(episodeRepository.findByEpisodeId(987654300), null, "foreign-owner fixture episode must be removed from the temporary database");
+    assert.equal(trailerCandidateRepository.listFileCleanup(500).some((item: any) => [retentionFixtureIds.approved, retentionFixtureIds.referenced].includes(item.candidateId)), false, "episode deletion must not queue approved or canonical-referenced candidate artifacts");
+    await candidateCleanup.cleanupTrailerCandidateFiles();
+    assert.equal(await fs.promises.access(approvedRetention.candidateDirectory).then(() => true).catch(() => false), true, "episode deletion must preserve approved candidate artifacts");
+    assert.equal(await fs.promises.access(referencedRetention.candidateDirectory).then(() => true).catch(() => false), true, "episode deletion must preserve canonical-referenced candidate artifacts");
+    assert.equal(createHash("sha256").update(await fs.promises.readFile(canonicalRetentionPath)).digest("hex"), referencedRetention.outputSha256, "episode deletion cleanup must preserve canonical trailer bytes");
     assert.equal(globalThis.fetch, blockedFetch, "all provider requests must remain bound to the throwing network stub");
     assert.equal(blockedFetchCallSites.length, fetchCalls, "every blocked network attempt must be captured by the verifier");
     const databaseRows = captureFixtureRows(getDb);

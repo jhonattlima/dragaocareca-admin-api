@@ -115,6 +115,9 @@ export type TrailerCandidateCaptionRevision = {
   transcriptSha256: string | null;
 };
 
+export type TrailerCandidateRetentionIdentity = Pick<TrailerCandidateRow,
+  "candidateId" | "episodeId" | "version" | "sourceFingerprint" | "snapshotRelativePath" | "outputSha256" | "updatedAt">;
+
 type CandidateSqlRow = {
   candidate_id: string; episode_id: number; draft_id: string | null; version: number;
   source_fingerprint: string; cover_sha256: string; audio_sha256: string; transcript_sha256: string | null;
@@ -419,11 +422,15 @@ export const trailerCandidateRepository = {
     const db = getDb();
     inImmediateTransaction(() => {
       const rows = db.prepare(`SELECT candidate_id, snapshot_relative_path FROM trailer_candidate_versions
-        WHERE episode_id = ? AND candidate_id <> ? AND status IN ('ready', 'stale', 'superseded')`)
+        WHERE episode_id = ? AND candidate_id <> ? AND status IN ('ready', 'stale', 'superseded')
+          AND NOT EXISTS (SELECT 1 FROM trailer_candidate_decisions d WHERE d.candidate_id = trailer_candidate_versions.candidate_id AND d.decision = 'approved')
+          AND NOT EXISTS (SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = trailer_candidate_versions.candidate_id AND j.phase <> 'aborted')`)
         .all(episodeId, exceptCandidateId) as Array<{ candidate_id: string; snapshot_relative_path: string }>;
       const now = nowIso();
       db.prepare(`UPDATE trailer_candidate_versions SET status = 'superseded', output_relative_path = NULL, updated_at = ?
-        WHERE episode_id = ? AND candidate_id <> ? AND status = 'ready'`).run(now, episodeId, exceptCandidateId);
+        WHERE episode_id = ? AND candidate_id <> ? AND status = 'ready'
+          AND NOT EXISTS (SELECT 1 FROM trailer_candidate_decisions d WHERE d.candidate_id = trailer_candidate_versions.candidate_id AND d.decision = 'approved')
+          AND NOT EXISTS (SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = trailer_candidate_versions.candidate_id AND j.phase <> 'aborted')`).run(now, episodeId, exceptCandidateId);
       const enqueue = db.prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup
         (candidate_id, relative_directory, created_at) VALUES (?, ?, ?)`);
       for (const row of rows) enqueue.run(row.candidate_id, row.snapshot_relative_path, now);
@@ -434,6 +441,65 @@ export const trailerCandidateRepository = {
     getDb().prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup
       (candidate_id, relative_directory, created_at) VALUES (?, ?, ?)`)
       .run(candidateId, relativeDirectory, nowIso());
+  },
+
+  listRetentionCandidates(cutoff: string, limit = 500): TrailerCandidateRetentionIdentity[] {
+    const bounded = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    return (getDb().prepare(`SELECT c.candidate_id, c.episode_id, c.version, c.source_fingerprint,
+        c.snapshot_relative_path, c.output_sha256, c.updated_at
+      FROM trailer_candidate_versions c
+      WHERE c.status IN ('stale', 'superseded') AND datetime(c.updated_at) <= datetime(?)
+        AND NOT EXISTS (SELECT 1 FROM trailer_candidate_decisions d WHERE d.candidate_id = c.candidate_id AND d.decision = 'approved')
+        AND NOT EXISTS (SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = c.candidate_id AND j.phase <> 'aborted')
+      ORDER BY datetime(c.updated_at), c.candidate_id LIMIT ?`).all(cutoff, bounded) as Array<{
+        candidate_id: string; episode_id: number; version: number; source_fingerprint: string;
+        snapshot_relative_path: string; output_sha256: string | null; updated_at: string;
+      }>).map((row) => ({
+      candidateId: row.candidate_id,
+      episodeId: row.episode_id,
+      version: row.version,
+      sourceFingerprint: row.source_fingerprint,
+      snapshotRelativePath: row.snapshot_relative_path,
+      outputSha256: row.output_sha256,
+      updatedAt: row.updated_at,
+    }));
+  },
+
+  queueRetentionCleanup(identity: TrailerCandidateRetentionIdentity, cutoff: string): boolean {
+    const db = getDb();
+    return inImmediateTransaction(() => {
+      const current = db.prepare(`SELECT c.candidate_id, c.episode_id, c.version, c.source_fingerprint,
+          c.snapshot_relative_path, c.output_sha256, c.updated_at
+        FROM trailer_candidate_versions c
+        WHERE c.candidate_id = ? AND c.episode_id = ? AND c.version = ? AND c.source_fingerprint = ?
+          AND c.snapshot_relative_path = ? AND COALESCE(c.output_sha256, '') = COALESCE(?, '')
+          AND c.updated_at = ? AND c.status IN ('stale', 'superseded')
+          AND datetime(c.updated_at) <= datetime(?)
+          AND NOT EXISTS (SELECT 1 FROM trailer_candidate_decisions d WHERE d.candidate_id = c.candidate_id AND d.decision = 'approved')
+          AND NOT EXISTS (SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = c.candidate_id AND j.phase <> 'aborted')`)
+        .get(identity.candidateId, identity.episodeId, identity.version, identity.sourceFingerprint,
+          identity.snapshotRelativePath, identity.outputSha256, identity.updatedAt, cutoff);
+      if (!current) return false;
+      return db.prepare(`INSERT OR IGNORE INTO trailer_candidate_file_cleanup
+        (candidate_id, relative_directory, created_at) VALUES (?, ?, ?)`)
+        .run(identity.candidateId, identity.snapshotRelativePath, nowIso()).changes > 0;
+    });
+  },
+
+  canCleanupFiles(candidateId: string, relativeDirectory: string): boolean {
+    const db = getDb();
+    const cleanup = db.prepare("SELECT relative_directory FROM trailer_candidate_file_cleanup WHERE candidate_id = ?").get(candidateId) as { relative_directory: string } | undefined;
+    if (!cleanup || cleanup.relative_directory !== relativeDirectory) return false;
+    const candidate = db.prepare("SELECT episode_id, snapshot_relative_path, status FROM trailer_candidate_versions WHERE candidate_id = ?").get(candidateId) as { episode_id: number; snapshot_relative_path: string; status: string } | undefined;
+    if (!candidate) return true;
+    if (candidate.snapshot_relative_path !== relativeDirectory || !["stale", "superseded"].includes(candidate.status)) return false;
+    const protectedReference = db.prepare(`SELECT 1
+      FROM trailer_candidate_decisions d LEFT JOIN trailer_promotion_journals j ON j.candidate_id = d.candidate_id
+      WHERE d.candidate_id = ? AND d.decision = 'approved'
+      UNION ALL
+      SELECT 1 FROM trailer_promotion_journals j WHERE j.candidate_id = ? AND j.phase <> 'aborted'
+      LIMIT 1`).get(candidateId, candidateId);
+    return !protectedReference;
   },
 
   listFileCleanup(limit = 100): Array<{ candidateId: string; relativeDirectory: string }> {
