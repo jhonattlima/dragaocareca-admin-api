@@ -199,6 +199,17 @@ const loadRouter = (): Router => {
   return (require("../routes/episodes.routes") as { episodesRouter: Router }).episodesRouter;
 };
 
+const invokeHealth = async (app: any): Promise<Record<string, any>> => {
+  const router = app.router ?? app._router;
+  const route = router?.stack?.find((layer: any) => layer.route?.path === "/health" && layer.route.methods?.get)?.route;
+  const handler = route?.stack?.[0]?.handle;
+  if (!handler) throw new Error("health route not found");
+  const response = new MemoryResponse();
+  return new Promise((resolve, reject) => {
+    Promise.resolve(handler({}, response, reject)).then(() => resolve(response.jsonBody as Record<string, any>)).catch(reject);
+  });
+};
+
 const episodeCreateBody = (episodeId: number): Record<string, unknown> => ({
   episodeId,
   title: "Candidate fixture episode",
@@ -253,7 +264,7 @@ const main = async (): Promise<void> => {
   }) as typeof fetch;
   globalThis.fetch = blockedFetch;
   try {
-    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, { config }, renderer, candidateWorker] = await Promise.all([
+    const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, { config }, renderer, candidateWorker, appModule] = await Promise.all([
       import("../database/connect.js"),
       import("../database/sqlite.js"),
       import("../database/repositories/episode.repository.js"),
@@ -265,6 +276,7 @@ const main = async (): Promise<void> => {
       import("../config/env.js"),
       import("../services/trailer-candidate-renderer.service.js"),
       import("../workers/trailer-candidate.worker.js"),
+      import("../app.js"),
     ]);
     fixtureDbReader = getDb;
     const originalWorkingDirectory = process.cwd();
@@ -340,6 +352,30 @@ const main = async (): Promise<void> => {
     assert.ok(fixtureTableCounts.every((table) => table.count === 0), "temporary SQLite fixture database must start empty before fixture rows are created");
     persistManifestSync(fixture, manifest);
     assert.equal(config.trailerCandidateRenderEnabled, false, "candidate rendering must be disabled by default");
+    appModule.beginCandidateLifecycleStartup();
+    const beforeRecoveryHealth = await invokeHealth(appModule.app);
+    assert.deepEqual(beforeRecoveryHealth.candidateLifecycle, {
+      workerStatus: "disabled", ready: false, recovery: "pending", cleanup: "pending", recoverableJobs: 0, pendingCleanup: 0,
+    }, "health must report disabled and not ready before startup recovery");
+    config.trailerCandidateRenderEnabled = true;
+    appModule.markCandidateRecoveryReady();
+    const beforeCleanupHealth = await invokeHealth(appModule.app);
+    assert.equal(beforeCleanupHealth.candidateLifecycle.ready, false, "recovery alone cannot report candidate readiness before cleanup initialization");
+    appModule.markCandidateCleanupReady();
+    const afterStartupHealth = await invokeHealth(appModule.app);
+    assert.equal(afterStartupHealth.candidateLifecycle.workerStatus, "ready");
+    assert.equal(afterStartupHealth.candidateLifecycle.ready, true, "candidate readiness requires successful recovery and cleanup initialization");
+    appModule.beginCandidateLifecycleStartup();
+    appModule.markCandidateRecoveryFailed();
+    appModule.markCandidateCleanupReady();
+    const failedRecoveryHealth = await invokeHealth(appModule.app);
+    assert.equal(failedRecoveryHealth.candidateLifecycle.ready, false, "failed recovery must keep candidate readiness false");
+    assert.equal(failedRecoveryHealth.candidateLifecycle.recovery, "failed");
+    config.trailerCandidateRenderEnabled = false;
+    appModule.beginCandidateLifecycleStartup();
+    const flagOffHealth = await invokeHealth(appModule.app);
+    assert.equal(flagOffHealth.candidateLifecycle.workerStatus, "disabled");
+    assert.equal(flagOffHealth.candidateLifecycle.ready, false);
     const router = loadRouter();
     config.auth.bypassInDev = true;
 
@@ -378,6 +414,18 @@ const main = async (): Promise<void> => {
     const privateSnapshot = await candidateService.trailerCandidateStoragePath(`${firstId}/cover.jpeg`);
     assert.equal(await fs.promises.readFile(privateSnapshot, "utf8"), "cover-one");
     assert.equal(candidateService.trailerCandidatePublicMediaBoundary(), true);
+    const lifecycleHealth = await invokeHealth(appModule.app);
+    const candidateHealth = lifecycleHealth.candidateLifecycle;
+    assert.deepEqual(Object.keys(candidateHealth).sort(), ["cleanup", "pendingCleanup", "ready", "recoverableJobs", "recovery", "workerStatus"].sort());
+    assert.ok(candidateHealth.recoverableJobs >= 1 && candidateHealth.recoverableJobs <= 1000);
+    assert.equal(candidateHealth.pendingCleanup, 0);
+    const candidateHealthJson = JSON.stringify(candidateHealth);
+    for (const privateValue of [firstId, "Candidate fixture episode", fixture.root, firstCandidate?.sourceFingerprint, firstCandidate?.coverSha256, firstCandidate?.audioSha256, "synthetic render failure"]) {
+      if (privateValue) assert.equal(candidateHealthJson.includes(privateValue), false, "candidate readiness must not expose fixture identity, episode text, private paths, hashes, or diagnostics");
+    }
+    for (const secret of [process.env.TELEGRAM_BOT_TOKEN, process.env.YOUTUBE_API_KEY, process.env.GEMINI_API_KEY, process.env.GROQ_API_KEY].filter((value): value is string => Boolean(value))) {
+      assert.equal(candidateHealthJson.includes(secret), false, "candidate readiness must not expose provider credentials");
+    }
 
     const repeat = await candidateService.enqueueTrailerCandidate(routeEpisodeId, "dev-bypass@local");
     assert.equal(repeat.waitingForInput, false);

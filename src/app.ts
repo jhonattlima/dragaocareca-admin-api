@@ -19,9 +19,24 @@ import { internalPromotionMediaRouter } from "./routes/internal-promotion-media.
 import { internalEpisodeRouter } from "./routes/internal-episode.routes";
 import { internalPublicationRouter } from "./routes/internal-publication.routes";
 import { episodeRepository } from "./database/repositories/episode.repository";
+import { trailerCandidateRepository } from "./database/repositories/trailer-candidate.repository";
 import fs from "node:fs";
 import { getEpisodeProviderMedia } from "./services/episode-promotion-media.service";
 import { getEpisodeMediaFinalPath } from "./services/episode-media-layout.service";
+
+type CandidateStartupState = "pending" | "ready" | "failed";
+let candidateRecoveryState: CandidateStartupState = "pending";
+let candidateCleanupState: CandidateStartupState = "pending";
+
+export const beginCandidateLifecycleStartup = (): void => {
+  candidateRecoveryState = "pending";
+  candidateCleanupState = "pending";
+};
+
+export const markCandidateRecoveryReady = (): void => { candidateRecoveryState = "ready"; };
+export const markCandidateRecoveryFailed = (): void => { candidateRecoveryState = "failed"; };
+export const markCandidateCleanupReady = (): void => { candidateCleanupState = "ready"; };
+export const markCandidateCleanupFailed = (): void => { candidateCleanupState = "failed"; };
 
 export const app = express();
 
@@ -93,6 +108,8 @@ app.get("/health", async (_req, res, next) => {
     const botEnabled = missingTelegramConfig.length === 0;
     const now = new Date();
     const nextPendingEpisode = episodeRepository.findNextScheduled(now);
+    const candidateWorkerEnabled = config.trailerCandidateRenderEnabled;
+    const candidateLifecycleReady = candidateWorkerEnabled && candidateRecoveryState === "ready" && candidateCleanupState === "ready";
 
     res.json({
       status: "ok",
@@ -110,6 +127,14 @@ app.get("/health", async (_req, res, next) => {
               pubDate: nextPendingEpisode.pubDate,
             }
           : null,
+      },
+      candidateLifecycle: {
+        workerStatus: !candidateWorkerEnabled ? "disabled" : candidateLifecycleReady ? "ready" : "enabled",
+        ready: candidateLifecycleReady,
+        recovery: candidateRecoveryState,
+        cleanup: candidateCleanupState,
+        recoverableJobs: trailerCandidateRepository.listPending(1000).length,
+        pendingCleanup: trailerCandidateRepository.listFileCleanup(1000).length,
       },
     });
   } catch (error) {

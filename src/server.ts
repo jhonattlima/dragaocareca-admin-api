@@ -1,4 +1,11 @@
-import { app } from "./app";
+import {
+  app,
+  beginCandidateLifecycleStartup,
+  markCandidateCleanupFailed,
+  markCandidateCleanupReady,
+  markCandidateRecoveryFailed,
+  markCandidateRecoveryReady,
+} from "./app";
 import { config } from "./config/env";
 import { connectDb } from "./database/connect";
 import { refreshCoverMosaicBackground } from "./services/cover-mosaic.service";
@@ -14,7 +21,7 @@ import { startEpisodeHashtagAuthoringWorker } from "./workers/episode-hashtag-au
 import { startEpisodePromotionWorker } from "./workers/episode-promotion.worker";
 import { startSocialPublicationRetryWorker } from "./workers/social-publication-retry.worker";
 import { startSpotifyEpisodeResolutionWorker } from "./workers/spotify-episode-resolution.worker";
-import { startTrailerCandidateWorker } from "./workers/trailer-candidate.worker";
+import { recoverTrailerCandidateJobs, startTrailerCandidateWorker } from "./workers/trailer-candidate.worker";
 import { cleanupTrailerCandidateFiles } from "./services/trailer-candidate-file-cleanup.service";
 import { recoverTrailerPromotionJournals } from "./services/trailer-candidate-approval.service";
 
@@ -42,12 +49,30 @@ const socialPublicationRetryWorkerEnabled =
   (process.env.ENABLE_SOCIAL_PUBLICATION_RETRY_WORKER ?? "false").toLowerCase() === "true";
 
 const bootstrap = async (): Promise<void> => {
+  beginCandidateLifecycleStartup();
   await connectDb();
   await migrateEpisodeMediaLayout().catch((error: unknown) => {
     console.warn("Episode media layout migration skipped", error instanceof Error ? error.message : String(error));
   });
   await recoverTrailerPromotionJournals();
-  await cleanupTrailerCandidateFiles();
+  let candidateRecoveryReady = false;
+  try {
+    await recoverTrailerCandidateJobs();
+    markCandidateRecoveryReady();
+    candidateRecoveryReady = true;
+  } catch {
+    markCandidateRecoveryFailed();
+    console.error("Trailer candidate startup recovery failed; candidate worker remains unavailable");
+  }
+  let candidateCleanupReady = false;
+  try {
+    await cleanupTrailerCandidateFiles();
+    markCandidateCleanupReady();
+    candidateCleanupReady = true;
+  } catch {
+    markCandidateCleanupFailed();
+    console.error("Trailer candidate cleanup initialization failed; candidate worker remains unavailable");
+  }
   await refreshCoverMosaicBackground().catch((error: unknown) => {
     console.warn("Cover mosaic background generation skipped", error instanceof Error ? error.message : String(error));
   });
@@ -55,8 +80,10 @@ const bootstrap = async (): Promise<void> => {
   // Artifact jobs only prepare local episode files. Keep this worker available even when
   // integrations that depend on external credentials are intentionally disabled.
   await startEpisodeArtifactPreparationWorker();
-  if (config.trailerCandidateRenderEnabled) {
+  if (config.trailerCandidateRenderEnabled && candidateRecoveryReady && candidateCleanupReady) {
     await startTrailerCandidateWorker();
+  } else if (config.trailerCandidateRenderEnabled) {
+    console.error("Trailer candidate worker remains disabled because startup lifecycle checks did not pass");
   }
   if (!backgroundWorkersDisabled || hashtagAuthoringWorkerEnabled) {
     await startEpisodeHashtagAuthoringWorker();
