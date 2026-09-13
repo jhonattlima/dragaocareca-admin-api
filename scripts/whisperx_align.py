@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import unicodedata
 
 ALIGNER_VERSION = "whisperx==3.8.6"
@@ -46,17 +47,20 @@ def model_identity(model_dir: Path) -> dict[str, str]:
     if not isinstance(model_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", model_hash) or not isinstance(declared_files, list) or not declared_files:
         raise ValueError("local model unavailable")
     verified: list[tuple[str, str]] = []
+    declared_paths: set[str] = set()
     for item in declared_files:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("sha256"), str):
             raise ValueError("local model unavailable")
         relative = item["path"].replace("\\", "/")
-        if relative.startswith("/") or ".." in relative.split("/") or not re.fullmatch(r"[a-f0-9]{64}", item["sha256"]):
+        if relative.startswith("/") or ".." in relative.split("/") or relative in declared_paths or not re.fullmatch(r"[a-f0-9]{64}", item["sha256"]):
             raise ValueError("local model unavailable")
+        declared_paths.add(relative)
         model_file = model_dir / relative
         if model_file.is_symlink() or not model_file.is_file():
             raise ValueError("local model unavailable")
         resolved = model_file.resolve(strict=True)
-        if not resolved.is_relative_to(model_dir.resolve(strict=True)):
+        resolved_root = model_dir.resolve(strict=True)
+        if os.path.commonpath((str(resolved_root), str(resolved))) != str(resolved_root):
             raise ValueError("local model unavailable")
         digest = hashlib.sha256()
         with resolved.open("rb") as source:
@@ -66,6 +70,14 @@ def model_identity(model_dir: Path) -> dict[str, str]:
         if actual != item["sha256"]:
             raise ValueError("local model unavailable")
         verified.append((relative, actual))
+    actual_paths: set[str] = set()
+    for entry in model_dir.rglob("*"):
+        if entry.is_symlink():
+            raise ValueError("local model unavailable")
+        if entry.is_file() and entry.name != MODEL_MANIFEST:
+            actual_paths.add(entry.relative_to(model_dir).as_posix())
+    if actual_paths != declared_paths:
+        raise ValueError("local model unavailable")
     actual_model_hash = hashlib.sha256("\n".join(f"{name}:{digest}" for name, digest in sorted(verified)).encode()).hexdigest()
     if actual_model_hash != model_hash:
         raise ValueError("local model unavailable")
@@ -148,6 +160,28 @@ def self_test() -> None:
     payload = {"status": "aligned", "words": [{"start": 0.0, "end": 0.1, "text": "ok"}]}
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     assert json.loads(encoded) == payload
+    with tempfile.TemporaryDirectory(prefix="dc-aligner-manifest-test-") as temp_dir:
+        model_dir = Path(temp_dir)
+        artifact = b"synthetic-offline-model-file"
+        artifact_path = model_dir / "pytorch_model.bin"
+        artifact_path.write_bytes(artifact)
+        artifact_hash = hashlib.sha256(artifact).hexdigest()
+        model_hash = hashlib.sha256(f"pytorch_model.bin:{artifact_hash}".encode()).hexdigest()
+        manifest = {
+            "modelId": MODEL_ID,
+            "revision": MODEL_REVISION,
+            "modelSha256": model_hash,
+            "files": [{"path": "pytorch_model.bin", "sha256": artifact_hash}],
+        }
+        (model_dir / MODEL_MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+        assert model_identity(model_dir)["modelSha256"] == model_hash
+        artifact_path.write_bytes(b"tampered")
+        try:
+            model_identity(model_dir)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("model manifest must reject altered weights")
 
 
 def main() -> int:

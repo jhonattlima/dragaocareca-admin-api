@@ -63,6 +63,12 @@ const availableBytes = async (rootPath: string): Promise<number> => {
   return Number(stats.bavail * stats.bsize);
 };
 
+const sha256File = async (filePath: string): Promise<string> => {
+  const digest = createHash("sha256");
+  for await (const chunk of fs.createReadStream(filePath)) digest.update(chunk as Buffer);
+  return digest.digest("hex");
+};
+
 const safelyRemovePartial = async (relativePath: string): Promise<void> => {
   if (!relativePath.endsWith(".partial.mp4") || path.isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..")) return;
   const absolute = await trailerCandidateStoragePath(relativePath);
@@ -197,8 +203,7 @@ const processTrailerCandidateInternal = async (
         const aligned = await align({ candidate: claimed, audioPath: snapshot.audioPath });
         const transcriptFilePath = await trailerCandidateExistingFilePath(claimed.trailerTranscriptRelativePath);
         const transcriptText = await fs.promises.readFile(transcriptFilePath, "utf8");
-        const audioBytes = await fs.promises.readFile(snapshot.audioPath);
-        const sourceAudioHash = createHash("sha256").update(audioBytes).digest("hex");
+        const sourceAudioHash = await sha256File(snapshot.audioPath);
         if (
           aligned.status === "aligned" && aligned.words &&
           aligned.audioSha256 === sourceAudioHash && aligned.audioSha256 === claimed.audioSha256 &&
@@ -215,6 +220,12 @@ const processTrailerCandidateInternal = async (
             reference: seams.captionReferenceWords,
             calibration: seams.captionCalibration ?? null,
             capacity: seams.captionCapacity ?? null,
+            alignmentProvenance: {
+              alignerVersion: aligned.alignerVersion ?? "",
+              modelId: aligned.modelId ?? "",
+              modelRevision: aligned.modelRevision ?? "",
+              modelSha256: aligned.modelSha256 ?? "",
+            },
           });
           if (quality.eligible) {
             await renderTrailerCandidateCaptions({

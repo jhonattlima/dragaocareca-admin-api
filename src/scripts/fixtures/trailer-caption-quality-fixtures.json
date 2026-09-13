@@ -1,0 +1,93 @@
+{
+  "metricVersion": "pt-br-word-alignment-metrics/v1",
+  "purpose": "Synthetic arithmetic and invariant fixtures only; never calibrate production cutoffs.",
+  "cases": [
+    {
+      "id": "accented-portuguese-punctuation-numerals",
+      "transcript": "AÇÃO, café! episódio 344.",
+      "words": [
+        { "startSeconds": 0.1, "endSeconds": 0.4, "text": "Ação" },
+        { "startSeconds": 0.5, "endSeconds": 0.8, "text": "café" },
+        { "startSeconds": 0.9, "endSeconds": 1.4, "text": "episódio" },
+        { "startSeconds": 1.5, "endSeconds": 1.8, "text": "344" }
+      ],
+      "durationSeconds": 2,
+      "reference": [
+        { "startSeconds": 0.1, "endSeconds": 0.4, "text": "ação" },
+        { "startSeconds": 0.5, "endSeconds": 0.8, "text": "café" },
+        { "startSeconds": 0.9, "endSeconds": 1.4, "text": "episódio" },
+        { "startSeconds": 1.5, "endSeconds": 1.8, "text": "344" }
+      ],
+      "expected": { "transcriptTokenCount": 4, "cueTokenCount": 4, "alignedCoverage": 1, "normalizedWordErrorRate": 0, "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": true, "cuePositiveDuration": true, "onsetMaeSeconds": 0, "onsetP95Seconds": 0, "offsetMaeSeconds": 0, "offsetP95Seconds": 0 }
+    },
+    {
+      "id": "unicode-nfc-case-fold-preserves-diacritics",
+      "transcript": "Ação CAFÉ",
+      "words": [
+        { "startSeconds": 0, "endSeconds": 0.4, "text": "AÇÃO" },
+        { "startSeconds": 0.5, "endSeconds": 0.9, "text": "café" }
+      ],
+      "durationSeconds": 1,
+      "reference": [
+        { "startSeconds": 0.05, "endSeconds": 0.45, "text": "ação" },
+        { "startSeconds": 0.55, "endSeconds": 0.95, "text": "café" }
+      ],
+      "expected": { "transcriptTokenCount": 2, "cueTokenCount": 2, "alignedCoverage": 1, "normalizedWordErrorRate": 0, "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": true, "cuePositiveDuration": true, "onsetMaeSeconds": 0.05, "onsetP95Seconds": 0.05, "offsetMaeSeconds": 0.05, "offsetP95Seconds": 0.05 }
+    },
+    {
+      "id": "missing-and-extra-token-wer",
+      "transcript": "um dois três",
+      "words": [
+        { "startSeconds": 0, "endSeconds": 0.2, "text": "um" },
+        { "startSeconds": 0.3, "endSeconds": 0.5, "text": "quatro" },
+        { "startSeconds": 0.6, "endSeconds": 0.8, "text": "três" }
+      ],
+      "durationSeconds": 1,
+      "expected": { "transcriptTokenCount": 3, "cueTokenCount": 3, "alignedCoverage": 1, "normalizedWordErrorRate": 0.3333333333333333, "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": true, "cuePositiveDuration": true }
+    },
+    {
+      "id": "unsupported-missing-cue",
+      "transcript": "um dois três",
+      "words": [
+        { "startSeconds": 0, "endSeconds": 0.2, "text": "um" },
+        { "startSeconds": 0.6, "endSeconds": 0.8, "text": "três" }
+      ],
+      "durationSeconds": 1,
+      "expected": { "transcriptTokenCount": 3, "cueTokenCount": 2, "alignedCoverage": 0.6666666666666666, "normalizedWordErrorRate": 0.3333333333333333, "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": true, "cuePositiveDuration": true }
+    },
+    {
+      "id": "non-monotonic-cues",
+      "transcript": "um dois",
+      "words": [
+        { "startSeconds": 0.5, "endSeconds": 0.8, "text": "um" },
+        { "startSeconds": 0.1, "endSeconds": 0.3, "text": "dois" }
+      ],
+      "durationSeconds": 1,
+      "expected": { "cueMonotonic": false, "cueNonOverlapping": false, "cueWithinDuration": true, "cuePositiveDuration": true }
+    },
+    {
+      "id": "zero-length-cue",
+      "transcript": "um",
+      "words": [{ "startSeconds": 0.4, "endSeconds": 0.4, "text": "um" }],
+      "durationSeconds": 1,
+      "expected": { "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": true, "cuePositiveDuration": false }
+    },
+    {
+      "id": "overlapping-cues",
+      "transcript": "um dois",
+      "words": [
+        { "startSeconds": 0.1, "endSeconds": 0.7, "text": "um" },
+        { "startSeconds": 0.5, "endSeconds": 0.9, "text": "dois" }
+      ],
+      "durationSeconds": 1,
+      "expected": { "cueMonotonic": true, "cueNonOverlapping": false, "cueWithinDuration": true, "cuePositiveDuration": true }
+    },
+    {
+      "id": "out-of-duration-cue",
+      "transcript": "um",
+      "words": [{ "startSeconds": 0.8, "endSeconds": 1.2, "text": "um" }],
+      "durationSeconds": 1,
+      "expected": { "cueMonotonic": true, "cueNonOverlapping": true, "cueWithinDuration": false, "cuePositiveDuration": true }
+    }
+  ]
+}

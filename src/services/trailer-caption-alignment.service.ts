@@ -120,6 +120,12 @@ export const evaluateTrailerCaptionQuality = (input: {
   reference?: TrailerTimedWord[];
   calibration?: TrailerCaptionCalibration | null;
   capacity?: TrailerCaptionCapacityEvidence | null;
+  alignmentProvenance?: {
+    alignerVersion: string;
+    modelId: string;
+    modelRevision: string;
+    modelSha256: string;
+  };
 }): TrailerCaptionQualityMetrics => {
   const expectedTokens = normalizePortugueseTokens(input.transcript);
   const actualTokens = input.words.flatMap((word) => normalizePortugueseTokens(word.text));
@@ -164,6 +170,8 @@ export const evaluateTrailerCaptionQuality = (input: {
     calibration.alignerVersion !== TRAILER_CAPTION_ALIGNER_VERSION || calibration.modelId !== TRAILER_CAPTION_MODEL_ID ||
     calibration.modelRevision !== TRAILER_CAPTION_MODEL_REVISION || !/^[a-f0-9]{64}$/iu.test(calibration.referenceSetSha256) ||
     !/^[a-f0-9]{64}$/iu.test(calibration.modelSha256) || calibration.sampleCount < 1 || !calibration.reviewer.trim() ||
+    input.alignmentProvenance?.alignerVersion !== calibration.alignerVersion || input.alignmentProvenance.modelId !== calibration.modelId ||
+    input.alignmentProvenance.modelRevision !== calibration.modelRevision || input.alignmentProvenance.modelSha256 !== calibration.modelSha256 ||
     !Number.isFinite(Date.parse(calibration.reviewedAt)) ||
     alignedCoverage < calibration.coverageMin || normalizedWordErrorRate > calibration.werMax ||
     onsetErrors.length !== input.words.length || offsetErrors.length !== input.words.length ||
@@ -205,16 +213,34 @@ const readLocalModelManifest = async (modelPath: string): Promise<{ modelSha256:
     if (manifest.modelId !== TRAILER_CAPTION_MODEL_ID || manifest.revision !== TRAILER_CAPTION_MODEL_REVISION) return null;
     if (typeof manifest.modelSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(manifest.modelSha256) || !Array.isArray(manifest.files) || !manifest.files.length) return null;
     const files: Array<{ path: string; sha256: string }> = [];
+    const declaredPaths = new Set<string>();
     for (const item of manifest.files) {
       if (!item || typeof item.path !== "string" || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(item.sha256)) return null;
       const relative = item.path.replace(/\\/gu, "/");
-      if (path.isAbsolute(relative) || relative.split("/").includes("..")) return null;
+      if (path.isAbsolute(relative) || relative.split("/").includes("..") || declaredPaths.has(relative)) return null;
+      declaredPaths.add(relative);
       const filePath = path.resolve(resolved, relative);
       const targetStat = await fs.lstat(filePath);
       if (!targetStat.isFile() || targetStat.isSymbolicLink() || path.relative(resolved, filePath).startsWith(`..${path.sep}`)) return null;
       files.push({ path: relative, sha256: await sha256File(filePath) });
     }
     files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    const actualPaths: string[] = [];
+    const visit = async (directory: string, prefix = ""): Promise<boolean> => {
+      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (relative === "dragaocareca-model-manifest.json") continue;
+        if (entry.isSymbolicLink()) return false;
+        if (entry.isDirectory()) {
+          if (!await visit(path.join(directory, entry.name), relative)) return false;
+        } else if (entry.isFile()) actualPaths.push(relative);
+        else return false;
+      }
+      return true;
+    };
+    if (!await visit(resolved)) return null;
+    actualPaths.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    if (actualPaths.length !== files.length || actualPaths.some((relative, index) => relative !== files[index].path)) return null;
     const computed = sha256(files.map((file) => `${file.path}:${file.sha256}`).join("\n"));
     if (computed !== manifest.modelSha256.toLowerCase()) return null;
     return { modelSha256: computed };
