@@ -507,6 +507,61 @@ const run = async (): Promise<void> => {
     const escapedGrant = await invoke(router, "post", grantPath, new Request(trailerParams(episodeId, candidateId), {}));
     assert.equal(escapedGrant.statusCode, 404, "symlink output outside the private root is rejected before grant issuance");
 
+    const decisionEpisodeId = 993041;
+    episodes.episodeRepository.create(episodeSchema.parse({
+      episodeId: decisionEpisodeId,
+      title: "Offline candidate decision fixture",
+      summary: "Exact revision response",
+      pubDate: new Date("2026-01-05T00:00:00.000Z"),
+      explicit: "no",
+      authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Fixture", links: [{ url: "https://example.test/fixture" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    const decisionCover = mediaLayout.getEpisodeMediaStagingPath(decisionEpisodeId, "cover");
+    const decisionAudio = mediaLayout.getEpisodeMediaStagingPath(decisionEpisodeId, "trailer");
+    await fs.promises.mkdir(path.dirname(decisionCover), { recursive: true });
+    await fs.promises.mkdir(path.dirname(decisionAudio), { recursive: true });
+    await fs.promises.writeFile(decisionCover, "decision-cover-fixture");
+    await fs.promises.writeFile(decisionAudio, "decision-audio-fixture");
+    const decisionCandidate = await candidateService.enqueueTrailerCandidate(decisionEpisodeId, "review-fixture@example.test");
+    if (decisionCandidate.waitingForInput) throw new Error("Decision fixture unexpectedly waited for inputs");
+    const decisionCandidateId = decisionCandidate.candidate.candidateId;
+    const decisionRow = candidates.trailerCandidateRepository.findById(decisionCandidateId)!;
+    const decisionClaim = candidates.trailerCandidateRepository.claim(decisionCandidateId, randomUUID());
+    assert.ok(decisionClaim);
+    const decisionBytes = Buffer.from("FAKE-MP4-APPROVAL-BYTES");
+    const decisionOutputRelativePath = path.posix.join(decisionRow.snapshotRelativePath.replace(/[\\/]+$/u, ""), "attempts", "1", "candidate.mp4");
+    const decisionOutputPath = path.join(privateRoot, decisionOutputRelativePath);
+    await fs.promises.mkdir(path.dirname(decisionOutputPath), { recursive: true });
+    await fs.promises.writeFile(decisionOutputPath, decisionBytes);
+    const decisionOutputSha256 = createHash("sha256").update(decisionBytes).digest("hex");
+    assert.equal(candidates.trailerCandidateRepository.markReady(decisionCandidateId, {
+      relativePath: decisionOutputRelativePath,
+      sha256: decisionOutputSha256,
+      bytes: decisionBytes.length,
+      durationSeconds: 4,
+      probeJson: JSON.stringify({ streams: [{ codec_type: "video", width: 1280, height: 1280 }] }),
+    }), true);
+    const decision = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/decision", new Request(
+      trailerParams(decisionEpisodeId, decisionCandidateId), {
+        decision: "approve",
+        expectedVersion: decisionRow.version,
+        expectedSourceFingerprint: decisionRow.sourceFingerprint,
+      },
+    ));
+    assert.equal(decision.statusCode, 200, "an exact current candidate decision is accepted by the local fake contract");
+    assert.equal(decision.jsonBody.status, "approved");
+    assert.equal(decision.jsonBody.candidateId, decisionCandidateId);
+    assert.equal(decision.jsonBody.version, decisionRow.version);
+    assert.equal(decision.jsonBody.sourceFingerprint, decisionRow.sourceFingerprint);
+    assert.match(decision.jsonBody.sourceRevision, new RegExp(`^episode:${decisionEpisodeId}:[a-f0-9]{64}$`, "u"));
+    const replacementStatus = await invoke(router, "get", "/:episodeId/trailer-replacements/:sourceRevision", new Request(
+      { episodeId: String(decisionEpisodeId), sourceRevision: decision.jsonBody.sourceRevision },
+    ));
+    assert.equal(replacementStatus.statusCode, 200, "the returned approved source revision addresses the existing replacement-status route");
+    assert.equal(replacementStatus.jsonBody.sourceRevision, decision.jsonBody.sourceRevision);
+
     assert.equal(routes.redactTrailerPreviewGrantFromUrl(`/v1/episodes/${episodeId}/trailer-candidates/${candidateId}/preview?grant=secret-token&x=1`),
       `/v1/episodes/${episodeId}/trailer-candidates/${candidateId}/preview?grant=[REDACTED]&x=1`);
     assert.equal(routes.redactTrailerPreviewGrantFromUrl("/v1/episodes/1?x=1"), "/v1/episodes/1?x=1");

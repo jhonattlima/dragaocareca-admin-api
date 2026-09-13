@@ -1,6 +1,9 @@
 import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
+import { episodePromotionRepository } from "../database/repositories/episode-promotion.repository";
 import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
 import type { PublicationEffectProjection } from "../schemas/episode-publication";
+import { PROMOTION_CONTRACT_SOURCE_REVISION } from "../schemas/episode-promotion";
+import { config } from "../config/env";
 
 export type TrailerReplacementDestination = {
   destination: "instagram_reel" | "facebook_native_video";
@@ -18,7 +21,7 @@ export type TrailerReplacementDestination = {
 export type TrailerReplacementStatus = {
   episodeId: number;
   sourceRevision: string;
-  status: "complete" | "waiting_for_successor" | "waiting_for_operator_retirement" | "waiting_for_youtube_action" | "waiting_for_youtube_public_success" | "waiting_for_youtube_retirement";
+  status: "complete" | "waiting_for_successor" | "waiting_for_operator_retirement" | "waiting_for_youtube_action" | "waiting_for_youtube_public_success" | "waiting_for_youtube_retirement" | "waiting_for_telegram";
   replacementComplete: boolean;
   destinations: Partial<Record<TrailerReplacementDestination["destination"], TrailerReplacementDestination>>;
   youtube: null | {
@@ -26,6 +29,17 @@ export type TrailerReplacementStatus = {
     predecessor: { remoteId: string; permalink: string | null } | null;
     successor: { remoteId: string | null; permalink: string | null; jobId: string } | null;
     retirementError: string | null;
+  };
+  telegram: {
+    configured: boolean;
+    status: "not_applicable" | "pending" | "in_progress" | "complete" | "replayed" | "temporary_failure" | "permanent_failure" | "unknown";
+    destinations: Partial<Record<"guild_trailer" | "advance_access", {
+    status: "not_applicable" | "pending" | "in_progress" | "complete" | "replayed" | "temporary_failure" | "permanent_failure" | "unknown";
+      messageId: string | null;
+      fileId: string | null;
+      topicId: string | null;
+      messageThreadId: string | null;
+    }>>;
   };
 };
 
@@ -46,21 +60,30 @@ const destinationStatus = (effect: PublicationEffectProjection): TrailerReplacem
   retirementConfirmedAt: effect.retirementConfirmedAt,
 });
 
-const aggregateStatus = (effects: PublicationEffectProjection[], youtube: TrailerReplacementStatus["youtube"]): TrailerReplacementStatus["status"] => {
-  const metaComplete = effects.every((effect) => effect.replacementComplete);
+const aggregateStatus = (
+  effects: PublicationEffectProjection[],
+  requiredMetaDestinations: Array<"instagram_reel" | "facebook_native_video">,
+  youtube: TrailerReplacementStatus["youtube"],
+  telegram: TrailerReplacementStatus["telegram"],
+): TrailerReplacementStatus["status"] => {
+  const metaComplete = requiredMetaDestinations.every((destination) =>
+    effects.some((effect) => effect.destination === destination && effect.replacementComplete));
   const youtubeComplete = !youtube || youtube.status === "complete" || youtube.status === "not_applicable";
-  if (metaComplete && youtubeComplete) return "complete";
+  const telegramComplete = !telegram.configured || telegram.status === "complete" || telegram.status === "replayed" || telegram.status === "not_applicable";
+  if (metaComplete && youtubeComplete && telegramComplete) return "complete";
   if (effects.some((effect) => effect.retirementStatus === "manual_retirement_required")) return "waiting_for_operator_retirement";
   if (!metaComplete) return "waiting_for_successor";
   if (youtube?.status === "waiting_for_operator_upload") return "waiting_for_youtube_action";
   if (youtube?.status === "waiting_for_public_success") return "waiting_for_youtube_public_success";
-  if (youtube) return "waiting_for_youtube_retirement";
+  if (youtube && !youtubeComplete) return "waiting_for_youtube_retirement";
+  if (!telegramComplete) return "waiting_for_telegram";
   return "complete";
 };
 
 export const getTrailerReplacementStatus = (episodeId: number, sourceRevision: string): TrailerReplacementStatus | null => {
   if (!episodePublicationRepository.hasIntent(episodeId, sourceRevision)) return null;
-  const effects = episodePublicationRepository.list(episodeId, sourceRevision)
+  const allEffects = episodePublicationRepository.list(episodeId, sourceRevision);
+  const effects = allEffects
     .filter((effect) => effect.destination === "instagram_reel" || effect.destination === "facebook_native_video");
   const youtubeReplacement = episodePublicationRepository.getYoutubeReplacement(episodeId, sourceRevision);
   const youtubeSuccessor = youtubeReplacement?.successorJobId
@@ -78,8 +101,51 @@ export const getTrailerReplacementStatus = (episodeId: number, sourceRevision: s
   } : null;
   const destinations: TrailerReplacementStatus["destinations"] = {};
   for (const effect of effects) destinations[effect.destination as TrailerReplacementDestination["destination"]] = destinationStatus(effect);
-  const status = aggregateStatus(effects, youtube);
-  return { episodeId, sourceRevision, status, replacementComplete: status === "complete", destinations, youtube };
+  const replacementSource = episodePublicationRepository.getSource(episodeId, sourceRevision);
+  const telegramConfigured = config.promotion.activeOwner === "promotion";
+  const promotionRevision = replacementSource ? `${PROMOTION_CONTRACT_SOURCE_REVISION}:${replacementSource.sha256}` : "";
+  const promotion = telegramConfigured && promotionRevision
+    ? episodePromotionRepository.findPromotionIntent(`episode:${episodeId}`, promotionRevision)
+    : null;
+  const telegramEffects = promotion?.effects ?? [];
+  const telegramDestinations: NonNullable<TrailerReplacementStatus["telegram"]>["destinations"] = {};
+  for (const effect of telegramEffects) {
+    telegramDestinations[effect.destination] = {
+      status: effect.status,
+      messageId: effect.messageId,
+      fileId: effect.fileId,
+      topicId: effect.topicId,
+      messageThreadId: effect.messageThreadId,
+    };
+  }
+  const requiredTelegramDestinations = ["guild_trailer", "advance_access"] as const;
+  const completeStatuses = new Set(["complete", "replayed"]);
+  const telegramStatus: TrailerReplacementStatus["telegram"]["status"] = !telegramConfigured
+    ? "not_applicable"
+    : requiredTelegramDestinations.some((destination) => !telegramDestinations[destination])
+      ? "pending"
+      : requiredTelegramDestinations.every((destination) => completeStatuses.has(telegramDestinations[destination]!.status))
+        ? "complete"
+        : telegramEffects.some((effect) => effect.status === "permanent_failure")
+          ? "permanent_failure"
+          : telegramEffects.some((effect) => effect.status === "temporary_failure")
+            ? "temporary_failure"
+            : telegramEffects.some((effect) => effect.status === "unknown")
+              ? "unknown"
+              : telegramEffects.some((effect) => effect.status === "in_progress")
+                ? "in_progress"
+                : "pending";
+  const telegram: TrailerReplacementStatus["telegram"] = {
+    configured: telegramConfigured,
+    status: telegramStatus,
+    destinations: telegramDestinations,
+  };
+  const requiredMetaDestinations = [
+    ...(config.meta.instagramEnabled ? ["instagram_reel" as const] : []),
+    ...(config.meta.facebookReelEnabled ? ["facebook_native_video" as const] : []),
+  ];
+  const status = aggregateStatus(effects, requiredMetaDestinations, youtube, telegram);
+  return { episodeId, sourceRevision, status, replacementComplete: status === "complete", destinations, youtube, telegram };
 };
 
 export const confirmManualTrailerRetirement = (input: {

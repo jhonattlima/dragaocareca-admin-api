@@ -75,6 +75,13 @@ export const episodePublicationRepository = {
   hasIntent(episodeId: number, sourceRevision: string): boolean {
     return Boolean(getDb().prepare("SELECT 1 AS found FROM episode_publication_intents WHERE episode_id = ? AND source_revision = ?").get(episodeId, sourceRevision));
   },
+  getSource(episodeId: number, sourceRevision: string): PublicationSource | null {
+    const row = getDb().prepare("SELECT source_json FROM episode_publication_intents WHERE episode_id = ? AND source_revision = ?")
+      .get(episodeId, sourceRevision) as { source_json: string } | undefined;
+    if (!row) return null;
+    try { return publicationSourceSchema.parse(JSON.parse(row.source_json)); }
+    catch { return null; }
+  },
   getYoutubeReplacement(episodeId: number, sourceRevision: string): YoutubeReplacementProjection | null {
     const row = getDb().prepare(`SELECT source_revision, youtube_retirement_status, youtube_predecessor_remote_id, youtube_predecessor_permalink,
       youtube_successor_job_id, youtube_retirement_error, youtube_retirement_updated_at

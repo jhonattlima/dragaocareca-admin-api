@@ -29,7 +29,8 @@ export type TrailerCandidateDecisionInput = {
   faultAt?: "after_journal" | "after_backup" | "after_install" | "during_commit" | "after_commit";
 };
 export type TrailerCandidateDecisionResult =
-  | { status: "approved" | "rejected" | "replayed"; candidateId: string; episodeId: number; version: number; sourceFingerprint: string }
+  | { status: "approved" | "replayed"; candidateId: string; episodeId: number; version: number; sourceFingerprint: string; sourceRevision: string }
+  | { status: "rejected"; candidateId: string; episodeId: number; version: number; sourceFingerprint: string }
   | { status: "conflict"; code: "unauthorized" | "not_found" | "not_ready" | "stale" | "fingerprint_mismatch" | "already_decided" | "integrity_mismatch" | "finalization_blocked" };
 
 const hashFile = async (filePath: string): Promise<{ sha256: string; bytes: number } | null> => {
@@ -266,7 +267,13 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
       try { await reconcileTrailerPromotionJournal(journal.journalId); } catch { return { status: "conflict", code: "finalization_blocked" }; }
       const finalized = trailerPromotionJournalRepository.findById(journal.journalId);
       if (finalized?.phase !== "committed") return { status: "conflict", code: "finalization_blocked" };
-      return { status: "replayed", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint };
+      const sourceRevision = (await import("../schemas/episode-publication.js")).publicationSourceRevision(candidate.episodeId, {
+        mediaReference: getEpisodeMediaRelativePath(candidate.episodeId, "trailerVideo"),
+        sha256: journal.newSha256,
+        byteCount: candidate.outputBytes as number,
+        mimeType: "video/mp4",
+      });
+      return { status: "replayed", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint, sourceRevision };
     }
     return { status: "conflict", code: "already_decided" };
   }
@@ -305,7 +312,7 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
       mimeType: "video/mp4",
     });
     await dispatchEpisodeReplacementPublication(candidate.episodeId, sourceRevision, input.metaProvider);
-    return { status: "approved", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint };
+    return { status: "approved", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint, sourceRevision };
   } catch (error) {
     const journal = trailerPromotionJournalRepository.findByCandidate(candidate.candidateId);
     if (!journal && error instanceof Error && error.message === "candidate_changed") return { status: "conflict", code: "stale" };

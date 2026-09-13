@@ -70,9 +70,11 @@ const run = async (): Promise<void> => {
       import("../services/facebook-native-video-publication.service.js"),
       import("../services/episode-media-layout.service.js"),
     ]);
-    const [{ getDb }, { youtubeTrailerJobRepository }, { fingerprintYoutubeTrailerSource, createYoutubeTrailerJob }, { publishYoutubeTrailer }, { getTrailerReplacementStatus }] = await Promise.all([
+    const [{ getDb }, { youtubeTrailerJobRepository }, { episodePromotionRepository }, { buildEpisodePromotionRequest, getPromotionRequestFingerprint }, { fingerprintYoutubeTrailerSource, createYoutubeTrailerJob }, { publishYoutubeTrailer }, { getTrailerReplacementStatus }] = await Promise.all([
       import("../database/sqlite.js"),
       import("../database/repositories/youtube-trailer-job.repository.js"),
+      import("../database/repositories/episode-promotion.repository.js"),
+      import("../services/episode-promotion.service.js"),
       import("../services/youtube-trailer-job.service.js"),
       import("../services/youtube-trailer-publication.service.js"),
       import("../services/publication-retirement.service.js"),
@@ -80,6 +82,8 @@ const run = async (): Promise<void> => {
     await connectDb();
     config.meta.instagramEnabled = true;
     config.meta.facebookReelEnabled = true;
+    config.promotion.enabled = true;
+    config.promotion.activeOwner = "promotion";
     config.trailerCandidateRenderEnabled = true;
     config.auth.bypassInDev = true;
     episodeRepository.create(episodeSchema.parse({
@@ -161,8 +165,73 @@ const run = async (): Promise<void> => {
     const changedConfirm = await confirm("instagram_reel", "another-old-id");
     assert.equal(changedConfirm.statusCode, 409, "confirmed predecessor identity cannot be changed");
     await confirm("facebook_native_video", "facebook_native_video-old-remote");
+    const metaOnlyComplete = getTrailerReplacementStatus(981903, second.sourceRevision);
+    assert.equal(metaOnlyComplete?.replacementComplete, false, "configured Telegram replacement cannot be omitted from global completion");
+    assert.equal(metaOnlyComplete?.status, "waiting_for_telegram");
+    assert.equal(metaOnlyComplete?.telegram.configured, true);
+    assert.equal(metaOnlyComplete?.telegram.status, "pending", "missing Telegram effect evidence remains explicitly pending");
+
+    const telegramRequest = buildEpisodePromotionRequest({
+      episodeId: 981903,
+      title: "Destination replacement fixture",
+      episodeNumber: 981903,
+      publicDownloadUrl: "https://example.invalid/episodes/981903/audio.mp3",
+      imageUrl: "https://example.invalid/episodes/981903/cover.jpeg",
+      trailerMediaReference: "episodes/981903/trailer.mp4",
+      trailerSha256: source("b").sha256,
+      trailerByteCount: source("b").byteCount,
+    });
+    const telegramIntent = episodePromotionRepository.upsertPromotionIntent({
+      request: telegramRequest,
+      requestFingerprint: getPromotionRequestFingerprint(telegramRequest),
+    });
+    const telegramPending = getTrailerReplacementStatus(981903, second.sourceRevision);
+    assert.equal(telegramPending?.replacementComplete, false, "Telegram pending destinations prevent aggregate completion");
+    assert.equal(telegramPending?.telegram.status, "pending");
+    for (const destination of telegramRequest.destinations.slice(0, 1)) {
+      episodePromotionRepository.recordPromotionAcknowledgement({
+        notificationId: telegramIntent.notification.notificationId,
+        destination,
+        sourceRevision: telegramIntent.notification.sourceRevision,
+        acknowledgement: {
+          destination,
+          status: "complete",
+          message_id: destination === "guild_trailer" ? "guild-message-stable" : "access-message-stable",
+          file_id: "telegram-file-stable",
+          topic_id: destination === "advance_access" ? "access-topic-stable" : null,
+          message_thread_id: destination === "advance_access" ? "access-thread-stable" : null,
+          acknowledged_at: new Date().toISOString(),
+        },
+      });
+    }
+    const partiallyAcknowledged = getTrailerReplacementStatus(981903, second.sourceRevision);
+    assert.equal(partiallyAcknowledged?.replacementComplete, false, "one Telegram destination missing is still incomplete");
+    assert.equal(partiallyAcknowledged?.telegram.status, "pending");
+    for (const destination of telegramRequest.destinations.slice(1)) {
+      episodePromotionRepository.recordPromotionAcknowledgement({
+        notificationId: telegramIntent.notification.notificationId,
+        destination,
+        sourceRevision: telegramIntent.notification.sourceRevision,
+        acknowledgement: {
+          destination,
+          status: "complete",
+          message_id: "access-message-stable",
+          file_id: "telegram-file-stable",
+          topic_id: "access-topic-stable",
+          message_thread_id: "access-thread-stable",
+          acknowledged_at: new Date().toISOString(),
+        },
+      });
+    }
+    const telegramComplete = getTrailerReplacementStatus(981903, second.sourceRevision);
+    assert.equal(telegramComplete?.telegram.status, "complete");
+    assert.equal(telegramComplete?.telegram.destinations.guild_trailer?.messageId, "guild-message-stable");
+    assert.equal(telegramComplete?.telegram.destinations.advance_access?.topicId, "access-topic-stable");
+    assert.equal(telegramComplete?.telegram.destinations.advance_access?.messageThreadId, "access-thread-stable");
+
     const completedStatus = await invoke(episodesRouter as unknown as Router, "get", "/:episodeId/trailer-replacements/:sourceRevision", new Request({ episodeId: "981903", sourceRevision: second.sourceRevision }, {}));
-    assert.equal(completedStatus.jsonBody.replacementComplete, true, "aggregate completes only after every predecessor is confirmed");
+    assert.equal(completedStatus.jsonBody.replacementComplete, true, "aggregate completes only after Meta retirement and both Telegram replacements are confirmed");
+    assert.equal(completedStatus.jsonBody.telegram.destinations.guild_trailer.messageId, "guild-message-stable");
     config.trailerCandidateRenderEnabled = false;
     const gated = await invoke(episodesRouter as unknown as Router, "get", "/:episodeId/trailer-replacements/:sourceRevision", new Request({ episodeId: "981903", sourceRevision: second.sourceRevision }, {}));
     assert.equal(gated.statusCode, 503, "replacement status remains behind the default-off candidate gate");
@@ -170,6 +239,7 @@ const run = async (): Promise<void> => {
     config.trailerCandidateRenderEnabled = true;
     config.meta.instagramEnabled = false;
     config.meta.facebookReelEnabled = false;
+    config.promotion.activeOwner = "none";
     episodeRepository.create(episodeSchema.parse({
       episodeId: 981904,
       title: "YouTube replacement fixture",
