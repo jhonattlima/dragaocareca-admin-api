@@ -78,7 +78,9 @@ const episodeIds = [991731, 991732] as const;
 const candidateIds = ["b4bb3ee0-0f72-4dc0-85f8-839aef1c1a01", "b4bb3ee0-0f72-4dc0-85f8-839aef1c1a02"] as const;
 const operatorEmail = "synthetic-operator@example.test";
 const sourceBytes = ["fixture-cover-approval", "fixture-audio-approval", "fixture-cover-review", "fixture-audio-review"] as const;
-const outputBytes = [Buffer.from("FAKE-MP4-APPROVAL-CANDIDATE-V1"), Buffer.from("FAKE-MP4-UNAPPROVED-REVIEW-V1")];
+const reviewVideoFixtureRelativePath = "src/scripts/fixtures/unapproved-review-preview.mp4";
+const reviewVideoFixtureBytes = fs.readFileSync(path.resolve(process.cwd(), reviewVideoFixtureRelativePath));
+const outputBytes = [Buffer.from("FAKE-MP4-APPROVAL-CANDIDATE-V1"), reviewVideoFixtureBytes];
 const sourceFingerprints = [
   hash(JSON.stringify({ cover: hash(sourceBytes[0]), audio: hash(sourceBytes[1]), transcript: "missing", profileId: "square-reels-karaoke-v2", profileRevision: 2 })),
   hash(JSON.stringify({ cover: hash(sourceBytes[2]), audio: hash(sourceBytes[3]), transcript: "missing", profileId: "square-reels-karaoke-v2", profileRevision: 2 })),
@@ -107,6 +109,11 @@ const cleanupManifestFixture = async (manifestPath: string, expectedMode: "hold-
   assert.deepEqual(manifest.episodes.map((entry: any) => entry.episodeId), [...episodeIds]);
   assert.deepEqual(manifest.episodes.map((entry: any) => entry.candidate.candidateId), [...candidateIds]);
   assert.equal(manifest.syntheticOperator.email, operatorEmail);
+  assert.deepEqual(manifest.sourceFixtures, [{
+    path: reviewVideoFixtureRelativePath,
+    sha256: hash(reviewVideoFixtureBytes),
+    bytes: reviewVideoFixtureBytes.byteLength,
+  }]);
   const strict = true;
   const dbPath = path.join(realRoot, manifest.database);
   assert.equal(dbPath, path.join(realRoot, "release.sqlite"));
@@ -205,6 +212,7 @@ const main = async (): Promise<void> => {
     createdAt: fixtureTime,
     fixtureRoot: rootRealPath,
     syntheticOperator: { email: operatorEmail, auth: "normal signed local JWT; secret/token never persisted" },
+    sourceFixtures: [{ path: reviewVideoFixtureRelativePath, sha256: hash(reviewVideoFixtureBytes), bytes: reviewVideoFixtureBytes.byteLength }],
     database: "release.sqlite",
     mediaRoot: "media/",
     privateRoot: "private/trailer-candidates/",
