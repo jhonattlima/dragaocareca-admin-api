@@ -111,6 +111,7 @@ const trailerPreviewGrantBodySchema = z.object({}).strict();
 const trailerCandidateGenerationSchema = z.object({
   transcriptText: z.string().max(50_000),
   expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  includeTimedCaptions: z.boolean().optional(),
 }).strict();
 const trailerCandidateRetrySchema = z.object({
   expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -1261,6 +1262,7 @@ episodesRouter.post("/:episodeId/trailer-candidates", noStoreTrailerCandidateRev
       ownerEmail,
       body.data.expectedSourceFingerprint,
       body.data.transcriptText,
+      body.data.includeTimedCaptions === false ? "disabled" : "automatic",
     );
     const status = await getTrailerCandidateReviewStatus(episodeId, created.candidateId);
     if (!status) {
