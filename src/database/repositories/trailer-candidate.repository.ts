@@ -168,6 +168,12 @@ export const trailerCandidateRepository = {
 
   findById(candidateId: string): TrailerCandidateRow | null { return byId(candidateId); },
 
+  findCurrentByEpisode(episodeId: number): TrailerCandidateRow | null {
+    return mapCandidate(getDb().prepare(`SELECT * FROM trailer_candidate_versions
+      WHERE episode_id = ? AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
+      ORDER BY version DESC LIMIT 1`).get(episodeId) as CandidateSqlRow | undefined);
+  },
+
   findCurrentByFingerprint(episodeId: number, fingerprint: string): TrailerCandidateRow | null {
     return mapCandidate(getDb().prepare(`SELECT * FROM trailer_candidate_versions
       WHERE episode_id = ? AND source_fingerprint = ?

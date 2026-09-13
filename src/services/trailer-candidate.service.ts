@@ -23,6 +23,26 @@ export type TrailerCandidateStatusDto = {
   updatedAt: string;
 };
 
+export type TrailerCandidateReviewStatusDto = {
+  candidateId: string;
+  episodeId: number;
+  version: number;
+  status: TrailerCandidateRow["status"];
+  progress: number;
+  errorCategory: string | null;
+  errorMessage: string | null;
+  durationSeconds: number | null;
+  resolution: string | null;
+  profileId: string;
+  profileRevision: number;
+  sourceFingerprint: string;
+  isCurrent: boolean;
+  outputValid: boolean;
+  createdAt: string;
+  updatedAt: string;
+  readyAt: string | null;
+};
+
 export type TrailerCandidateEnqueueResult = {
   candidate: TrailerCandidateStatusDto;
   reused: boolean;
@@ -45,6 +65,30 @@ const toStatusDto = (row: TrailerCandidateRow): TrailerCandidateStatusDto => ({
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
+
+const safeCandidateErrorMessage = (category: string | null): string | null => {
+  if (!category) return null;
+  const messages: Record<string, string> = {
+    capacity: "Trailer generation is waiting for available processing capacity.",
+    capacity_unavailable: "Trailer generation is waiting for available processing capacity.",
+    invalid_snapshot: "The private source snapshot could not be validated. Generate the trailer again.",
+    source_changed: "The cover, trailer audio, or transcript changed. Generate a new trailer to review the latest inputs.",
+    stale_source: "The source files changed while this trailer was being generated. Generate it again before review.",
+    timeout: "Trailer generation took too long. You can try generating it again.",
+    render_failed: "Trailer generation failed. Check the source files and try again.",
+    probe_failed: "The generated trailer could not be validated. Try generating it again.",
+    output_invalid: "The generated trailer is no longer available for review. Generate it again.",
+    snapshot_invalid: "The private source snapshot could not be validated. Generate the trailer again.",
+    interrupted: "Trailer generation was interrupted. Try generating it again.",
+  };
+  return messages[category] ?? "Trailer generation could not be completed. Try again or upload an MP4 manually.";
+};
+
+const safeCandidateErrorCategory = (category: string | null): string | null => {
+  if (!category) return null;
+  const allowed = new Set(["capacity", "capacity_unavailable", "source_changed", "stale_source", "timeout", "render_failed", "probe_failed", "output_invalid", "snapshot_invalid", "invalid_snapshot", "interrupted"]);
+  return allowed.has(category) ? category : "generation_failed";
+};
 
 const isWithin = (root: string, target: string): boolean => {
   const relative = path.relative(root, target);
@@ -76,6 +120,80 @@ const hashFile = async (filePath: string): Promise<{ sha256: string; bytes: numb
   }
   if (bytes <= 0) throw new Error("Trailer candidate source is empty");
   return { sha256: hash.digest("hex"), bytes };
+};
+
+const currentEpisodeFingerprint = async (episodeId: number): Promise<string | null> => {
+  const resolved = await resolveSources(episodeId);
+  if (!resolved.cover || !resolved.audio) return null;
+  const sources: Source[] = [];
+  for (const [kind, filePath] of [["cover", resolved.cover], ["audio", resolved.audio], ["transcript", resolved.transcript]] as const) {
+    if (!filePath) continue;
+    const evidence = await hashFile(filePath);
+    sources.push({ kind, path: filePath, ...evidence });
+  }
+  return fingerprint(sources);
+};
+
+const isValidReadyOutput = async (candidate: TrailerCandidateRow): Promise<boolean> => {
+  if (candidate.status !== "ready" || !candidate.outputRelativePath || !candidate.outputSha256 || !candidate.outputBytes || candidate.outputBytes <= 0) return false;
+  try {
+    const outputPath = await trailerCandidateStoragePath(candidate.outputRelativePath);
+    const evidence = await hashFile(outputPath);
+    return evidence.sha256 === candidate.outputSha256 && evidence.bytes === candidate.outputBytes;
+  } catch {
+    return false;
+  }
+};
+
+const parseResolution = (probeJson: string | null): string | null => {
+  if (!probeJson) return null;
+  try {
+    const probe = JSON.parse(probeJson) as { streams?: Array<{ codec_type?: unknown; width?: unknown; height?: unknown }> };
+    const video = probe.streams?.find((stream) => stream.codec_type === "video");
+    if (!Number.isSafeInteger(video?.width) || !Number.isSafeInteger(video?.height)
+      || (video?.width as number) <= 0 || (video?.height as number) <= 0) return null;
+    return `${video?.width}×${video?.height}`;
+  } catch {
+    return null;
+  }
+};
+
+const toReviewStatusDto = async (candidate: TrailerCandidateRow, currentFingerprint: string | null): Promise<TrailerCandidateReviewStatusDto> => {
+  const isCurrent = currentFingerprint !== null && candidate.sourceFingerprint === currentFingerprint
+    && ["pending", "processing", "waiting_capacity", "retryable", "ready"].includes(candidate.status);
+  const outputValid = isCurrent && await isValidReadyOutput(candidate);
+  return {
+    candidateId: candidate.candidateId,
+    episodeId: candidate.episodeId,
+    version: candidate.version,
+    status: candidate.status,
+    progress: candidate.progress,
+    errorCategory: safeCandidateErrorCategory(candidate.errorCategory),
+    errorMessage: safeCandidateErrorMessage(safeCandidateErrorCategory(candidate.errorCategory)),
+    durationSeconds: candidate.durationSeconds,
+    resolution: parseResolution(candidate.probeJson),
+    profileId: candidate.profileId,
+    profileRevision: candidate.profileRevision,
+    sourceFingerprint: candidate.sourceFingerprint,
+    isCurrent,
+    outputValid,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt,
+    readyAt: candidate.readyAt,
+  };
+};
+
+export const getCurrentTrailerCandidateReviewStatus = async (episodeId: number): Promise<TrailerCandidateReviewStatusDto | null> => {
+  const currentFingerprint = await currentEpisodeFingerprint(episodeId);
+  if (!currentFingerprint) return null;
+  const candidate = trailerCandidateRepository.findCurrentByFingerprint(episodeId, currentFingerprint);
+  return candidate ? toReviewStatusDto(candidate, currentFingerprint) : null;
+};
+
+export const getTrailerCandidateReviewStatus = async (episodeId: number, candidateId: string): Promise<TrailerCandidateReviewStatusDto | null> => {
+  const candidate = trailerCandidateRepository.findById(candidateId);
+  if (!candidate || candidate.episodeId !== episodeId) return null;
+  return toReviewStatusDto(candidate, await currentEpisodeFingerprint(episodeId));
 };
 
 const resolveSources = async (episodeId: number): Promise<{ cover: string | null; audio: string | null; transcript: string | null; draftId: string | null }> => {
@@ -209,7 +327,11 @@ export const trailerCandidateStoragePath = async (relativePath: string): Promise
   }
   const target = path.resolve(candidateRoot, relativePath);
   if (!isWithin(candidateRoot, target) || target === candidateRoot) throw new Error("Invalid private candidate relative path");
-  return target;
+  const stat = await fs.promises.lstat(target);
+  if (stat.isSymbolicLink()) throw new Error("Invalid private candidate file");
+  const realTarget = await fs.promises.realpath(target);
+  if (!isWithin(candidateRoot, realTarget) || realTarget === candidateRoot) throw new Error("Invalid private candidate relative path");
+  return realTarget;
 };
 
 export type TrailerCandidateSnapshotPaths = { coverPath: string; audioPath: string; transcriptPath: string | null; sourceBytes: number };

@@ -41,7 +41,7 @@ import {
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
-import { enqueueTrailerCandidate } from "../services/trailer-candidate.service";
+import { enqueueTrailerCandidate, getCurrentTrailerCandidateReviewStatus, getTrailerCandidateReviewStatus } from "../services/trailer-candidate.service";
 import { decideTrailerCandidate } from "../services/trailer-candidate-approval.service";
 import { confirmManualTrailerRetirement, getTrailerReplacementStatus } from "../services/publication-retirement.service";
 import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
@@ -93,6 +93,12 @@ const noStoreHashtagAuthoring: RequestHandler = (_req, res, next) => {
 
 const noStoreTrailerReplacement: RequestHandler = (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
+  next();
+};
+
+const noStoreTrailerCandidateReview: RequestHandler = (_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
   next();
 };
 
@@ -1166,6 +1172,51 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/:jobId/publish", noStoreYo
 
     const publication = await publishYoutubeTrailer(episodeId, parsedJobId.data, body.data);
     res.json(publication);
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/trailer-candidates/current", noStoreTrailerCandidateReview, requireAuth, async (req, res, next) => {
+  try {
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate review is disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0) {
+      res.status(400).json({ code: "invalid_episode_id", message: "Episode ID is invalid." });
+      return;
+    }
+    const candidate = await getCurrentTrailerCandidateReviewStatus(episodeId);
+    if (!candidate) {
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "No current trailer candidate is available." });
+      return;
+    }
+    res.json(candidate);
+  } catch (error) {
+    next(error);
+  }
+});
+
+episodesRouter.get("/:episodeId/trailer-candidates/:candidateId", noStoreTrailerCandidateReview, requireAuth, async (req, res, next) => {
+  try {
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate review is disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    const candidateId = z.string().uuid().safeParse(req.params.candidateId);
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !candidateId.success) {
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer candidate was not found." });
+      return;
+    }
+    const candidate = await getTrailerCandidateReviewStatus(episodeId, candidateId.data);
+    if (!candidate) {
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer candidate was not found." });
+      return;
+    }
+    res.json(candidate);
   } catch (error) {
     next(error);
   }
