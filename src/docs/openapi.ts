@@ -79,6 +79,7 @@ export const swaggerSpec = swaggerJsdoc({
           properties: {
             contract_version: { type: "string", enum: [PROMOTION_CONTRACT_VERSION] },
             source_revision: { type: "string", pattern: `^${PROMOTION_CONTRACT_SOURCE_REVISION}:[a-f0-9]{64}$` },
+            source_revision_ordinal: { type: "integer", minimum: 1, description: "Optional for legacy callers; API-issued outbox requests include the durable monotonic generation for this trailer source revision." },
             notification_id: { type: "string", pattern: "^episode:[1-9][0-9]*$" },
             episode_id: { type: "integer", minimum: 1 },
             episode_number: { type: "integer", minimum: 1 },

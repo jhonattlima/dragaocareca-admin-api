@@ -40,6 +40,9 @@ export type PromotionError = z.infer<typeof promotionErrorSchema>;
 export const promotionRequestSchema = z.object({
   contract_version: z.literal(PROMOTION_CONTRACT_VERSION),
   source_revision: z.string().regex(/^phase-05-promotion-contract-1:[a-f0-9]{64}$/),
+  // Optional on the wire so already-deployed/legacy clients remain parseable.
+  // API-created outbox requests always include this durable episode generation.
+  source_revision_ordinal: z.number().int().positive().optional(),
   notification_id: z.string().regex(/^episode:[1-9][0-9]*$/),
   episode_id: z.number().int().positive(),
   episode_number: z.number().int().positive(),

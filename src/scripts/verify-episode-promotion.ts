@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { EpisodePromotionInput } from "../services/episode-promotion.service";
 import type { PromotionEffectRow } from "../database/repositories/episode-promotion.repository";
 import type { PromotionRequest } from "../schemas/episode-promotion";
@@ -456,10 +457,23 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
 
     if (scenario === "contract-outbox-tracer") {
       assert.ok(first.effects.every((effect) => effect.status === "complete"));
+      assert.equal(first.request.source_revision_ordinal, 1);
       const replay = await service.createOrReusePromotionIntent(requestInput, transport);
       assert.equal(replay.effects.filter((effect) => effect.status === "complete").length, 2);
+      assert.equal(replay.request.source_revision_ordinal, first.request.source_revision_ordinal, "retry must reuse the persisted source ordinal");
       assert.equal(transport.requests.length, 1, "a completed intent must not be sent again");
-      console.log("episode promotion contract/outbox tracer passed with fake transport only");
+      const changed = await service.createOrReusePromotionIntent({ ...requestInput, trailerSha256: "b".repeat(64) }, transport);
+      assert.ok((changed.request.source_revision_ordinal ?? 0) > (first.request.source_revision_ordinal ?? 0));
+      const changedReplay = await service.createOrReusePromotionIntent({ ...requestInput, trailerSha256: "b".repeat(64) }, transport);
+      assert.equal(changedReplay.request.source_revision_ordinal, changed.request.source_revision_ordinal, "changed-source retry must retain its ordinal");
+      const reopened = new DatabaseSync(fixture.database);
+      try {
+        const rows = reopened.prepare(`SELECT source_revision, ordinal FROM promotion_source_revision_ordinals WHERE notification_id = ? ORDER BY ordinal`).all(request.notification_id) as Array<{ source_revision: string; ordinal: number }>;
+        assert.deepEqual(rows.map((row) => row.ordinal), [1, 2], "source ordinals must survive reopening the durable SQLite database");
+      } finally {
+        reopened.close();
+      }
+      console.log("episode promotion contract/outbox tracer passed with stable persisted ordinals across retries and database reopen");
       return;
     }
 

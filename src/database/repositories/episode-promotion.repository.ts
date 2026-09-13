@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getDb, nowIso } from "../sqlite";
 import {
   promotionAcknowledgementSchema,
@@ -268,10 +268,27 @@ const claimPromotionEffects = (
 
 export const episodePromotionRepository = {
   upsertPromotionIntent(input: UpsertPromotionIntentInput): PromotionIntent {
-    const request = promotionRequestSchema.parse(input.request);
+    const requested = promotionRequestSchema.parse(input.request);
     const now = nowIso();
+    const assignOrdinal = (): PromotionRequest => {
+      const existingOrdinal = getDb().prepare(`
+        SELECT ordinal FROM promotion_source_revision_ordinals
+        WHERE notification_id = ? AND source_revision = ?
+      `).get(requested.notification_id, requested.source_revision) as { ordinal: number } | undefined;
+      const ordinal = existingOrdinal?.ordinal ?? ((getDb().prepare(`
+        SELECT COALESCE(MAX(ordinal), 0) + 1 AS ordinal
+        FROM promotion_source_revision_ordinals WHERE notification_id = ?
+      `).get(requested.notification_id) as { ordinal: number }).ordinal);
+      if (!existingOrdinal) {
+        getDb().prepare(`INSERT INTO promotion_source_revision_ordinals (notification_id, source_revision, ordinal, created_at) VALUES (?, ?, ?, ?)`)
+          .run(requested.notification_id, requested.source_revision, ordinal, now);
+      }
+      return promotionRequestSchema.parse({ ...requested, source_revision_ordinal: ordinal });
+    };
+    const request = input.withinTransaction ? assignOrdinal() : withImmediateTransaction(assignOrdinal);
+    const requestFingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex");
     const existing = selectNotification(request.notification_id);
-    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== input.requestFingerprint && !input.allowPayloadReplacement) {
+    if (existing && existing.sourceRevision === request.source_revision && existing.requestFingerprint !== requestFingerprint && !input.allowPayloadReplacement) {
       throw new Error(`Conflicting promotion payload fingerprint for ${request.notification_id}.`);
     }
 
@@ -296,7 +313,7 @@ export const episodePromotionRepository = {
         request.contract_version,
         request.source_revision,
         JSON.stringify(request),
-        input.requestFingerprint,
+        requestFingerprint,
         request.trailer.sha256,
         request.trailer.byte_count,
         now,
@@ -311,10 +328,10 @@ export const episodePromotionRepository = {
             status, attempt_count, revision, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0, ?, ?)
           ON CONFLICT(notification_id, destination, source_revision) DO NOTHING
-        `).run(effectKey, request.notification_id, request.episode_id, destination, request.source_revision, input.requestFingerprint, now, now);
+        `).run(effectKey, request.notification_id, request.episode_id, destination, request.source_revision, requestFingerprint, now, now);
       }
       if (input.allowPayloadReplacement) {
-        getDb().prepare("UPDATE promotion_effects SET request_fingerprint = ?, updated_at = ? WHERE notification_id = ? AND source_revision = ?").run(input.requestFingerprint, now, request.notification_id, request.source_revision);
+        getDb().prepare("UPDATE promotion_effects SET request_fingerprint = ?, updated_at = ? WHERE notification_id = ? AND source_revision = ?").run(requestFingerprint, now, request.notification_id, request.source_revision);
       }
     };
     if (input.withinTransaction) {

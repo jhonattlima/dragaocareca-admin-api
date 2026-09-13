@@ -167,6 +167,15 @@ CREATE TABLE IF NOT EXISTS promotion_notifications (
   UNIQUE (notification_id, source_revision)
 );
 
+CREATE TABLE IF NOT EXISTS promotion_source_revision_ordinals (
+  notification_id TEXT NOT NULL,
+  source_revision TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (notification_id, source_revision),
+  UNIQUE (notification_id, ordinal)
+);
+
 CREATE TABLE IF NOT EXISTS promotion_effects (
   effect_key TEXT PRIMARY KEY,
   notification_id TEXT NOT NULL REFERENCES promotion_notifications(notification_id) ON DELETE CASCADE,
@@ -697,6 +706,14 @@ const ensureEpisodePromotionTables = (database: DatabaseSync): void => {
       error_description TEXT,
       created_at TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS promotion_source_revision_ordinals (
+      notification_id TEXT NOT NULL,
+      source_revision TEXT NOT NULL,
+      ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (notification_id, source_revision),
+      UNIQUE (notification_id, ordinal)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_promotion_notifications_source
       ON promotion_notifications(notification_id, source_revision);

@@ -209,9 +209,10 @@ export const dispatchPromotionIntent = async (notificationId: string, transport:
 export const createOrReusePromotionIntent = async (input: EpisodePromotionInput, transport?: PromotionTransport): Promise<PromotionIntentResult> => {
   const request = buildEpisodePromotionRequest(input);
   const intent = episodePromotionRepository.upsertPromotionIntent({ request, requestFingerprint: fingerprintPromotionRequest(request) });
-  if (!transport) return { ...intent, request };
+  const persistedRequest = promotionRequestSchema.parse(JSON.parse(intent.notification.requestJson));
+  if (!transport) return { ...intent, request: persistedRequest };
   const acknowledgement = await dispatchPromotionIntent(request.notification_id, transport);
-  return { ...episodePromotionRepository.findPromotionIntent(request.notification_id)!, request, acknowledgement: acknowledgement ?? undefined };
+  return { ...episodePromotionRepository.findPromotionIntent(request.notification_id)!, request: persistedRequest, acknowledgement: acknowledgement ?? undefined };
 };
 
 export const getPromotionRequestFingerprint = (request: PromotionRequest): string =>
