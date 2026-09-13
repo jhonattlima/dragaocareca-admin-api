@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { DatabaseSync } from "node:sqlite";
 
 type RouteHandler = (req: any, res: MemoryResponse, next: (error?: unknown) => void) => void | Promise<void>;
 type Router = { stack?: Array<{ route?: { path?: string; methods?: Record<string, boolean>; stack?: Array<{ handle: RouteHandler }> } }> };
@@ -75,10 +76,46 @@ const trailerParams = (episodeId: number, candidateId: string): Record<string, s
 const previewPath = "/:episodeId/trailer-candidates/:candidateId/preview";
 const grantPath = "/:episodeId/trailer-candidates/:candidateId/preview-grant";
 
+const verifyCandidateTranscriptMigration = async (): Promise<void> => {
+  const { ensureTrailerCandidateTranscriptColumns } = await import("../database/sqlite.js");
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(`CREATE TABLE trailer_candidate_versions (
+      candidate_id TEXT PRIMARY KEY, episode_id INTEGER NOT NULL, draft_id TEXT, version INTEGER NOT NULL,
+      source_fingerprint TEXT NOT NULL, cover_sha256 TEXT NOT NULL, audio_sha256 TEXT NOT NULL, transcript_sha256 TEXT,
+      profile_id TEXT NOT NULL, profile_revision INTEGER NOT NULL, snapshot_relative_path TEXT NOT NULL,
+      output_relative_path TEXT, output_sha256 TEXT, output_bytes INTEGER, duration_seconds REAL, probe_json TEXT,
+      status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, error_category TEXT, error_message TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      ready_at TEXT, stale_at TEXT, UNIQUE (episode_id, version)
+    );
+    CREATE UNIQUE INDEX idx_trailer_candidate_episode_fingerprint_current
+      ON trailer_candidate_versions(episode_id, source_fingerprint)
+      WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready');
+    INSERT INTO trailer_candidate_versions (
+      candidate_id, episode_id, version, source_fingerprint, cover_sha256, audio_sha256, profile_id,
+      profile_revision, snapshot_relative_path, output_relative_path, output_sha256, output_bytes,
+      duration_seconds, status, progress, created_at, updated_at
+    ) VALUES ('legacy-candidate', 42, 1, 'fingerprint', 'cover-hash', 'audio-hash', 'legacy-profile',
+      1, 'legacy-candidate/', 'legacy-candidate/out.mp4', 'output-hash', 8, 7.25, 'ready', 100,
+      '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');`);
+    ensureTrailerCandidateTranscriptColumns(database);
+    const legacy = database.prepare("SELECT * FROM trailer_candidate_versions WHERE candidate_id = 'legacy-candidate'").get() as Record<string, unknown>;
+    assert.equal(legacy.status, "ready", "transcript migration must preserve existing ready candidates");
+    assert.equal(legacy.output_relative_path, "legacy-candidate/out.mp4");
+    assert.equal(legacy.trailer_transcript_status, "not_started");
+    assert.equal(legacy.trailer_transcript_relative_path, null);
+    assert.equal(legacy.trailer_transcript_sha256, null);
+    const index = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_trailer_candidate_episode_fingerprint_current'").get() as { sql: string };
+    assert.equal(index.sql.toUpperCase().includes("CREATE UNIQUE INDEX"), false, "edited transcript revisions may share one asset fingerprint");
+  } finally {
+    database.close();
+  }
+};
+
 const run = async (): Promise<void> => {
   if (!process.argv.includes("--fake-only")) throw new Error("Trailer candidate review verification requires --fake-only");
   if (process.env.NODE_ENV !== "development") throw new Error("Trailer candidate review verification is development-only");
-
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "dc-trailer-candidate-review-"));
   const mediaRoot = path.join(root, "media");
   const privateRoot = path.join(root, "private", "trailer-candidates");
@@ -98,6 +135,7 @@ const run = async (): Promise<void> => {
   globalThis.fetch = (async () => { networkCalls += 1; throw new Error("Outbound network is forbidden in fake-only verification"); }) as typeof fetch;
   const originalNow = Date.now;
   try {
+    await verifyCandidateTranscriptMigration();
     const [database, episodes, candidates, mediaLayout, candidateService, routes, publicCatalog, candidateWorker] = await Promise.all([
       import("../database/connect.js"),
       import("../database/repositories/episode.repository.js"),
@@ -280,6 +318,7 @@ const run = async (): Promise<void> => {
     assert.equal(generation.statusCode, 202, "explicit transcript-backed generation queues an immutable candidate version");
     assert.equal(generation.headers["cache-control"], "private, no-store");
     assert.equal(generation.jsonBody.transcriptText, generationBody.transcriptText);
+    assert.equal(generation.jsonBody.transcriptStatus, "done");
     const generatedCandidateId = generation.jsonBody.candidateId as string;
     assert.notEqual(generatedCandidateId, generationBase.candidate.candidateId);
     const generatedRow = candidates.trailerCandidateRepository.findById(generatedCandidateId)!;
@@ -289,11 +328,25 @@ const run = async (): Promise<void> => {
     assert.equal(createHash("sha256").update(generatedTranscriptBytes).digest("hex"), generatedRow.trailerTranscriptSha256);
     assert.equal(generatedRow.trailerTranscriptStatus, "done");
     assert.equal(episodes.episodeRepository.findByEpisodeId(generationEpisodeId)?.transcriptStatus, "idle");
+    const generatedReview = await invoke(router, "get", "/:episodeId/trailer-candidates/:candidateId", new Request(
+      trailerParams(generationEpisodeId, generatedCandidateId),
+    ));
+    assert.equal(generatedReview.statusCode, 200);
+    assert.equal(generatedReview.jsonBody.transcriptText, generationBody.transcriptText);
+    assert.equal(generatedReview.jsonBody.transcriptStatus, "done");
+    const serializedGeneratedReview = JSON.stringify(generatedReview.jsonBody);
+    for (const forbidden of ["trailerTranscriptRelativePath", "trailerTranscriptSha256", "snapshotRelativePath", "outputRelativePath"]) {
+      assert.equal(serializedGeneratedReview.includes(forbidden), false, `review DTO must not contain ${forbidden}`);
+    }
     const generatedRepeat = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
       { episodeId: String(generationEpisodeId) }, generationBody,
     ));
     assert.equal(generatedRepeat.statusCode, 200, "identical transcript requests reuse the exact candidate revision");
     assert.equal(generatedRepeat.jsonBody.candidateId, generatedCandidateId);
+    const invalidGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, { ...generationBody, filePath: "/etc/passwd" },
+    ));
+    assert.equal(invalidGeneration.statusCode, 400, "generation rejects body fields outside transcript text and source fingerprint");
     const generatedCount = getDb().prepare("SELECT COUNT(*) AS count FROM trailer_candidate_versions WHERE episode_id = ?").get(generationEpisodeId)?.count;
     await fs.promises.writeFile(generationCoverPath, "changed-generation-cover");
     const staleGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
@@ -304,18 +357,22 @@ const run = async (): Promise<void> => {
     await fs.promises.writeFile(generationCoverPath, "generation-cover-fixture");
 
     const invalidRetry = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/retry", new Request(
-      trailerParams(generationEpisodeId, generatedCandidateId), {},
+      trailerParams(generationEpisodeId, generatedCandidateId), { expectedSourceFingerprint: generationBody.expectedSourceFingerprint },
     ));
     assert.equal(invalidRetry.statusCode, 409, "retry conflicts unless the API marks the exact candidate retryable");
     getDb().prepare("UPDATE trailer_candidate_versions SET status = 'retryable' WHERE candidate_id = ?").run(generatedCandidateId);
     const validRetry = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/retry", new Request(
-      trailerParams(generationEpisodeId, generatedCandidateId), {},
+      trailerParams(generationEpisodeId, generatedCandidateId), { expectedSourceFingerprint: generationBody.expectedSourceFingerprint },
     ));
     assert.equal(validRetry.statusCode, 202);
     assert.equal(validRetry.jsonBody.candidateId, generatedCandidateId);
     assert.equal(candidates.trailerCandidateRepository.findById(generatedCandidateId)?.status, "pending");
     assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM promotion_notifications WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
       "generation and retry must not trigger publication side effects");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM youtube_trailer_jobs WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
+      "generation and retry must not create a YouTube upload job");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM episode_publication_effects WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
+      "generation and retry must not create publication effects");
 
     const statusRoute = "/:episodeId/trailer-candidates/current";
     const status = await invoke(router, "get", statusRoute, new Request({ episodeId: String(episodeId) }));

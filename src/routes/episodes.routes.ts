@@ -42,7 +42,7 @@ import {
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
-import { assertPrivateTrailerCandidateRoot, enqueueTrailerCandidate, getCurrentTrailerCandidateReviewStatus, getTrailerCandidateReviewStatus, getValidatedTrailerCandidatePreviewOutput } from "../services/trailer-candidate.service";
+import { assertPrivateTrailerCandidateRoot, createTrailerCandidateWithTranscript, enqueueTrailerCandidate, getCurrentTrailerCandidateReviewStatus, getTrailerCandidateReviewStatus, getValidatedTrailerCandidatePreviewOutput, retryTrailerCandidateGeneration, StaleTrailerCandidateSourceError } from "../services/trailer-candidate.service";
 import { decideTrailerCandidate } from "../services/trailer-candidate-approval.service";
 import { confirmManualTrailerRetirement, getTrailerReplacementStatus } from "../services/publication-retirement.service";
 import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
@@ -108,6 +108,13 @@ const trailerPreviewGrants = new Map<string, TrailerPreviewGrant>();
 const TRAILER_PREVIEW_GRANT_TTL_MS = 5 * 60 * 1000;
 const TRAILER_PREVIEW_GRANT_LIMIT = 5000;
 const trailerPreviewGrantBodySchema = z.object({}).strict();
+const trailerCandidateGenerationSchema = z.object({
+  transcriptText: z.string().max(50_000),
+  expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+const trailerCandidateRetrySchema = z.object({
+  expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
 
 export const redactTrailerPreviewGrantFromUrl = (rawUrl: string): string =>
   rawUrl.replace(/([?&]grant=)[^&]*/giu, "$1[REDACTED]");
@@ -1240,6 +1247,73 @@ episodesRouter.get("/:episodeId/trailer-candidates/current", noStoreTrailerCandi
   } catch (error) {
     res.status(503).json({ code: "trailer_candidate_review_unavailable", message: "Trailer review status is temporarily unavailable." });
   }
+});
+
+episodesRouter.post("/:episodeId/trailer-candidates", noStoreTrailerCandidateReview, requireAuth, async (req, res) => {
+  try {
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate generation is disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    const body = trailerCandidateGenerationSchema.safeParse(req.body);
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !body.success || body.data.transcriptText.includes("\u0000")
+      || Buffer.byteLength(body.data.transcriptText, "utf8") > 200_000) {
+      res.status(400).json({ code: "invalid_trailer_candidate_request", message: "Trailer generation request is invalid or exceeds its limits." });
+      return;
+    }
+    const ownerEmail = req.user?.email?.trim();
+    if (!ownerEmail) {
+      res.status(401).json({ code: "unauthorized", message: "An authenticated operator is required." });
+      return;
+    }
+    const created = await createTrailerCandidateWithTranscript(
+      episodeId,
+      ownerEmail,
+      body.data.expectedSourceFingerprint,
+      body.data.transcriptText,
+    );
+    const status = await getTrailerCandidateReviewStatus(episodeId, created.candidateId);
+    if (!status) {
+      res.status(409).json({ code: "trailer_candidate_source_changed", message: "Trailer inputs changed before the candidate could be queued. Refresh the assets and try again." });
+      return;
+    }
+    res.status(created.reused ? 200 : 202).json(status);
+  } catch (error) {
+    if (error instanceof StaleTrailerCandidateSourceError) {
+      res.status(409).json({ code: "trailer_candidate_source_changed", message: "Trailer inputs changed. Refresh the current candidate before generating again." });
+      return;
+    }
+    res.status(400).json({ code: "trailer_candidate_request_rejected", message: "Trailer generation could not be queued. Verify the current cover and trailer audio." });
+  }
+});
+
+episodesRouter.post("/:episodeId/trailer-candidates/:candidateId/retry", noStoreTrailerCandidateReview, requireAuth, async (req, res) => {
+  if (!config.trailerCandidateRenderEnabled) {
+    res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate generation is disabled." });
+    return;
+  }
+  const episodeId = Number(req.params.episodeId);
+  const candidateId = z.string().uuid().safeParse(req.params.candidateId);
+  const body = trailerCandidateRetrySchema.safeParse(req.body);
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !candidateId.success || !body.success) {
+    res.status(400).json({ code: "invalid_trailer_candidate_retry", message: "Trailer generation retry request is invalid." });
+    return;
+  }
+  const result = await retryTrailerCandidateGeneration(episodeId, candidateId.data, body.data.expectedSourceFingerprint);
+  if (!result.candidate) {
+    const status = result.conflictCode === "not_found" ? 404 : 409;
+    const code = result.conflictCode === "source_changed" ? "trailer_candidate_source_changed"
+      : result.conflictCode === "not_retryable" ? "trailer_candidate_not_retryable" : "trailer_candidate_not_found";
+    res.status(status).json({ code, message: "This trailer candidate cannot be retried in its current state." });
+    return;
+  }
+  const review = await getTrailerCandidateReviewStatus(episodeId, result.candidate.candidateId);
+  if (!review) {
+    res.status(409).json({ code: "trailer_candidate_source_changed", message: "Trailer inputs changed. Generate a new candidate from the current assets." });
+    return;
+  }
+  res.status(202).json(review);
 });
 
 episodesRouter.get("/:episodeId/trailer-candidates/:candidateId", noStoreTrailerCandidateReview, requireAuth, async (req, res, next) => {

@@ -41,6 +41,12 @@ export type TrailerCandidateReviewStatusDto = {
   createdAt: string;
   updatedAt: string;
   readyAt: string | null;
+  transcriptStatus: TrailerCandidateRow["trailerTranscriptStatus"];
+  transcriptProgress: number | null;
+  transcriptText: string | null;
+  transcriptProvider: string | null;
+  transcriptErrorCategory: string | null;
+  transcriptErrorMessage: string | null;
 };
 
 export type TrailerCandidateEnqueueResult = {
@@ -84,6 +90,13 @@ const safeCandidateErrorMessage = (category: string | null): string | null => {
   return messages[category] ?? "Trailer generation could not be completed. Try again or upload an MP4 manually.";
 };
 
+const safeTranscriptErrorMessage = (category: string | null): string | null => {
+  if (!category) return null;
+  return category === "transcription_unavailable"
+    ? "Trailer audio transcription is unavailable. You can continue with a waveform-only candidate or edit the transcript and generate again."
+    : "Trailer audio transcription could not be completed. You can continue with a waveform-only candidate.";
+};
+
 const safeCandidateErrorCategory = (category: string | null): string | null => {
   if (!category) return null;
   const allowed = new Set(["capacity", "capacity_unavailable", "source_changed", "stale_source", "timeout", "render_failed", "probe_failed", "output_invalid", "snapshot_invalid", "invalid_snapshot", "interrupted"]);
@@ -122,7 +135,7 @@ const hashFile = async (filePath: string): Promise<{ sha256: string; bytes: numb
   return { sha256: hash.digest("hex"), bytes };
 };
 
-const currentEpisodeFingerprint = async (episodeId: number): Promise<string | null> => {
+export const getCurrentTrailerCandidateSourceFingerprint = async (episodeId: number): Promise<string | null> => {
   const resolved = await resolveSources(episodeId);
   if (!resolved.cover || !resolved.audio) return null;
   const sources: Source[] = [];
@@ -142,6 +155,18 @@ const isValidReadyOutput = async (candidate: TrailerCandidateRow): Promise<boole
     return evidence.sha256 === candidate.outputSha256 && evidence.bytes === candidate.outputBytes;
   } catch {
     return false;
+  }
+};
+
+const readCandidateTranscript = async (candidate: TrailerCandidateRow): Promise<string | null> => {
+  if (candidate.trailerTranscriptStatus !== "done" || !candidate.trailerTranscriptRelativePath || !candidate.trailerTranscriptSha256) return null;
+  try {
+    const filePath = await trailerCandidateExistingFilePath(candidate.trailerTranscriptRelativePath);
+    const bytes = await fs.promises.readFile(filePath);
+    if (createHash("sha256").update(bytes).digest("hex") !== candidate.trailerTranscriptSha256) return null;
+    return bytes.toString("utf8");
+  } catch {
+    return null;
   }
 };
 
@@ -180,11 +205,17 @@ const toReviewStatusDto = async (candidate: TrailerCandidateRow, currentFingerpr
     createdAt: candidate.createdAt,
     updatedAt: candidate.updatedAt,
     readyAt: candidate.readyAt,
+    transcriptStatus: candidate.trailerTranscriptStatus,
+    transcriptProgress: candidate.trailerTranscriptProgress,
+    transcriptText: await readCandidateTranscript(candidate),
+    transcriptProvider: candidate.trailerTranscriptionProvider,
+    transcriptErrorCategory: candidate.trailerTranscriptErrorCategory,
+    transcriptErrorMessage: safeTranscriptErrorMessage(candidate.trailerTranscriptErrorCategory),
   };
 };
 
 export const getCurrentTrailerCandidateReviewStatus = async (episodeId: number): Promise<TrailerCandidateReviewStatusDto | null> => {
-  const currentFingerprint = await currentEpisodeFingerprint(episodeId);
+  const currentFingerprint = await getCurrentTrailerCandidateSourceFingerprint(episodeId);
   if (!currentFingerprint) return null;
   const candidate = trailerCandidateRepository.findCurrentByFingerprint(episodeId, currentFingerprint);
   return candidate ? toReviewStatusDto(candidate, currentFingerprint) : null;
@@ -193,7 +224,7 @@ export const getCurrentTrailerCandidateReviewStatus = async (episodeId: number):
 export const getTrailerCandidateReviewStatus = async (episodeId: number, candidateId: string): Promise<TrailerCandidateReviewStatusDto | null> => {
   const candidate = trailerCandidateRepository.findById(candidateId);
   if (!candidate || candidate.episodeId !== episodeId) return null;
-  return toReviewStatusDto(candidate, await currentEpisodeFingerprint(episodeId));
+  return toReviewStatusDto(candidate, await getCurrentTrailerCandidateSourceFingerprint(episodeId));
 };
 
 export const getValidatedTrailerCandidatePreviewOutput = async (
@@ -205,7 +236,7 @@ export const getValidatedTrailerCandidatePreviewOutput = async (
   if (!candidate || candidate.episodeId !== episodeId || candidate.status !== "ready"
     || !candidate.outputRelativePath || !candidate.outputSha256 || !candidate.outputBytes || candidate.outputBytes <= 0
     || (expectedOutputSha256 !== undefined && candidate.outputSha256 !== expectedOutputSha256)) return null;
-  const currentFingerprint = await currentEpisodeFingerprint(episodeId);
+  const currentFingerprint = await getCurrentTrailerCandidateSourceFingerprint(episodeId);
   if (!currentFingerprint || currentFingerprint !== candidate.sourceFingerprint) return null;
   try {
     const filePath = await trailerCandidateExistingFilePath(candidate.outputRelativePath);
@@ -269,7 +300,7 @@ const copySnapshot = async (sources: readonly Source[], candidateRoot: string, c
   await fs.promises.mkdir(absoluteDirectory, { recursive: false });
   try {
     for (const source of sources) {
-      const fileName = source.kind === "cover" ? "cover.jpeg" : source.kind === "audio" ? "trailer.mp3" : "transcript.txt";
+      const fileName = source.kind === "cover" ? "cover.jpeg" : source.kind === "audio" ? "trailer.mp3" : "episode-transcript.txt";
       const target = path.join(absoluteDirectory, fileName);
       await fs.promises.copyFile(source.path, target, fs.constants.COPYFILE_EXCL);
       const copied = await hashFile(target);
@@ -280,6 +311,91 @@ const copySnapshot = async (sources: readonly Source[], candidateRoot: string, c
     await fs.promises.rm(absoluteDirectory, { recursive: true, force: true }).catch(() => undefined);
     throw error;
   }
+};
+
+export class StaleTrailerCandidateSourceError extends Error {
+  constructor() { super("Trailer source fingerprint is stale"); }
+}
+
+export const createTrailerCandidateWithTranscript = async (
+  episodeId: number,
+  ownerEmail: string,
+  expectedSourceFingerprint: string,
+  transcriptText: string,
+): Promise<{ candidateId: string; reused: boolean }> => {
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0) throw new Error("Invalid episodeId");
+  if (!/^[a-f0-9]{64}$/u.test(expectedSourceFingerprint)) throw new Error("Invalid trailer source fingerprint");
+  if (typeof transcriptText !== "string" || transcriptText.length > 50_000 || Buffer.byteLength(transcriptText, "utf8") > 200_000 || transcriptText.includes("\u0000")) {
+    throw new Error("Trailer transcript is outside the accepted size or content limits");
+  }
+  const episode = episodeRepository.findByEpisodeId(episodeId);
+  if (!episode) throw new Error("Episode not found");
+  if (episode.isDraft) {
+    const reservation = await reserveTrailerVideoDraft(episodeId, ownerEmail);
+    const checked = checkTrailerVideoDraft(reservation.draftId, episodeId, ownerEmail, { allowStaged: true });
+    if (!checked.ok) throw new Error(checked.message);
+  }
+
+  const resolved = await resolveSources(episodeId);
+  if (!resolved.cover || !resolved.audio || (episode.isDraft && !resolved.draftId)) throw new Error("Trailer cover and audio are required");
+  const sources: Source[] = [];
+  for (const [kind, sourcePath] of [["cover", resolved.cover], ["audio", resolved.audio], ["transcript", resolved.transcript]] as const) {
+    if (!sourcePath) continue;
+    sources.push({ kind, path: sourcePath, ...await hashFile(sourcePath) });
+  }
+  const sourceFingerprint = fingerprint(sources);
+  if (sourceFingerprint !== expectedSourceFingerprint) throw new StaleTrailerCandidateSourceError();
+
+  const candidateRoot = await assertPrivateTrailerCandidateRoot();
+  const candidateId = randomUUID();
+  const snapshotRelativePath = await copySnapshot(sources, candidateRoot, candidateId);
+  const transcriptRelativePath = path.posix.join(candidateId, "trailer-transcript.txt");
+  try {
+    const transcriptBytes = Buffer.from(transcriptText, "utf8");
+    const transcriptSha256 = createHash("sha256").update(transcriptBytes).digest("hex");
+    const transcriptPath = await trailerCandidateStoragePath(transcriptRelativePath);
+    await fs.promises.writeFile(transcriptPath, transcriptBytes, { flag: "wx", mode: 0o600 });
+    const currentAfterSnapshot = await getCurrentTrailerCandidateSourceFingerprint(episodeId);
+    if (currentAfterSnapshot !== sourceFingerprint) throw new StaleTrailerCandidateSourceError();
+    const created = trailerCandidateRepository.createOrReuse({
+      candidateId,
+      episodeId,
+      draftId: resolved.draftId,
+      sourceFingerprint,
+      coverSha256: sources.find((source) => source.kind === "cover")?.sha256 as string,
+      audioSha256: sources.find((source) => source.kind === "audio")?.sha256 as string,
+      transcriptSha256: sources.find((source) => source.kind === "transcript")?.sha256 ?? null,
+      trailerTranscriptStatus: "done",
+      trailerTranscriptRelativePath: transcriptRelativePath,
+      trailerTranscriptSha256: transcriptSha256,
+      trailerTranscriptionProvider: "operator",
+      profileId: TRAILER_RENDER_VISUAL_PROFILE.profileId,
+      profileRevision: TRAILER_RENDER_VISUAL_PROFILE.revision,
+      snapshotRelativePath,
+    });
+    if (created.reused) await fs.promises.rm(path.resolve(candidateRoot, candidateId), { recursive: true, force: true });
+    return { candidateId: created.candidate.candidateId, reused: created.reused };
+  } catch (error) {
+    await fs.promises.rm(path.resolve(candidateRoot, candidateId), { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+};
+
+export const retryTrailerCandidateGeneration = async (
+  episodeId: number,
+  candidateId: string,
+  expectedSourceFingerprint: string,
+): Promise<{ candidate: TrailerCandidateRow | null; conflictCode: "not_found" | "source_changed" | "not_retryable" | null }> => {
+  const candidate = trailerCandidateRepository.findById(candidateId);
+  if (!candidate || candidate.episodeId !== episodeId) return { candidate: null, conflictCode: "not_found" };
+  if (candidate.sourceFingerprint !== expectedSourceFingerprint
+    || await getCurrentTrailerCandidateSourceFingerprint(episodeId) !== expectedSourceFingerprint) {
+    return { candidate: null, conflictCode: "source_changed" };
+  }
+  const retried = trailerCandidateRepository.retry(candidateId);
+  return retried
+    ? { candidate: retried, conflictCode: null }
+    : { candidate: null, conflictCode: "not_retryable" };
 };
 
 export const enqueueTrailerCandidate = async (episodeId: number, ownerEmail: string): Promise<TrailerCandidateEnqueueResult> => {
@@ -372,7 +488,7 @@ export const getTrailerCandidateSnapshotPaths = async (candidate: TrailerCandida
   const coverPath = await trailerCandidateStoragePath(path.posix.join(base, "cover.jpeg"));
   const audioPath = await trailerCandidateStoragePath(path.posix.join(base, "trailer.mp3"));
   const transcriptPath = candidate.transcriptSha256
-    ? await trailerCandidateStoragePath(path.posix.join(base, "transcript.txt"))
+    ? await trailerCandidateStoragePath(path.posix.join(base, "episode-transcript.txt"))
     : null;
   const expected: Array<{ path: string; sha256: string }> = [
     { path: coverPath, sha256: candidate.coverSha256 },

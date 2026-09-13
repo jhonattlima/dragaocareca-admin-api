@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS trailer_promotion_journals (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_promotion_one_active_per_episode
   ON trailer_promotion_journals(episode_id) WHERE phase NOT IN ('committed', 'aborted');
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_trailer_candidate_episode_fingerprint_current
+CREATE INDEX IF NOT EXISTS idx_trailer_candidate_episode_fingerprint_current
   ON trailer_candidate_versions(episode_id, source_fingerprint)
   WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready');
 CREATE INDEX IF NOT EXISTS idx_trailer_candidate_versions_fifo
@@ -585,7 +585,7 @@ export const getDb = (): DatabaseSync => {
   return db;
 };
 
-const ensureTrailerCandidateTranscriptColumns = (database: DatabaseSync): void => {
+export const ensureTrailerCandidateTranscriptColumns = (database: DatabaseSync): void => {
   const columns = database.prepare("PRAGMA table_info(trailer_candidate_versions)").all() as Array<{ name: string }>;
   const names = new Set(columns.map((column) => column.name));
   if (!names.has("trailer_transcript_status")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_status TEXT NOT NULL DEFAULT 'not_started'");
@@ -594,6 +594,13 @@ const ensureTrailerCandidateTranscriptColumns = (database: DatabaseSync): void =
   if (!names.has("trailer_transcript_sha256")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_sha256 TEXT");
   if (!names.has("trailer_transcription_provider")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcription_provider TEXT");
   if (!names.has("trailer_transcript_error_category")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_error_category TEXT");
+  const fingerprintIndex = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_trailer_candidate_episode_fingerprint_current'").get() as { sql?: string } | undefined;
+  if (fingerprintIndex?.sql?.toUpperCase().includes("CREATE UNIQUE INDEX")) {
+    database.exec("DROP INDEX idx_trailer_candidate_episode_fingerprint_current");
+    database.exec(`CREATE INDEX idx_trailer_candidate_episode_fingerprint_current
+      ON trailer_candidate_versions(episode_id, source_fingerprint)
+      WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')`);
+  }
 };
 
 const ensureMetaConnectionTable = (database: DatabaseSync): void => {

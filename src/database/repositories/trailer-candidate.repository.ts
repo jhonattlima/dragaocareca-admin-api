@@ -59,6 +59,10 @@ export type CreateTrailerCandidateInput = {
   coverSha256: string;
   audioSha256: string;
   transcriptSha256?: string | null;
+  trailerTranscriptStatus?: TrailerTranscriptStatus;
+  trailerTranscriptRelativePath?: string | null;
+  trailerTranscriptSha256?: string | null;
+  trailerTranscriptionProvider?: string | null;
   profileId: string;
   profileRevision: number;
   snapshotRelativePath: string;
@@ -152,18 +156,22 @@ export const trailerCandidateRepository = {
     const create = () => inImmediateTransaction(() => {
       const existing = db.prepare(`SELECT * FROM trailer_candidate_versions
         WHERE episode_id = ? AND source_fingerprint = ?
+          AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')
           AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
-        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint) as CandidateSqlRow | undefined;
+        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined;
       if (existing) return { candidate: mapCandidate(existing) as TrailerCandidateRow, reused: true };
       const version = Number((db.prepare("SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM trailer_candidate_versions WHERE episode_id = ?")
         .get(input.episodeId) as { next_version: number }).next_version);
       const now = nowIso();
       db.prepare(`INSERT INTO trailer_candidate_versions (
         candidate_id, episode_id, draft_id, version, source_fingerprint, cover_sha256, audio_sha256,
-        transcript_sha256, profile_id, profile_revision, snapshot_relative_path, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+        transcript_sha256, trailer_transcript_status, trailer_transcript_relative_path, trailer_transcript_sha256,
+        trailer_transcription_provider, profile_id, profile_revision, snapshot_relative_path, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
         input.candidateId, input.episodeId, input.draftId ?? null, version, input.sourceFingerprint,
-        input.coverSha256, input.audioSha256, input.transcriptSha256 ?? null, input.profileId,
+        input.coverSha256, input.audioSha256, input.transcriptSha256 ?? null,
+        input.trailerTranscriptStatus ?? "not_started", input.trailerTranscriptRelativePath ?? null,
+        input.trailerTranscriptSha256 ?? null, input.trailerTranscriptionProvider ?? null, input.profileId,
         input.profileRevision, input.snapshotRelativePath, now, now,
       );
       return { candidate: byId(input.candidateId) as TrailerCandidateRow, reused: false };
@@ -175,8 +183,9 @@ export const trailerCandidateRepository = {
       // converge on its durable identity instead of exposing a duplicate job.
       const winner = mapCandidate(db.prepare(`SELECT * FROM trailer_candidate_versions
         WHERE episode_id = ? AND source_fingerprint = ?
+          AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')
           AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
-        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint) as CandidateSqlRow | undefined);
+        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined);
       if (winner) return { candidate: winner, reused: true };
       throw error;
     }
@@ -350,9 +359,9 @@ export const trailerCandidateRepository = {
 
   retry(candidateId: string): TrailerCandidateRow | null {
     const db = getDb();
-    db.prepare(`UPDATE trailer_candidate_versions SET status = 'pending', progress = 0, error_category = NULL,
-      error_message = NULL, updated_at = ? WHERE candidate_id = ? AND status = 'retryable'`).run(nowIso(), candidateId);
-    return byId(candidateId);
+    const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'pending', progress = 0, error_category = NULL,
+      error_message = NULL, updated_at = ? WHERE candidate_id = ? AND status = 'retryable'`).run(nowIso(), candidateId).changes;
+    return changed ? byId(candidateId) : null;
   },
 
   recoverProcessing(): TrailerCandidateRow[] {
