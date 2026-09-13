@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import multer from "multer";
 import { Router, type Request, type RequestHandler } from "express";
@@ -41,7 +42,7 @@ import {
 } from "../services/episode-media-layout.service";
 import { replaceEpisodeTrailerVideo } from "../services/episode-trailer-video.service";
 import { checkTrailerVideoDraft, cleanupExpiredTrailerVideoDrafts, consumeTrailerVideoDraft, reserveTrailerVideoDraft, restoreTrailerVideoDraftForRetry } from "../services/episode-draft-reservation.service";
-import { enqueueTrailerCandidate, getCurrentTrailerCandidateReviewStatus, getTrailerCandidateReviewStatus } from "../services/trailer-candidate.service";
+import { assertPrivateTrailerCandidateRoot, enqueueTrailerCandidate, getCurrentTrailerCandidateReviewStatus, getTrailerCandidateReviewStatus, getValidatedTrailerCandidatePreviewOutput } from "../services/trailer-candidate.service";
 import { decideTrailerCandidate } from "../services/trailer-candidate-approval.service";
 import { confirmManualTrailerRetirement, getTrailerReplacementStatus } from "../services/publication-retirement.service";
 import { cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
@@ -100,6 +101,48 @@ const noStoreTrailerCandidateReview: RequestHandler = (_req, res, next) => {
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("Referrer-Policy", "no-referrer");
   next();
+};
+
+type TrailerPreviewGrant = { episodeId: number; candidateId: string; outputSha256: string; expiresAt: number };
+const trailerPreviewGrants = new Map<string, TrailerPreviewGrant>();
+const TRAILER_PREVIEW_GRANT_TTL_MS = 5 * 60 * 1000;
+const TRAILER_PREVIEW_GRANT_LIMIT = 5000;
+const trailerPreviewGrantBodySchema = z.object({}).strict();
+
+export const redactTrailerPreviewGrantFromUrl = (rawUrl: string): string =>
+  rawUrl.replace(/([?&]grant=)[^&]*/giu, "$1[REDACTED]");
+
+const pruneTrailerPreviewGrants = (now = Date.now()): void => {
+  for (const [token, grant] of trailerPreviewGrants) {
+    if (grant.expiresAt <= now) trailerPreviewGrants.delete(token);
+  }
+};
+
+const parseSingleByteRange = (header: string | undefined, size: number): { start: number; end: number } | null | "invalid" => {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/iu.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return "invalid";
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return "invalid";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start < 0 || requestedEnd < start || start >= size) return "invalid";
+  return { start, end: Math.min(requestedEnd, size - 1) };
+};
+
+const hashOpenedFile = async (handle: fs.promises.FileHandle): Promise<{ sha256: string; bytes: number }> => {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  const stream = handle.createReadStream({ autoClose: false });
+  for await (const chunk of stream) {
+    const buffer = chunk as Buffer;
+    bytes += buffer.length;
+    hash.update(buffer);
+  }
+  return { sha256: hash.digest("hex"), bytes };
 };
 
 const manualHashtagLookupSchema = z.object({ tag: z.string().min(1).max(100) }).strict();
@@ -1195,7 +1238,7 @@ episodesRouter.get("/:episodeId/trailer-candidates/current", noStoreTrailerCandi
     }
     res.json(candidate);
   } catch (error) {
-    next(error);
+    res.status(503).json({ code: "trailer_candidate_review_unavailable", message: "Trailer review status is temporarily unavailable." });
   }
 });
 
@@ -1218,7 +1261,125 @@ episodesRouter.get("/:episodeId/trailer-candidates/:candidateId", noStoreTrailer
     }
     res.json(candidate);
   } catch (error) {
-    next(error);
+    res.status(503).json({ code: "trailer_candidate_review_unavailable", message: "Trailer review status is temporarily unavailable." });
+  }
+});
+
+episodesRouter.post("/:episodeId/trailer-candidates/:candidateId/preview-grant", noStoreTrailerCandidateReview, requireAuth, async (req, res) => {
+  try {
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate review is disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    const candidateId = z.string().uuid().safeParse(req.params.candidateId);
+    const body = trailerPreviewGrantBodySchema.safeParse(req.body);
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !candidateId.success || !body.success) {
+      res.status(400).json({ code: "invalid_preview_grant_request", message: "Trailer preview request is invalid." });
+      return;
+    }
+    const output = await getValidatedTrailerCandidatePreviewOutput(episodeId, candidateId.data);
+    if (!output) {
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer candidate is not available for preview." });
+      return;
+    }
+    const now = Date.now();
+    pruneTrailerPreviewGrants(now);
+    if (trailerPreviewGrants.size >= TRAILER_PREVIEW_GRANT_LIMIT) {
+      res.status(429).json({ code: "preview_grant_capacity", message: "Trailer preview is temporarily unavailable. Try again shortly." });
+      return;
+    }
+    const grant = randomBytes(32).toString("base64url");
+    const expiresAt = now + TRAILER_PREVIEW_GRANT_TTL_MS;
+    trailerPreviewGrants.set(grant, {
+      episodeId,
+      candidateId: candidateId.data,
+      outputSha256: output.outputSha256,
+      expiresAt,
+    });
+    res.status(201).json({
+      episodeId,
+      candidateId: candidateId.data,
+      previewUrl: `/v1/episodes/${episodeId}/trailer-candidates/${candidateId.data}/preview?grant=${grant}`,
+      expiresAt: new Date(expiresAt).toISOString(),
+    });
+  } catch {
+    res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer candidate is not available for preview." });
+  }
+});
+
+episodesRouter.get("/:episodeId/trailer-candidates/:candidateId/preview", noStoreTrailerCandidateReview, async (req, res) => {
+  let handle: fs.promises.FileHandle | null = null;
+  let streaming = false;
+  try {
+    if (!config.trailerCandidateRenderEnabled) {
+      res.status(503).json({ code: "trailer_candidate_review_disabled", message: "Trailer candidate review is disabled." });
+      return;
+    }
+    const episodeId = Number(req.params.episodeId);
+    const candidateId = z.string().uuid().safeParse(req.params.candidateId);
+    const grantValue = req.query.grant;
+    if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !candidateId.success
+      || typeof grantValue !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(grantValue)) {
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer preview is unavailable." });
+      return;
+    }
+    const grant = trailerPreviewGrants.get(grantValue);
+    if (!grant || grant.expiresAt <= Date.now() || grant.episodeId !== episodeId || grant.candidateId !== candidateId.data) {
+      if (grant?.expiresAt && grant.expiresAt <= Date.now()) trailerPreviewGrants.delete(grantValue);
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer preview is unavailable." });
+      return;
+    }
+    const output = await getValidatedTrailerCandidatePreviewOutput(episodeId, candidateId.data, grant.outputSha256);
+    if (!output) {
+      trailerPreviewGrants.delete(grantValue);
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer preview is unavailable." });
+      return;
+    }
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+    handle = await fs.promises.open(output.filePath, flags);
+    const openedPath = await fs.promises.realpath(`/proc/self/fd/${handle.fd}`);
+    const privateRoot = await assertPrivateTrailerCandidateRoot();
+    const relativeOpenedPath = path.relative(privateRoot, openedPath);
+    if (relativeOpenedPath.startsWith(`..${path.sep}`) || relativeOpenedPath === ".." || path.isAbsolute(relativeOpenedPath)) {
+      throw new Error("Private preview path validation failed");
+    }
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error("Private preview output is unavailable");
+    const evidence = await hashOpenedFile(handle);
+    if (evidence.sha256 !== grant.outputSha256 || evidence.sha256 !== output.outputSha256 || evidence.bytes !== output.outputBytes || stat.size !== evidence.bytes) {
+      trailerPreviewGrants.delete(grantValue);
+      res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer preview is unavailable." });
+      return;
+    }
+    const range = parseSingleByteRange(req.get("range"), evidence.bytes);
+    if (range === "invalid") {
+      res.status(416).setHeader("Content-Range", `bytes */${evidence.bytes}`).end();
+      return;
+    }
+    const start = range?.start ?? 0;
+    const end = range?.end ?? evidence.bytes - 1;
+    res.status(range ? 206 : 200);
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Length", String(end - start + 1));
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Disposition", "inline; filename=trailer-preview.mp4");
+    if (range) res.setHeader("Content-Range", `bytes ${start}-${end}/${evidence.bytes}`);
+    const stream = handle.createReadStream({ start, end, autoClose: false });
+    streaming = true;
+    const closeHandle = (): void => {
+      const active = handle;
+      handle = null;
+      void active?.close().catch(() => undefined);
+    };
+    stream.once("error", () => { closeHandle(); res.destroy(); });
+    stream.once("end", closeHandle);
+    stream.pipe(res);
+  } catch {
+    if (!res.headersSent) res.status(404).json({ code: "trailer_candidate_not_found", message: "Trailer preview is unavailable." });
+    else res.destroy();
+  } finally {
+    if (handle && !streaming) await handle.close().catch(() => undefined);
   }
 });
 

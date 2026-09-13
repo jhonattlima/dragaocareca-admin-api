@@ -8,7 +8,7 @@ import { config } from "./config/env";
 import { swaggerSpec } from "./docs/openapi";
 import { authRouter } from "./routes/auth.routes";
 import { assetsRouter } from "./routes/assets.routes";
-import { episodesRouter } from "./routes/episodes.routes";
+import { episodesRouter, redactTrailerPreviewGrantFromUrl } from "./routes/episodes.routes";
 import { feedRouter } from "./routes/feed.routes";
 import { metricsRouter } from "./routes/metrics.routes";
 import { metaConnectionRouter } from "./routes/meta-connection.routes";
@@ -45,7 +45,11 @@ app.use(
     exposedHeaders: ["Content-Disposition", "X-Missing-Artifacts"],
   }),
 );
-app.use(morgan("[:date[iso]] :method :url :status :response-time ms - :res[content-length]"));
+morgan.token("redacted-url", (req) => {
+  const request = req as typeof req & { originalUrl?: string };
+  return redactTrailerPreviewGrantFromUrl(request.originalUrl ?? req.url ?? "");
+});
+app.use(morgan("[:date[iso]] :method :redacted-url :status :response-time ms - :res[content-length]"));
 app.use(express.json({ limit: "4mb" }));
 app.use("/media/episodes/:episodeId/trailer.mp4", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store");

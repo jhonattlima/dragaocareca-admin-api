@@ -137,7 +137,7 @@ const currentEpisodeFingerprint = async (episodeId: number): Promise<string | nu
 const isValidReadyOutput = async (candidate: TrailerCandidateRow): Promise<boolean> => {
   if (candidate.status !== "ready" || !candidate.outputRelativePath || !candidate.outputSha256 || !candidate.outputBytes || candidate.outputBytes <= 0) return false;
   try {
-    const outputPath = await trailerCandidateStoragePath(candidate.outputRelativePath);
+    const outputPath = await trailerCandidateExistingFilePath(candidate.outputRelativePath);
     const evidence = await hashFile(outputPath);
     return evidence.sha256 === candidate.outputSha256 && evidence.bytes === candidate.outputBytes;
   } catch {
@@ -194,6 +194,27 @@ export const getTrailerCandidateReviewStatus = async (episodeId: number, candida
   const candidate = trailerCandidateRepository.findById(candidateId);
   if (!candidate || candidate.episodeId !== episodeId) return null;
   return toReviewStatusDto(candidate, await currentEpisodeFingerprint(episodeId));
+};
+
+export const getValidatedTrailerCandidatePreviewOutput = async (
+  episodeId: number,
+  candidateId: string,
+  expectedOutputSha256?: string,
+): Promise<{ candidate: TrailerCandidateRow; filePath: string; outputSha256: string; outputBytes: number } | null> => {
+  const candidate = trailerCandidateRepository.findById(candidateId);
+  if (!candidate || candidate.episodeId !== episodeId || candidate.status !== "ready"
+    || !candidate.outputRelativePath || !candidate.outputSha256 || !candidate.outputBytes || candidate.outputBytes <= 0
+    || (expectedOutputSha256 !== undefined && candidate.outputSha256 !== expectedOutputSha256)) return null;
+  const currentFingerprint = await currentEpisodeFingerprint(episodeId);
+  if (!currentFingerprint || currentFingerprint !== candidate.sourceFingerprint) return null;
+  try {
+    const filePath = await trailerCandidateExistingFilePath(candidate.outputRelativePath);
+    const evidence = await hashFile(filePath);
+    if (evidence.sha256 !== candidate.outputSha256 || evidence.bytes !== candidate.outputBytes) return null;
+    return { candidate, filePath, outputSha256: evidence.sha256, outputBytes: evidence.bytes };
+  } catch {
+    return null;
+  }
 };
 
 const resolveSources = async (episodeId: number): Promise<{ cover: string | null; audio: string | null; transcript: string | null; draftId: string | null }> => {
@@ -327,8 +348,18 @@ export const trailerCandidateStoragePath = async (relativePath: string): Promise
   }
   const target = path.resolve(candidateRoot, relativePath);
   if (!isWithin(candidateRoot, target) || target === candidateRoot) throw new Error("Invalid private candidate relative path");
+  return target;
+};
+
+export const trailerCandidateExistingFilePath = async (relativePath: string): Promise<string> => {
+  const candidateRoot = await assertPrivateTrailerCandidateRoot();
+  if (!relativePath || path.isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..")) {
+    throw new Error("Invalid private candidate relative path");
+  }
+  const target = path.resolve(candidateRoot, relativePath);
+  if (!isWithin(candidateRoot, target) || target === candidateRoot) throw new Error("Invalid private candidate relative path");
   const stat = await fs.promises.lstat(target);
-  if (stat.isSymbolicLink()) throw new Error("Invalid private candidate file");
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Invalid private candidate file");
   const realTarget = await fs.promises.realpath(target);
   if (!isWithin(candidateRoot, realTarget) || realTarget === candidateRoot) throw new Error("Invalid private candidate relative path");
   return realTarget;
