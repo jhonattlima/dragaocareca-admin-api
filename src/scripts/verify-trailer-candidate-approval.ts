@@ -250,7 +250,7 @@ const main = async (): Promise<void> => {
       episodeId: rejected.episodeId, candidateId: rejected.candidateId, decision: "reject",
       expectedSourceFingerprint: rejected.sourceFingerprint, expectedVersion: rejected.version, actorEmail: "operator@example.test",
     });
-    assert.deepEqual(rejectedReplay, { status: "conflict", code: "already_decided" });
+    assert.deepEqual(rejectedReplay, { status: "conflict", code: "stale" }, "a rejected candidate is superseded and must fail the current-revision guard before the decision replay check");
 
     const wrongFingerprint = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
       episodeId: rejected.episodeId, candidateId: rejected.candidateId, decision: "approve",
