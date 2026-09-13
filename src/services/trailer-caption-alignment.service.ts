@@ -158,8 +158,9 @@ export const evaluateTrailerCaptionQuality = (input: {
   } else if (
     !capacity?.approved || capacity.modelRevision !== TRAILER_CAPTION_MODEL_REVISION ||
     !/^sha256:[a-f0-9]{64}$/iu.test(capacity.imageDigest) || !Number.isFinite(capacity.maxPeakMemoryBytes) ||
-    capacity.maxPeakMemoryBytes <= 0 || input.durationSeconds > capacity.maxDurationSeconds ||
-    (input.sourceBytes !== undefined && input.sourceBytes > capacity.maxInputBytes)
+    capacity.maxPeakMemoryBytes <= 0 || !Number.isFinite(capacity.maxDurationSeconds) || capacity.maxDurationSeconds <= 0 ||
+    !Number.isFinite(capacity.maxInputBytes) || capacity.maxInputBytes <= 0 || !Number.isFinite(Date.parse(capacity.measuredAt)) ||
+    input.durationSeconds > capacity.maxDurationSeconds || (input.sourceBytes !== undefined && input.sourceBytes > capacity.maxInputBytes)
   ) {
     reason = "capacity_unavailable";
   } else if (!input.words.length || !expectedTokens.length || !actualTokens.length) {
@@ -173,8 +174,16 @@ export const evaluateTrailerCaptionQuality = (input: {
     input.alignmentProvenance?.alignerVersion !== calibration.alignerVersion || input.alignmentProvenance.modelId !== calibration.modelId ||
     input.alignmentProvenance.modelRevision !== calibration.modelRevision || input.alignmentProvenance.modelSha256 !== calibration.modelSha256 ||
     !Number.isFinite(Date.parse(calibration.reviewedAt)) ||
+    !Number.isFinite(calibration.werMax) || calibration.werMax < 0 || calibration.werMax > 1 ||
+    !Number.isFinite(calibration.coverageMin) || calibration.coverageMin < 0 || calibration.coverageMin > 1 ||
+    !Number.isFinite(calibration.onsetMaeMaxSeconds) || calibration.onsetMaeMaxSeconds < 0 ||
+    !Number.isFinite(calibration.onsetP95MaxSeconds) || calibration.onsetP95MaxSeconds < 0 ||
+    !Number.isFinite(calibration.offsetMaeMaxSeconds) || calibration.offsetMaeMaxSeconds < 0 ||
+    !Number.isFinite(calibration.offsetP95MaxSeconds) || calibration.offsetP95MaxSeconds < 0 ||
+    !Number.isSafeInteger(calibration.sampleCount) ||
     alignedCoverage < calibration.coverageMin || normalizedWordErrorRate > calibration.werMax ||
     onsetErrors.length !== input.words.length || offsetErrors.length !== input.words.length ||
+    [...onsetErrors, ...offsetErrors].some((error) => !Number.isFinite(error)) ||
     (mean(onsetErrors) ?? Infinity) > calibration.onsetMaeMaxSeconds || percentile95(onsetErrors) > calibration.onsetP95MaxSeconds ||
     (mean(offsetErrors) ?? Infinity) > calibration.offsetMaeMaxSeconds || percentile95(offsetErrors) > calibration.offsetP95MaxSeconds
   ) {
