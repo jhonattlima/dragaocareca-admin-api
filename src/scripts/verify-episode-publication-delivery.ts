@@ -7,9 +7,16 @@ import type { MetaPublicationProvider, ProviderResult } from "../services/meta-p
 const run = async (): Promise<void> => {
   if (process.env.NODE_ENV !== "development") throw new Error("Publication delivery verification is development-only");
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "dc-publication-delivery-"));
+  const originalWorkingDirectory = process.cwd();
+  const originalFetch = globalThis.fetch;
+  process.chdir(root);
+  try {
   process.env.SQLITE_PATH = path.join(root, "publication.sqlite");
   process.env.SQLITE_RESET = "true";
   process.env.MEDIA_STORAGE_ROOT = path.join(root, "media");
+  process.env.MEDIA_EPISODES_DIR = path.join(root, "media", "episodes");
+  process.env.MEDIA_EPISODES_STAGING_DIR = path.join(root, "media", "staging");
+  process.env.TRAILER_CANDIDATES_ROOT = path.join(root, "generated", "trailer-candidates");
   const [{ config }, { connectDb }, { episodeRepository }, { episodeSchema }, { episodePublicationRepository }, { publicationSourceRevision }, { deliverInstagramReel }, { normalizeMetaProviderStatus }] = await Promise.all([
     import("../config/env.js"), import("../database/connect.js"), import("../database/repositories/episode.repository.js"),
     import("../schemas/episode.js"), import("../database/repositories/episode-publication.repository.js"), import("../schemas/episode-publication.js"),
@@ -35,7 +42,6 @@ const run = async (): Promise<void> => {
     async getFacebookVideo() { calls.push("facebook:status",); return result("video-1", "ready"); },
     async publishFacebookVideo() { calls.push("facebook:publish"); return result("video-1"); },
   };
-  const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => { throw new Error("Outbound network is forbidden in fake-only verification"); }) as typeof fetch;
   const previous = config.meta.instagramEnabled;
   config.meta.instagramEnabled = true;
@@ -54,9 +60,18 @@ const run = async (): Promise<void> => {
   } finally {
     config.meta.instagramEnabled = previous;
     globalThis.fetch = originalFetch;
-    await fs.promises.rm(root, { recursive: true, force: true });
   }
   console.log(`Fake publication delivery passed: ${calls.join(",")}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(originalWorkingDirectory);
+    const rootStat = await fs.promises.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || path.dirname(path.resolve(root)) !== path.resolve(os.tmpdir())) {
+      throw new Error("Refusing to remove a publication delivery root that no longer matches its temporary identity");
+    }
+    await fs.promises.rm(root, { recursive: true, force: false });
+    assert.equal(await fs.promises.access(root).then(() => true).catch(() => false), false, "publication delivery fixture root must be absent after cleanup");
+  }
 };
 
 if (process.argv.includes("--fake-only")) {

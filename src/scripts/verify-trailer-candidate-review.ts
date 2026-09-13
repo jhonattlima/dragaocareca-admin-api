@@ -130,6 +130,8 @@ const run = async (): Promise<void> => {
   process.env.TRAILER_CANDIDATE_RENDER_ENABLED = "true";
   process.env.DISABLE_BACKGROUND_WORKERS = "true";
 
+  const originalWorkingDirectory = process.cwd();
+  process.chdir(root);
   const originalFetch = globalThis.fetch;
   let networkCalls = 0;
   globalThis.fetch = (async () => { networkCalls += 1; throw new Error("Outbound network is forbidden in fake-only verification"); }) as typeof fetch;
@@ -616,7 +618,13 @@ const run = async (): Promise<void> => {
   } finally {
     Date.now = originalNow;
     globalThis.fetch = originalFetch;
-    await fs.promises.rm(root, { recursive: true, force: true });
+    process.chdir(originalWorkingDirectory);
+    const rootStat = await fs.promises.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || path.dirname(path.resolve(root)) !== path.resolve(os.tmpdir())) {
+      throw new Error("Refusing to remove a trailer candidate review root that no longer matches its temporary identity");
+    }
+    await fs.promises.rm(root, { recursive: true, force: false });
+    assert.equal(await fs.promises.access(root).then(() => true).catch(() => false), false, "review fixture root must be absent after cleanup");
   }
 };
 

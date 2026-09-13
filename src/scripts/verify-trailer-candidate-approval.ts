@@ -97,6 +97,8 @@ const main = async (): Promise<void> => {
   const workerStart = serverSource.indexOf("await startEpisodeArtifactPreparationWorker()");
   assert.ok(recoveryImport >= 0 && recoveryCall > recoveryImport && workerStart > recoveryCall, "startup must reconcile unfinished trailer journals before workers start");
   const fixture = await createFixture();
+  const originalWorkingDirectory = process.cwd();
+  process.chdir(fixture.root);
   const originalFetch = globalThis.fetch;
   let transportCalls = 0;
   const metaCalls = { instagram: 0, facebook: 0 };
@@ -468,7 +470,13 @@ const main = async (): Promise<void> => {
     console.log("trailer candidate approval passed: authenticated CAS, output/source validation, canonical replacement, journal restart recovery, replay, rejection isolation, stale conflicts, and fake-only after-commit handoff");
   } finally {
     globalThis.fetch = originalFetch;
-    await fs.promises.rm(fixture.root, { recursive: true, force: true });
+    process.chdir(originalWorkingDirectory);
+    const rootStat = await fs.promises.lstat(fixture.root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || path.dirname(path.resolve(fixture.root)) !== path.resolve(os.tmpdir())) {
+      throw new Error("Refusing to remove a trailer candidate approval root that no longer matches its temporary identity");
+    }
+    await fs.promises.rm(fixture.root, { recursive: true, force: false });
+    assert.equal(await fs.promises.access(fixture.root).then(() => true).catch(() => false), false, "approval fixture root must be absent after cleanup");
   }
 };
 
