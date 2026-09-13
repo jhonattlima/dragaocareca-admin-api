@@ -47,8 +47,10 @@ class MultipartRequest extends Readable {
 class MemoryResponse extends Writable {
   statusCode = 200;
   jsonBody: unknown;
+  headers: Record<string, string> = {};
   _write(_chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void { callback(); }
   status(code: number): this { this.statusCode = code; return this; }
+  setHeader(name: string, value: string): this { this.headers[name.toLowerCase()] = value; return this; }
   json(body: unknown): this { this.jsonBody = body; this.end(); return this; }
 }
 
@@ -60,6 +62,8 @@ const loadRouter = (): { stack?: Layer[] } => {
   delete require.cache[modulePath];
   return (require("../routes/episodes.routes") as { episodesRouter: { stack?: Layer[] } }).episodesRouter;
 };
+
+const episodePublicationService = require("../services/episode-promotion-save.service") as typeof import("../services/episode-promotion-save.service");
 
 const invoke = async (router: { stack?: Layer[] }, routePath: string, req: any): Promise<{ response: MemoryResponse; error?: unknown }> => {
   const route = router.stack?.find((layer) => layer.route?.path === routePath && layer.route.methods?.post)?.route;
@@ -126,9 +130,12 @@ const assertCreateCompensated = async (episodeId: number, draftId: string, expec
 
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV !== "development") throw new Error("expected NODE_ENV=development");
+  if (process.env.DISABLE_BACKGROUND_WORKERS !== "true") throw new Error("fake verifier requires background workers to be disabled");
   await connectDb();
   const router = loadRouter();
+  const priorYoutubeJobEnabled = config.youtube.trailerJob.enabled;
   try {
+    getDb().prepare("DELETE FROM youtube_trailer_jobs WHERE episode_id IN (?, ?, ?, ?, ?, ?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2, fixtureEpisodeId + 3, consumeFailureEpisodeId, createFailureEpisodeId, promotionFailureEpisodeId, postCreateFailureEpisodeId);
     episodeRepository.delete(fixtureEpisodeId);
     episodeRepository.delete(replacementEpisodeId);
     getDb().prepare("DELETE FROM episode_trailer_video_drafts WHERE episode_id IN (?, ?)").run(fixtureEpisodeId, replacementEpisodeId);
@@ -175,10 +182,24 @@ const main = async (): Promise<void> => {
       trailerVideoFileName: null,
       message: "Trailer video staged; save the episode to finalize it.",
     });
-    if (config.youtube.trailerJob.enabled) {
-      assert.equal(typeof stagedBody.youtubeJob, "object");
-    }
+    assert.equal(stagedBody.youtubeJob, null, "MP4 staging must not enqueue or start a YouTube job");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM youtube_trailer_jobs WHERE episode_id = ?").get(fixtureEpisodeId)?.count ?? 0, 0,
+      "staging alone must create zero YouTube jobs");
     assert.equal(await fs.promises.readFile(getEpisodeMediaStagingPath(fixtureEpisodeId, "trailerVideo"), "utf8"), "draft-bytes");
+
+    // The same staged bytes become transferable only through the explicit,
+    // authenticated operator action. Workers stay disabled in this verifier.
+    config.youtube.trailerJob.enabled = true;
+    const explicitUpload = await invoke(router, "/:episodeId/youtube-trailer-jobs", {
+      params: { episodeId: String(fixtureEpisodeId) },
+      body: { draftId: reservation.draftId, title: `Trailer - Episode ${fixtureEpisodeId}`, summary: "", hashtags: [] },
+      headers: {},
+      user: { email: owner },
+    });
+    assert.equal(explicitUpload.response.statusCode, 202);
+    assert.equal((explicitUpload.response.jsonBody as { status?: string }).status, "queued");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM youtube_trailer_jobs WHERE episode_id = ?").get(fixtureEpisodeId)?.count ?? 0, 1,
+      "the explicit YouTube action creates exactly one durable job");
 
     const noVideoEpisodeId = fixtureEpisodeId + 2;
     episodeRepository.delete(noVideoEpisodeId);
@@ -225,10 +246,10 @@ const main = async (): Promise<void> => {
     await assertCreateCompensated(promotionFailureEpisodeId, promotionFailureReservation.draftId, "reserved");
 
     const postCreateFailureReservation = await stageTrailerDraft(router, postCreateFailureEpisodeId, "post-create-failure");
-    const originalQueueLaunchNotification = episodeRepository.queueLaunchNotification;
-    (episodeRepository as any).queueLaunchNotification = (): never => { throw new Error("injected post-create failure"); };
+    const originalSaveEpisodeAndQueuePromotion = episodePublicationService.saveEpisodeAndQueuePromotion;
+    (episodePublicationService as any).saveEpisodeAndQueuePromotion = (): never => { throw new Error("injected post-create failure"); };
     const postCreateFailure = await invoke(router, "/", { body: episodeCreateBody(postCreateFailureEpisodeId, postCreateFailureReservation.draftId), headers: {}, params: {} });
-    (episodeRepository as any).queueLaunchNotification = originalQueueLaunchNotification;
+    (episodePublicationService as any).saveEpisodeAndQueuePromotion = originalSaveEpisodeAndQueuePromotion;
     assert.ok(postCreateFailure.error, "D-03 post-create failure must surface through the route error boundary");
     await assertCreateCompensated(postCreateFailureEpisodeId, postCreateFailureReservation.draftId, "reserved");
 
@@ -265,8 +286,10 @@ const main = async (): Promise<void> => {
     assert.match(routesSource, /youtube-trailer-jobs[\s\S]*publish/i);
     console.log("verified D-01/D-02/D-03 trailer-video reservation, auth, staging, fault-injected create/promotion/consume/post-create compensation, rollback, expiry cleanup, and YouTube job/publication route integration");
   } finally {
+    config.youtube.trailerJob.enabled = priorYoutubeJobEnabled;
     config.auth.bypassInDev = true;
     config.media.trailerVideoMaxBytes = 500 * 1024 * 1024;
+    getDb().prepare("DELETE FROM youtube_trailer_jobs WHERE episode_id IN (?, ?, ?, ?, ?, ?, ?, ?)").run(fixtureEpisodeId, replacementEpisodeId, fixtureEpisodeId + 2, fixtureEpisodeId + 3, consumeFailureEpisodeId, createFailureEpisodeId, promotionFailureEpisodeId, postCreateFailureEpisodeId);
     episodeRepository.delete(fixtureEpisodeId);
     episodeRepository.delete(replacementEpisodeId);
     episodeRepository.delete(consumeFailureEpisodeId);

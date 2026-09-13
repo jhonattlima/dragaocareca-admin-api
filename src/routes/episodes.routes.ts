@@ -675,20 +675,9 @@ episodesRouter.post("/:episodeId/trailer-video", requireAuth, (req, res, next) =
           message: "Trailer video staged; save the episode to finalize it.",
         };
         episodeRepository.updateTrailerVideoDraftState(checked.reservation.draftId, "staged");
-        let youtubeJob = null;
-        if (config.youtube.trailerJob.enabled) {
-          try {
-            const job = await createYoutubeTrailerJob(episodeId, {
-              title: `Trailer - Episode ${episodeId}`,
-              summary: "",
-              hashtags: [],
-            });
-            youtubeJob = toYoutubeTrailerJobStatusDto(job);
-          } catch (youtubeError) {
-            console.warn("Private YouTube trailer job could not be queued after staging", youtubeError instanceof Error ? youtubeError.message : String(youtubeError));
-          }
-        }
-        res.json({ ...response, youtubeJob });
+        // Staging is local-only. The operator explicitly starts YouTube transfer
+        // through POST /youtube-trailer-jobs after reviewing the staged MP4.
+        res.json({ ...response, youtubeJob: null });
         return;
       }
 
