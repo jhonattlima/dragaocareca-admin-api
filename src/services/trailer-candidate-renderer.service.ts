@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { buildTrailerRenderArgs, TRAILER_RENDER_VISUAL_PROFILE } from "./trailer-render-profile.service";
+import { buildTrailerAssCaptions, buildTrailerCaptionRenderArgs, buildTrailerRenderArgs, TRAILER_RENDER_VISUAL_PROFILE, type TrailerCaptionCue } from "./trailer-render-profile.service";
 
 const STDERR_LIMIT = 64 * 1024;
 const PROCESS_KILL_GRACE_MS = 2_000;
@@ -133,6 +133,13 @@ export const renderTrailerCandidateOutput = async (input: {
   coverPath: string; audioPath: string; outputPath: string; durationSeconds: number;
 }, runner: TrailerProcessRunner = runTrailerProcess): Promise<void> => {
   await runner("ffmpeg", buildTrailerRenderArgs(input), trailerRenderTimeoutMs(input.durationSeconds));
+};
+
+export const renderTrailerCandidateCaptions = async (input: {
+  inputVideoPath: string; assPath: string; outputPath: string; durationSeconds: number; cues: TrailerCaptionCue[];
+}, runner: TrailerProcessRunner = runTrailerProcess): Promise<void> => {
+  await fs.promises.writeFile(input.assPath, buildTrailerAssCaptions(input.cues), { flag: "wx", mode: 0o600 });
+  await runner("ffmpeg", buildTrailerCaptionRenderArgs(input), trailerRenderTimeoutMs(input.durationSeconds));
 };
 
 export const resolveAttemptOutputPaths = (candidateDirectory: string, attemptNumber: number): { directory: string; partial: string; ready: string } => {
