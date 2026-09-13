@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { config } from "../config/env";
 import { trailerCandidateRepository, type TrailerCandidateRow } from "../database/repositories/trailer-candidate.repository";
 import { acquireTrailerCandidateFileUse, cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
+import { transcribeTrailerAudioSnapshot } from "../services/episode-transcription.service";
 import {
   getTrailerCandidateSnapshotPaths,
+  trailerCandidateExistingFilePath,
   trailerCandidateStoragePath,
   trailerCandidateSourcesStillCurrent,
 } from "../services/trailer-candidate.service";
@@ -33,6 +36,7 @@ export const requiredTrailerCandidateFreeBytes = (sourceBytes: number, durationS
 export type TrailerCandidateWorkerSeams = {
   availableBytes?: (rootPath: string) => Promise<number>;
   processRunner?: TrailerProcessRunner;
+  transcribe?: (audioPath: string, onProgress: (progress: number) => void) => Promise<{ text: string; provider: string }>;
 };
 
 const availableBytes = async (rootPath: string): Promise<number> => {
@@ -103,6 +107,47 @@ const processTrailerCandidateInternal = async (
   trailerCandidateRepository.setAttemptPartialPath(candidate.candidateId, attemptNumber, partialRelativePath);
 
   try {
+    let transcriptValid = false;
+    if (claimed.trailerTranscriptStatus === "done" && claimed.trailerTranscriptRelativePath && claimed.trailerTranscriptSha256) {
+      try {
+        const existingTranscriptPath = await trailerCandidateExistingFilePath(claimed.trailerTranscriptRelativePath);
+        const evidence = await fs.promises.readFile(existingTranscriptPath);
+        transcriptValid = createHash("sha256").update(evidence).digest("hex") === claimed.trailerTranscriptSha256;
+        if (!transcriptValid) throw new Error("Private trailer transcript hash mismatch");
+      } catch {
+        transcriptValid = false;
+      }
+    }
+
+    if (!transcriptValid) {
+      trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, { status: "processing", progress: 0, errorCategory: null });
+      try {
+        const transcribe = seams.transcribe ?? ((audioPath, onProgress) => transcribeTrailerAudioSnapshot(audioPath, onProgress));
+        const result = await transcribe(snapshot.audioPath, (progress) => {
+          trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, { status: "processing", progress });
+        });
+        const transcriptText = result.text.trim();
+        if (transcriptText.length > 100_000) throw new Error("Transcript exceeds the private candidate limit");
+        const bytes = Buffer.from(transcriptText, "utf8");
+        const transcriptHash = createHash("sha256").update(bytes).digest("hex");
+        const relativePath = path.posix.join(candidate.snapshotRelativePath.replace(/[\\/]+$/u, ""), "transcript.txt");
+        const finalTranscriptPath = await trailerCandidateStoragePath(relativePath);
+        const temporaryTranscriptPath = `${finalTranscriptPath}.partial`;
+        await fs.promises.writeFile(temporaryTranscriptPath, bytes, { flag: "wx", mode: 0o600 });
+        await fs.promises.rename(temporaryTranscriptPath, finalTranscriptPath);
+        transcriptValid = true;
+        trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, {
+          status: "done", progress: 100, relativePath, sha256: transcriptHash, provider: result.provider, errorCategory: null,
+        });
+      } catch {
+        trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, {
+          status: "error", progress: null, errorCategory: "transcription_unavailable",
+        });
+      }
+    }
+
+    // The transcript is deliberately kept on the candidate record and private root;
+    // a transcription failure does not block waveform-only candidate generation.
     await renderTrailerCandidateOutput({ ...snapshot, outputPath: outputPaths.partial, durationSeconds }, runner);
     const evidence = await validateTrailerCandidateOutput(outputPaths.partial, durationSeconds, runner);
     if (!await trailerCandidateSourcesStillCurrent(candidate)) {

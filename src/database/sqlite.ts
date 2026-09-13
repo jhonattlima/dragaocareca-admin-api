@@ -308,6 +308,12 @@ CREATE TABLE IF NOT EXISTS trailer_candidate_versions (
   cover_sha256 TEXT NOT NULL,
   audio_sha256 TEXT NOT NULL,
   transcript_sha256 TEXT,
+  trailer_transcript_status TEXT NOT NULL DEFAULT 'not_started' CHECK (trailer_transcript_status IN ('not_started', 'processing', 'done', 'error')),
+  trailer_transcript_progress INTEGER CHECK (trailer_transcript_progress IS NULL OR trailer_transcript_progress BETWEEN 0 AND 100),
+  trailer_transcript_relative_path TEXT,
+  trailer_transcript_sha256 TEXT,
+  trailer_transcription_provider TEXT,
+  trailer_transcript_error_category TEXT,
   profile_id TEXT NOT NULL,
   profile_revision INTEGER NOT NULL CHECK (profile_revision > 0),
   snapshot_relative_path TEXT NOT NULL,
@@ -562,6 +568,7 @@ export const getDb = (): DatabaseSync => {
     }
     db = new DatabaseSync(dbPath);
     db.exec(schema);
+    ensureTrailerCandidateTranscriptColumns(db);
     ensureYoutubeMetricSampleColumns(db);
     ensureEpisodeTranscriptColumns(db);
     ensureEpisodeDraftColumn(db);
@@ -576,6 +583,17 @@ export const getDb = (): DatabaseSync => {
     ensureEpisodeSocialMetadataColumns(db);
   }
   return db;
+};
+
+const ensureTrailerCandidateTranscriptColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(trailer_candidate_versions)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("trailer_transcript_status")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_status TEXT NOT NULL DEFAULT 'not_started'");
+  if (!names.has("trailer_transcript_progress")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_progress INTEGER");
+  if (!names.has("trailer_transcript_relative_path")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_relative_path TEXT");
+  if (!names.has("trailer_transcript_sha256")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_sha256 TEXT");
+  if (!names.has("trailer_transcription_provider")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcription_provider TEXT");
+  if (!names.has("trailer_transcript_error_category")) database.exec("ALTER TABLE trailer_candidate_versions ADD COLUMN trailer_transcript_error_category TEXT");
 };
 
 const ensureMetaConnectionTable = (database: DatabaseSync): void => {

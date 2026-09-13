@@ -98,7 +98,7 @@ const run = async (): Promise<void> => {
   globalThis.fetch = (async () => { networkCalls += 1; throw new Error("Outbound network is forbidden in fake-only verification"); }) as typeof fetch;
   const originalNow = Date.now;
   try {
-    const [database, episodes, candidates, mediaLayout, candidateService, routes, publicCatalog] = await Promise.all([
+    const [database, episodes, candidates, mediaLayout, candidateService, routes, publicCatalog, candidateWorker] = await Promise.all([
       import("../database/connect.js"),
       import("../database/repositories/episode.repository.js"),
       import("../database/repositories/trailer-candidate.repository.js"),
@@ -106,6 +106,7 @@ const run = async (): Promise<void> => {
       import("../services/trailer-candidate.service.js"),
       import("../routes/episodes.routes.js"),
       import("../services/public-episode-catalog.service.js"),
+      import("../workers/trailer-candidate.worker.js"),
     ]);
     const [{ config }, { episodeSchema }] = await Promise.all([import("../config/env.js"), import("../schemas/episode.js")]);
     await database.connectDb();
@@ -129,6 +130,106 @@ const run = async (): Promise<void> => {
     await fs.promises.mkdir(path.dirname(audioPath), { recursive: true });
     await fs.promises.writeFile(coverPath, "offline-cover-fixture");
     await fs.promises.writeFile(audioPath, "offline-audio-fixture");
+
+    const automaticEpisodeId = episodeId + 1;
+    episodes.episodeRepository.create(episodeSchema.parse({
+      episodeId: automaticEpisodeId,
+      title: "Automatic transcript fixture",
+      summary: "Offline transcript contract",
+      pubDate: new Date("2026-01-02T00:00:00.000Z"),
+      explicit: "no",
+      authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Fixture", links: [{ url: "https://example.test/fixture" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    const automaticCoverPath = mediaLayout.getEpisodeMediaStagingPath(automaticEpisodeId, "cover");
+    const automaticAudioPath = mediaLayout.getEpisodeMediaStagingPath(automaticEpisodeId, "trailer");
+    await fs.promises.mkdir(path.dirname(automaticCoverPath), { recursive: true });
+    await fs.promises.mkdir(path.dirname(automaticAudioPath), { recursive: true });
+    await fs.promises.writeFile(automaticCoverPath, "automatic-cover-fixture");
+    await fs.promises.writeFile(automaticAudioPath, "automatic-audio-fixture");
+    const automatic = await candidateService.enqueueTrailerCandidate(automaticEpisodeId, "review-fixture@example.test");
+    assert.equal(automatic.waitingForInput, false);
+    if (automatic.waitingForInput) throw new Error("Automatic candidate fixture unexpectedly waited for inputs");
+    let transcriptionCalls = 0;
+    const fakeRunner = async (command: string, args: string[]) => {
+      const target = args[args.length - 1];
+      if (command === "ffprobe") {
+        const isSourceAudio = target === await candidateService.trailerCandidateStoragePath(`${automatic.candidate.candidateId}/trailer.mp3`);
+        return { stdout: JSON.stringify(isSourceAudio
+          ? { streams: [{ codec_type: "audio", duration: "7.25" }] }
+          : { format: { duration: "7.25" }, streams: [
+            { codec_type: "video", codec_name: "h264", profile: "Main", width: 1280, height: 1280, pix_fmt: "yuv420p", sample_aspect_ratio: "1:1", duration: "7.25" },
+            { codec_type: "audio", codec_name: "aac", duration: "7.25" },
+          ] }), stderr: "" };
+      }
+      if (command === "ffmpeg" && args.includes("null")) return { stdout: "", stderr: "" };
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.writeFile(target, Buffer.from("FAKE-CANDIDATE-MP4"));
+      return { stdout: "", stderr: "" };
+    };
+    const fakeTranscribe = async (snapshotAudioPath: string, onProgress: (progress: number) => void) => {
+      transcriptionCalls += 1;
+      assert.equal(snapshotAudioPath, await candidateService.trailerCandidateStoragePath(`${automatic.candidate.candidateId}/trailer.mp3`));
+      assert.equal(await fs.promises.readFile(snapshotAudioPath, "utf8"), "automatic-audio-fixture");
+      onProgress(37);
+      return { text: "A private generated trailer transcript.", provider: "fake" };
+    };
+    await candidateWorker.processTrailerCandidate(candidates.trailerCandidateRepository.findById(automatic.candidate.candidateId)!, {
+      availableBytes: async () => 2 ** 40,
+      processRunner: fakeRunner,
+      transcribe: fakeTranscribe,
+    });
+    let automaticRow = candidates.trailerCandidateRepository.findById(automatic.candidate.candidateId)!;
+    assert.equal(automaticRow.status, "ready");
+    assert.equal(automaticRow.trailerTranscriptStatus, "done");
+    assert.equal(automaticRow.trailerTranscriptProgress, 100);
+    assert.equal(automaticRow.trailerTranscriptionProvider, "fake");
+    assert.ok(automaticRow.trailerTranscriptRelativePath);
+    const privateTranscriptPath = await candidateService.trailerCandidateExistingFilePath(automaticRow.trailerTranscriptRelativePath!);
+    const privateTranscript = await fs.promises.readFile(privateTranscriptPath);
+    assert.equal(privateTranscript.toString("utf8"), "A private generated trailer transcript.");
+    assert.equal(createHash("sha256").update(privateTranscript).digest("hex"), automaticRow.trailerTranscriptSha256);
+    const canonicalTranscriptPath = mediaLayout.getEpisodeMediaFinalPath(automaticEpisodeId, "transcript");
+    assert.equal(await fs.promises.access(canonicalTranscriptPath).then(() => true).catch(() => false), false);
+    assert.equal(episodes.episodeRepository.findByEpisodeId(automaticEpisodeId)?.transcriptStatus, "idle");
+    assert.equal(transcriptionCalls, 1);
+
+    const { getDb } = await import("../database/sqlite.js");
+    getDb().prepare("UPDATE trailer_candidate_versions SET status = 'processing' WHERE candidate_id = ?").run(automatic.candidate.candidateId);
+    const recoveredTranscript = candidates.trailerCandidateRepository.recoverProcessing();
+    assert.equal(recoveredTranscript.length, 1);
+    assert.equal(candidates.trailerCandidateRepository.findById(automatic.candidate.candidateId)?.trailerTranscriptStatus, "done");
+    await candidateWorker.processTrailerCandidate(candidates.trailerCandidateRepository.findById(automatic.candidate.candidateId)!, {
+      availableBytes: async () => 2 ** 40,
+      processRunner: fakeRunner,
+      transcribe: async () => { throw new Error("completed transcript must not be generated twice after restart"); },
+    });
+    assert.equal(transcriptionCalls, 1, "restart reuses the immutable completed transcript rather than duplicating provider work");
+
+    const failedEpisodeId = episodeId + 2;
+    episodes.episodeRepository.create(episodeSchema.parse({
+      episodeId: failedEpisodeId, title: "Transcript failure fixture", summary: "", pubDate: new Date("2026-01-03T00:00:00.000Z"),
+      explicit: "no", authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Fixture", links: [{ url: "https://example.test/fixture" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    for (const [kind, data] of [["cover", "failure-cover"], ["trailer", "failure-audio"]] as const) {
+      const stagedPath = mediaLayout.getEpisodeMediaStagingPath(failedEpisodeId, kind);
+      await fs.promises.mkdir(path.dirname(stagedPath), { recursive: true });
+      await fs.promises.writeFile(stagedPath, data);
+    }
+    const failedTranscriptCandidate = await candidateService.enqueueTrailerCandidate(failedEpisodeId, "review-fixture@example.test");
+    if (failedTranscriptCandidate.waitingForInput) throw new Error("Failure candidate unexpectedly waited for inputs");
+    await candidateWorker.processTrailerCandidate(candidates.trailerCandidateRepository.findById(failedTranscriptCandidate.candidate.candidateId)!, {
+      availableBytes: async () => 2 ** 40,
+      processRunner: fakeRunner,
+      transcribe: async () => { throw new Error("offline fake provider failure"); },
+    });
+    const waveformOnly = candidates.trailerCandidateRepository.findById(failedTranscriptCandidate.candidate.candidateId)!;
+    assert.equal(waveformOnly.status, "ready", "transcription failure must not block waveform-only candidate output");
+    assert.equal(waveformOnly.trailerTranscriptStatus, "error");
+    assert.equal(waveformOnly.trailerTranscriptErrorCategory, "transcription_unavailable");
 
     const enqueued = await candidateService.enqueueTrailerCandidate(episodeId, "review-fixture@example.test");
     assert.equal(enqueued.waitingForInput, false);
@@ -281,7 +382,6 @@ const run = async (): Promise<void> => {
     const originalCandidate = candidates.trailerCandidateRepository.findById(candidateId)!;
     const symlinkRelativePath = path.posix.join(originalCandidate.snapshotRelativePath.replace(/[\\/]+$/u, ""), "attempts", "1", "linked.mp4");
     await fs.promises.symlink(escapedOutput, path.join(privateRoot, symlinkRelativePath));
-    const { getDb } = await import("../database/sqlite.js");
     getDb().prepare("UPDATE trailer_candidate_versions SET output_relative_path = ?, output_sha256 = ?, output_bytes = ? WHERE candidate_id = ?")
       .run(symlinkRelativePath, outputSha256, videoBytes.length, candidateId);
     const escapedGrant = await invoke(router, "post", grantPath, new Request(trailerParams(episodeId, candidateId), {}));

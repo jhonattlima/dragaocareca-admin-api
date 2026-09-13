@@ -697,6 +697,21 @@ const transcribeAudio = async (
   return transcribeAudioInChunks(audioPath, onProgress, provider);
 };
 
+/** Transcribes an already-resolved immutable media snapshot without touching episode state. */
+export const transcribeTrailerAudioSnapshot = async (
+  audioPath: string,
+  onProgress?: (progress: number) => void,
+  requestedProvider: TranscriptionProvider = getConfiguredTranscriptionProvider(),
+): Promise<{ text: string; provider: TranscriptionProvider }> => {
+  const configurationError = getTranscriptionConfigurationError(requestedProvider);
+  if (configurationError) throw new Error(configurationError);
+  let provider = requestedProvider;
+  const text = await transcribeAudio(audioPath, onProgress, requestedProvider, (activeProvider) => {
+    provider = activeProvider;
+  });
+  return { text, provider };
+};
+
 const transcribeEpisode = async (episode: EpisodeRow): Promise<string> => {
   const audioPath = await buildAudioPath(episode);
   const transcript = await transcribeAudio(audioPath);

@@ -2,6 +2,7 @@ import { getDb, nowIso } from "../sqlite";
 
 export type TrailerCandidateStatus = "pending" | "processing" | "waiting_capacity" | "retryable" | "ready" | "stale" | "superseded";
 export type TrailerCandidateAttemptStatus = "processing" | "waiting_capacity" | "ready" | "failed" | "stale" | "interrupted";
+export type TrailerTranscriptStatus = "not_started" | "processing" | "done" | "error";
 
 export type TrailerCandidateRow = {
   candidateId: string;
@@ -12,6 +13,12 @@ export type TrailerCandidateRow = {
   coverSha256: string;
   audioSha256: string;
   transcriptSha256: string | null;
+  trailerTranscriptStatus: TrailerTranscriptStatus;
+  trailerTranscriptProgress: number | null;
+  trailerTranscriptRelativePath: string | null;
+  trailerTranscriptSha256: string | null;
+  trailerTranscriptionProvider: string | null;
+  trailerTranscriptErrorCategory: string | null;
   profileId: string;
   profileRevision: number;
   snapshotRelativePath: string;
@@ -60,6 +67,9 @@ export type CreateTrailerCandidateInput = {
 type CandidateSqlRow = {
   candidate_id: string; episode_id: number; draft_id: string | null; version: number;
   source_fingerprint: string; cover_sha256: string; audio_sha256: string; transcript_sha256: string | null;
+  trailer_transcript_status: TrailerTranscriptStatus; trailer_transcript_progress: number | null;
+  trailer_transcript_relative_path: string | null; trailer_transcript_sha256: string | null;
+  trailer_transcription_provider: string | null; trailer_transcript_error_category: string | null;
   profile_id: string; profile_revision: number; snapshot_relative_path: string; output_relative_path: string | null;
   output_sha256: string | null; output_bytes: number | null; duration_seconds: number | null; probe_json: string | null;
   status: TrailerCandidateStatus; progress: number; error_category: string | null; error_message: string | null;
@@ -81,6 +91,12 @@ const mapCandidate = (row: CandidateSqlRow | undefined): TrailerCandidateRow | n
   coverSha256: row.cover_sha256,
   audioSha256: row.audio_sha256,
   transcriptSha256: row.transcript_sha256,
+  trailerTranscriptStatus: row.trailer_transcript_status ?? "not_started",
+  trailerTranscriptProgress: row.trailer_transcript_progress ?? null,
+  trailerTranscriptRelativePath: row.trailer_transcript_relative_path ?? null,
+  trailerTranscriptSha256: row.trailer_transcript_sha256 ?? null,
+  trailerTranscriptionProvider: row.trailer_transcription_provider ?? null,
+  trailerTranscriptErrorCategory: row.trailer_transcript_error_category ?? null,
   profileId: row.profile_id,
   profileRevision: row.profile_revision,
   snapshotRelativePath: row.snapshot_relative_path,
@@ -221,6 +237,24 @@ export const trailerCandidateRepository = {
       WHERE candidate_id = ? AND status = 'processing'`).run(bounded, nowIso(), candidateId).changes > 0;
   },
 
+  updateTrailerTranscript(candidateId: string, input: {
+    status: TrailerTranscriptStatus;
+    progress?: number | null;
+    relativePath?: string | null;
+    sha256?: string | null;
+    provider?: string | null;
+    errorCategory?: string | null;
+  }): boolean {
+    const progress = input.progress == null ? null : Math.max(0, Math.min(100, Math.trunc(input.progress)));
+    return getDb().prepare(`UPDATE trailer_candidate_versions SET trailer_transcript_status = ?,
+      trailer_transcript_progress = ?, trailer_transcript_relative_path = COALESCE(?, trailer_transcript_relative_path),
+      trailer_transcript_sha256 = COALESCE(?, trailer_transcript_sha256),
+      trailer_transcription_provider = COALESCE(?, trailer_transcription_provider),
+      trailer_transcript_error_category = ?, updated_at = ? WHERE candidate_id = ?`)
+      .run(input.status, progress, input.relativePath ?? null, input.sha256 ?? null,
+        input.provider ?? null, input.errorCategory ?? null, nowIso(), candidateId).changes > 0;
+  },
+
   setAttemptPartialPath(candidateId: string, attemptNumber: number, relativePath: string): boolean {
     return getDb().prepare(`UPDATE trailer_candidate_attempts SET output_partial_relative_path = ?
       WHERE candidate_id = ? AND attempt_number = ? AND status = 'processing'`).run(relativePath, candidateId, attemptNumber).changes > 0;
@@ -332,6 +366,9 @@ export const trailerCandidateRepository = {
           SELECT candidate_id FROM trailer_candidate_versions WHERE status = 'processing'
         )`).run(now);
       db.prepare(`UPDATE trailer_candidate_versions SET status = 'pending', progress = 0, updated_at = ? WHERE status = 'processing'`).run(now);
+      db.prepare(`UPDATE trailer_candidate_versions SET trailer_transcript_status = 'not_started',
+        trailer_transcript_progress = NULL, trailer_transcript_error_category = NULL, updated_at = ?
+        WHERE trailer_transcript_status = 'processing' AND trailer_transcript_sha256 IS NULL`).run(now);
       return interrupted.map((row) => mapCandidate(row) as TrailerCandidateRow);
     });
     return recover();
