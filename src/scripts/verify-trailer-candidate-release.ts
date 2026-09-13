@@ -79,6 +79,15 @@ const candidateIds = ["b4bb3ee0-0f72-4dc0-85f8-839aef1c1a01", "b4bb3ee0-0f72-4dc
 const operatorEmail = "synthetic-operator@example.test";
 const sourceBytes = ["fixture-cover-approval", "fixture-audio-approval", "fixture-cover-review", "fixture-audio-review"] as const;
 const outputBytes = [Buffer.from("FAKE-MP4-APPROVAL-CANDIDATE-V1"), Buffer.from("FAKE-MP4-UNAPPROVED-REVIEW-V1")];
+const sourceFingerprints = [
+  hash(JSON.stringify({ cover: hash(sourceBytes[0]), audio: hash(sourceBytes[1]), transcript: "missing", profileId: "square-reels-karaoke-v2", profileRevision: 2 })),
+  hash(JSON.stringify({ cover: hash(sourceBytes[2]), audio: hash(sourceBytes[3]), transcript: "missing", profileId: "square-reels-karaoke-v2", profileRevision: 2 })),
+];
+const approvedSourceRevision = `episode:${episodeIds[0]}:${hash(JSON.stringify({
+  mediaReference: `episodes/${episodeIds[0]}/trailer.mp4`, sha256: hash(outputBytes[0]), byteCount: outputBytes[0].byteLength, mimeType: "video/mp4",
+}))}`;
+const attemptIds = episodeIds.map((episodeId) => `synthetic-attempt-${episodeId}`);
+const journalId = "b4bb3ee0-0f72-4dc0-85f8-839aef1c1a03";
 
 const cleanupManifestFixture = async (manifestPath: string, expectedMode: "hold-for-admin-smoke" | "default-cleanup", remove = true): Promise<void> => {
   const resolvedManifestPath = path.resolve(manifestPath);
@@ -114,7 +123,7 @@ const cleanupManifestFixture = async (manifestPath: string, expectedMode: "hold-
       assert.equal(candidates.every((row) => candidateIds.includes(row.candidate_id as typeof candidateIds[number]) && episodeIds[candidateIds.indexOf(row.candidate_id as typeof candidateIds[number])] === row.episode_id && row.version === 1), true);
       if (strict) assert.deepEqual(candidates.map((row) => ({ candidate_id: row.candidate_id, status: row.status })), candidateIds.map((candidate_id) => ({ candidate_id, status: "ready" })));
       assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT candidate_id, episode_id, version, status, source_fingerprint, output_relative_path, output_sha256, output_bytes FROM trailer_candidate_versions ORDER BY episode_id").all())), manifest.relatedRows.find((row: any) => row.table === "trailer_candidate_versions").keys);
-      assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT candidate_id, attempt_number, status FROM trailer_candidate_attempts ORDER BY candidate_id").all())), manifest.relatedRows.find((row: any) => row.table === "trailer_candidate_attempts").keys);
+      assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT attempt_id, candidate_id, attempt_number, status FROM trailer_candidate_attempts ORDER BY candidate_id").all())), manifest.relatedRows.find((row: any) => row.table === "trailer_candidate_attempts").keys);
       const decisions = database.prepare("SELECT candidate_id, decision FROM trailer_candidate_decisions").all() as Array<{ candidate_id: string; decision: string }>;
       assert.equal(decisions.every((row) => row.candidate_id === candidateIds[0] && row.decision === "approved"), true);
       if (strict) assert.deepEqual(decisions.map(({ candidate_id, decision }) => ({ candidate_id, decision })), [{ candidate_id: candidateIds[0], decision: "approved" }]);
@@ -199,6 +208,8 @@ const main = async (): Promise<void> => {
     database: "release.sqlite",
     mediaRoot: "media/",
     privateRoot: "private/trailer-candidates/",
+    timestamps: { episodeCreatedAt: fixtureTime, candidateCreatedAt: fixtureTime, candidateReadyAt: fixtureTime, decisionAt: fixtureTime, journalAt: fixtureTime },
+    canonicalFile: { path: `media/episodes/${episodeIds[0]}/trailer.mp4`, sha256: hash(outputBytes[0]), bytes: outputBytes[0].byteLength },
     episodes: episodeIds.map((episodeId, index) => ({
       episodeId,
       title: `Synthetic release proof ${index + 1}`,
@@ -208,6 +219,7 @@ const main = async (): Promise<void> => {
         : [{ path: `media/staging/${episodeId}/cover.jpeg`, sha256: hash(sourceBytes[2]) }, { path: `media/staging/${episodeId}/trailer.mp3`, sha256: hash(sourceBytes[3]) }],
       candidate: {
         candidateId: candidateIds[index], version: 1, status: "ready",
+        sourceFingerprint: sourceFingerprints[index],
         snapshotFiles: index === 0
           ? [{ path: `${candidateIds[index]}/cover.jpeg`, sha256: hash(sourceBytes[0]) }, { path: `${candidateIds[index]}/trailer.mp3`, sha256: hash(sourceBytes[1]) }, { path: `${candidateIds[index]}/trailer-transcript.txt`, sha256: hash("Synthetic private transcript") }]
           : [{ path: `${candidateIds[index]}/cover.jpeg`, sha256: hash(sourceBytes[2]) }, { path: `${candidateIds[index]}/trailer.mp3`, sha256: hash(sourceBytes[3]) }, { path: `${candidateIds[index]}/trailer-transcript.txt`, sha256: hash("Synthetic private transcript") }],
@@ -217,13 +229,13 @@ const main = async (): Promise<void> => {
       },
     })),
     relatedRows: [
-      { table: "episodes", keys: episodeIds.map((episodeId) => ({ episodeId })) },
-      { table: "trailer_candidate_versions", keys: candidateIds.map((candidateId, index) => ({ candidateId, episodeId: episodeIds[index], version: 1 })) },
-      { table: "trailer_candidate_attempts", keys: candidateIds.map((candidateId, index) => ({ candidateId, attemptNumber: 1 })) },
-      { table: "trailer_candidate_decisions", keys: [{ candidateId: candidateIds[0], decision: "approved" }] },
-      { table: "trailer_promotion_journals", keys: [{ episodeId: episodeIds[0], candidateId: candidateIds[0], phase: "committed" }] },
-      { table: "episode_publication_intents", keys: [{ episodeId: episodeIds[0], sourceRevision: "computed-from-approved-output" }] },
-      { table: "episode_publication_effects", keys: [{ episodeId: episodeIds[0], destination: "instagram_reel" }, { episodeId: episodeIds[0], destination: "facebook_native_video" }] },
+      { table: "episodes", keys: episodeIds.map((episode_id) => ({ episode_id, created_at: fixtureTime })) },
+      { table: "trailer_candidate_versions", keys: candidateIds.map((candidate_id, index) => ({ candidate_id, episode_id: episodeIds[index], version: 1, status: "ready", source_fingerprint: sourceFingerprints[index], output_relative_path: `${candidate_id}/attempts/1/candidate.mp4`, output_sha256: hash(outputBytes[index]), output_bytes: outputBytes[index].byteLength })) },
+      { table: "trailer_candidate_attempts", keys: candidateIds.map((candidate_id, index) => ({ attempt_id: attemptIds[index], candidate_id, attempt_number: 1, status: "ready" })) },
+      { table: "trailer_candidate_decisions", keys: [{ candidate_id: candidateIds[0], episode_id: episodeIds[0], decision: "approved", expected_version: 1, expected_source_fingerprint: sourceFingerprints[0] }] },
+      { table: "trailer_promotion_journals", keys: [{ journal_id: journalId, episode_id: episodeIds[0], candidate_id: candidateIds[0], phase: "committed", new_sha256: hash(outputBytes[0]) }] },
+      { table: "episode_publication_intents", keys: [{ intent_id: `episode:${episodeIds[0]}:${approvedSourceRevision}`, episode_id: episodeIds[0], source_revision: approvedSourceRevision }] },
+      { table: "episode_publication_effects", keys: ["facebook_native_video", "instagram_reel"].map((destination) => ({ effect_key: `episode:${episodeIds[0]}:${approvedSourceRevision}:${destination}`, intent_id: `episode:${episodeIds[0]}:${approvedSourceRevision}`, episode_id: episodeIds[0], destination, source_revision: approvedSourceRevision, lifecycle: "published" })) },
     ],
     mode: hold ? "hold-for-admin-smoke" : "default-cleanup",
   };
@@ -232,6 +244,7 @@ const main = async (): Promise<void> => {
   const originalFetch = globalThis.fetch;
   const originalCwd = process.cwd();
   const originalConsoleLog = console.log;
+  const originalDate = globalThis.Date;
   const crypto = require("node:crypto") as typeof import("node:crypto");
   const originalRandomUUID = crypto.randomUUID;
   let uuidIndex = 0;
@@ -241,6 +254,12 @@ const main = async (): Promise<void> => {
   let holdReady = false;
   try {
     process.chdir(root);
+    const fixedTimeMs = originalDate.parse(fixtureTime);
+    class FixtureDate extends originalDate {
+      constructor(...args: any[]) { if (args.length === 0) super(fixtureTime); else super(args[0]); }
+      static now(): number { return fixedTimeMs; }
+    }
+    globalThis.Date = FixtureDate as DateConstructor;
     process.env.NODE_ENV = "development";
     process.env.SQLITE_PATH = databasePath;
     process.env.SQLITE_RESET = "true";
@@ -276,6 +295,7 @@ const main = async (): Promise<void> => {
     process.env.YOUTUBE_CLIENT_SECRET = "";
     process.env.YOUTUBE_REFRESH_TOKEN = "";
     globalThis.fetch = (async () => { networkCalls += 1; throw new Error("Outbound network is blocked in composite fake-only verification"); }) as typeof fetch;
+    crypto.randomUUID = (() => uuidQueue[uuidIndex++] ?? originalRandomUUID()) as typeof crypto.randomUUID;
     console.log = (...args: unknown[]) => {
       const first = args[0];
       if (typeof first === "string" && first.startsWith("SQLite database ready at ")) originalConsoleLog("Synthetic fixture database ready (path redacted)");
@@ -315,9 +335,6 @@ const main = async (): Promise<void> => {
     };
     publication.dispatchEpisodeReplacementPublication = async (episodeId: number, sourceRevision: string) =>
       originalDispatch(episodeId, sourceRevision, fakeProvider as any);
-    crypto.randomUUID = (() => uuidQueue[uuidIndex++] ?? originalRandomUUID()) as typeof crypto.randomUUID;
-
-    await connectDb();
     const router = episodesRouter as unknown as Router;
     const token = signAccessToken({ email: operatorEmail });
     const authHeaders = { authorization: `Bearer ${token}` };
@@ -344,11 +361,13 @@ const main = async (): Promise<void> => {
         transcriptText: "Synthetic private transcript", expectedSourceFingerprint: fingerprint,
       }, authHeaders));
       assert.equal(response.statusCode, 202);
-      assert.equal(response.jsonBody.candidateId, candidateIds[episodeIds.indexOf(episodeId as never)]);
+      const episodeIndex = episodeIds.indexOf(episodeId as never);
+      assert.equal(response.jsonBody.candidateId, candidateIds[episodeIndex]);
+      assert.equal(response.jsonBody.sourceFingerprint, sourceFingerprints[episodeIndex]);
       const candidateId = response.jsonBody.candidateId as string;
       const candidate = trailerCandidateRepository.findById(candidateId);
       assert.ok(candidate);
-      const attempt = trailerCandidateRepository.claim(candidateId, `synthetic-worker-${episodeId}`);
+      const attempt = trailerCandidateRepository.claim(candidateId, attemptIds[episodeIndex]);
       assert.ok(attempt);
       const candidateIndex = episodeIds.indexOf(episodeId as never);
       const bytes = outputBytes[candidateIndex];
@@ -421,6 +440,8 @@ const main = async (): Promise<void> => {
     assert.equal(decisionResponse.jsonBody.candidateId, candidateIds[0]);
     assert.equal(decisionResponse.jsonBody.version, 1);
     assert.equal(decisionResponse.jsonBody.sourceFingerprint, approvalBody.expectedSourceFingerprint);
+    assert.equal(decisionResponse.jsonBody.sourceRevision, approvedSourceRevision, "the revision must match the prewritten manifest identity");
+    assert.equal(uuidIndex, 3, "promotion journal UUID must match the prewritten manifest identity");
     const canonicalPath = media.getEpisodeMediaFinalPath(episodeIds[0], "trailerVideo");
     assert.deepEqual(await fs.promises.readFile(canonicalPath), outputBytes[0], "canonical file must exactly match the approved manifest candidate");
     assert.equal(hash(await fs.promises.readFile(canonicalPath)), approvedEntry.candidate.outputSha256);
@@ -449,22 +470,19 @@ const main = async (): Promise<void> => {
 
     manifest.completedAt = new Date().toISOString();
     manifest.runtime = { databaseSha256: hash(await fs.promises.readFile(databasePath)), approvedSourceRevision: decisionResponse.jsonBody.sourceRevision };
-    const episodeRows = getDb().prepare("SELECT episode_id, created_at FROM episodes ORDER BY episode_id").all() as Array<{ episode_id: number; created_at: string }>;
-    for (const row of episodeRows) {
-      const entry = manifest.episodes.find((candidate: any) => candidate.episodeId === row.episode_id);
-      assert.ok(entry);
-      entry.createdAt = row.created_at;
+    const exactRows = [
+      ["episodes", getDb().prepare("SELECT episode_id, created_at FROM episodes ORDER BY episode_id").all()],
+      ["trailer_candidate_versions", getDb().prepare("SELECT candidate_id, episode_id, version, status, source_fingerprint, output_relative_path, output_sha256, output_bytes FROM trailer_candidate_versions ORDER BY episode_id").all()],
+      ["trailer_candidate_attempts", getDb().prepare("SELECT attempt_id, candidate_id, attempt_number, status FROM trailer_candidate_attempts ORDER BY candidate_id").all()],
+      ["trailer_candidate_decisions", getDb().prepare("SELECT candidate_id, episode_id, decision, expected_version, expected_source_fingerprint FROM trailer_candidate_decisions ORDER BY candidate_id").all()],
+      ["trailer_promotion_journals", getDb().prepare("SELECT journal_id, episode_id, candidate_id, phase, new_sha256 FROM trailer_promotion_journals ORDER BY journal_id").all()],
+      ["episode_publication_intents", getDb().prepare("SELECT intent_id, episode_id, source_revision FROM episode_publication_intents ORDER BY intent_id").all()],
+      ["episode_publication_effects", getDb().prepare("SELECT effect_key, intent_id, episode_id, destination, source_revision, lifecycle FROM episode_publication_effects ORDER BY destination").all()],
+    ] as Array<[string, unknown[]]>;
+    for (const [table, rows] of exactRows) {
+      const expected = manifest.relatedRows.find((row: any) => row.table === table)?.keys;
+      assert.deepEqual(JSON.parse(JSON.stringify(rows)), expected, `prewritten manifest identity must exactly match ${table}`);
     }
-    manifest.relatedRows = [
-      { table: "episodes", keys: episodeRows },
-      { table: "trailer_candidate_versions", keys: getDb().prepare("SELECT candidate_id, episode_id, version, status, source_fingerprint, output_relative_path, output_sha256, output_bytes FROM trailer_candidate_versions ORDER BY episode_id").all() },
-      { table: "trailer_candidate_attempts", keys: getDb().prepare("SELECT candidate_id, attempt_number, status FROM trailer_candidate_attempts ORDER BY candidate_id").all() },
-      { table: "trailer_candidate_decisions", keys: getDb().prepare("SELECT candidate_id, episode_id, decision, expected_version, expected_source_fingerprint FROM trailer_candidate_decisions ORDER BY candidate_id").all() },
-      { table: "trailer_promotion_journals", keys: getDb().prepare("SELECT journal_id, episode_id, candidate_id, phase, new_sha256 FROM trailer_promotion_journals ORDER BY journal_id").all() },
-      { table: "episode_publication_intents", keys: getDb().prepare("SELECT intent_id, episode_id, source_revision FROM episode_publication_intents ORDER BY intent_id").all() },
-      { table: "episode_publication_effects", keys: getDb().prepare("SELECT effect_key, intent_id, episode_id, destination, source_revision, lifecycle FROM episode_publication_effects ORDER BY destination").all() },
-    ];
-    assert.equal(manifest.relatedRows.find((row: any) => row.table === "trailer_promotion_journals").keys[0].journal_id, uuidQueue[2]);
     await fs.promises.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
     const savedManifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8"));
     assert.deepEqual(savedManifest.episodes.map((entry: any) => entry.candidate.candidateId), [...candidateIds]);
@@ -478,6 +496,7 @@ const main = async (): Promise<void> => {
   } finally {
     globalThis.fetch = originalFetch;
     crypto.randomUUID = originalRandomUUID;
+    globalThis.Date = originalDate;
     process.chdir(originalCwd);
     console.log = originalConsoleLog;
     if (holdReady) return;
