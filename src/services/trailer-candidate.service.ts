@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config/env";
 import { episodeRepository } from "../database/repositories/episode.repository";
-import { trailerCandidateRepository, type TrailerCandidateRow } from "../database/repositories/trailer-candidate.repository";
+import { trailerCandidateRepository, type TrailerCandidateRow, type TrailerCaptionMode, type TrailerCaptionReasonCode } from "../database/repositories/trailer-candidate.repository";
 import { TRAILER_RENDER_VISUAL_PROFILE } from "./trailer-render-profile.service";
 import {
   findExistingEpisodeMediaPath,
@@ -19,6 +19,9 @@ export type TrailerCandidateStatusDto = {
   status: TrailerCandidateRow["status"];
   progress: number;
   errorCategory: string | null;
+  captionMode: TrailerCaptionMode;
+  captionStatus: TrailerCandidateRow["captionStatus"];
+  captionReasonCode: TrailerCaptionReasonCode;
   createdAt: string;
   updatedAt: string;
 };
@@ -47,6 +50,9 @@ export type TrailerCandidateReviewStatusDto = {
   transcriptProvider: string | null;
   transcriptErrorCategory: string | null;
   transcriptErrorMessage: string | null;
+  captionMode: TrailerCaptionMode;
+  captionStatus: TrailerCandidateRow["captionStatus"];
+  captionReasonCode: TrailerCaptionReasonCode;
 };
 
 export type TrailerCandidateEnqueueResult = {
@@ -68,6 +74,9 @@ const toStatusDto = (row: TrailerCandidateRow): TrailerCandidateStatusDto => ({
   status: row.status,
   progress: row.progress,
   errorCategory: row.errorCategory,
+  captionMode: row.captionMode,
+  captionStatus: row.captionStatus,
+  captionReasonCode: safeCaptionReasonCode(row.captionReasonCode),
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -95,6 +104,17 @@ const safeTranscriptErrorMessage = (category: string | null): string | null => {
   return category === "transcription_unavailable"
     ? "Trailer audio transcription is unavailable. You can continue with a waveform-only candidate or edit the transcript and generate again."
     : "Trailer audio transcription could not be completed. You can continue with a waveform-only candidate.";
+};
+
+const safeCaptionReasonCode = (category: string | null): TrailerCaptionReasonCode => {
+  const allowed = new Set<NonNullable<TrailerCaptionReasonCode>>([
+    "quality_calibration_unavailable", "capacity_unavailable", "captions_disabled", "transcript_unavailable",
+    "model_unavailable", "aligner_unavailable", "alignment_failed", "alignment_provenance_stale",
+    "alignment_coverage_insufficient", "alignment_timing_invalid", "quality_below_calibration", "caption_render_failed",
+  ]);
+  return category && allowed.has(category as NonNullable<TrailerCaptionReasonCode>)
+    ? category as NonNullable<TrailerCaptionReasonCode>
+    : category === null ? null : "quality_calibration_unavailable";
 };
 
 const safeCandidateErrorCategory = (category: string | null): string | null => {
@@ -209,8 +229,11 @@ const toReviewStatusDto = async (candidate: TrailerCandidateRow, currentFingerpr
     transcriptProgress: candidate.trailerTranscriptProgress,
     transcriptText: await readCandidateTranscript(candidate),
     transcriptProvider: candidate.trailerTranscriptionProvider,
-    transcriptErrorCategory: candidate.trailerTranscriptErrorCategory,
+  transcriptErrorCategory: candidate.trailerTranscriptErrorCategory,
     transcriptErrorMessage: safeTranscriptErrorMessage(candidate.trailerTranscriptErrorCategory),
+    captionMode: candidate.captionMode,
+    captionStatus: candidate.captionStatus,
+    captionReasonCode: safeCaptionReasonCode(candidate.captionReasonCode),
   };
 };
 
@@ -322,6 +345,7 @@ export const createTrailerCandidateWithTranscript = async (
   ownerEmail: string,
   expectedSourceFingerprint: string,
   transcriptText: string,
+  captionMode: TrailerCaptionMode = "automatic",
 ): Promise<{ candidateId: string; reused: boolean }> => {
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) throw new Error("Invalid episodeId");
   if (!/^[a-f0-9]{64}$/u.test(expectedSourceFingerprint)) throw new Error("Invalid trailer source fingerprint");
@@ -369,6 +393,7 @@ export const createTrailerCandidateWithTranscript = async (
       trailerTranscriptRelativePath: transcriptRelativePath,
       trailerTranscriptSha256: transcriptSha256,
       trailerTranscriptionProvider: "operator",
+      captionMode,
       profileId: TRAILER_RENDER_VISUAL_PROFILE.profileId,
       profileRevision: TRAILER_RENDER_VISUAL_PROFILE.revision,
       snapshotRelativePath,
@@ -418,7 +443,7 @@ export const enqueueTrailerCandidate = async (episodeId: number, ownerEmail: str
     sources.push({ kind, path: filePath, ...evidence });
   }
   const sourceFingerprint = fingerprint(sources);
-  const existing = trailerCandidateRepository.findCurrentByFingerprint(episodeId, sourceFingerprint);
+  const existing = trailerCandidateRepository.findCurrentByFingerprint(episodeId, sourceFingerprint, "automatic");
   if (existing) return { candidate: toStatusDto(existing), reused: true, waitingForInput: false };
 
   const candidateRoot = await assertPrivateTrailerCandidateRoot();

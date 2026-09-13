@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { config } from "../config/env";
-import { trailerCandidateRepository, type TrailerCandidateRow } from "../database/repositories/trailer-candidate.repository";
+import { trailerCandidateRepository, type TrailerCandidateRow, type TrailerCandidateCaptionProvenance } from "../database/repositories/trailer-candidate.repository";
 import { acquireTrailerCandidateFileUse, cleanupTrailerCandidateFiles } from "../services/trailer-candidate-file-cleanup.service";
 import { transcribeTrailerAudioSnapshot } from "../services/episode-transcription.service";
 import {
@@ -138,6 +138,11 @@ const processTrailerCandidateInternal = async (
 
   const claimed = trailerCandidateRepository.claim(candidate.candidateId, randomUUID());
   if (!claimed) return;
+  let captionRevision = {
+    sourceFingerprint: claimed.sourceFingerprint,
+    audioSha256: claimed.audioSha256,
+    transcriptSha256: claimed.trailerTranscriptSha256,
+  };
   const attemptNumber = claimed.attemptCount;
   const candidateDirectory = await trailerCandidateStoragePath(candidate.snapshotRelativePath);
   const outputPaths = resolveAttemptOutputPaths(candidateDirectory, attemptNumber);
@@ -161,6 +166,7 @@ const processTrailerCandidateInternal = async (
       }
     }
 
+    let candidateForCaption = claimed;
     if (!transcriptValid) {
       trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, { status: "processing", progress: 0, errorCategory: null });
       try {
@@ -181,6 +187,12 @@ const processTrailerCandidateInternal = async (
         trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, {
           status: "done", progress: 100, relativePath, sha256: transcriptHash, provider: result.provider, errorCategory: null,
         });
+        candidateForCaption = trailerCandidateRepository.findById(candidate.candidateId) ?? claimed;
+        captionRevision = {
+          sourceFingerprint: candidateForCaption.sourceFingerprint,
+          audioSha256: candidateForCaption.audioSha256,
+          transcriptSha256: candidateForCaption.trailerTranscriptSha256,
+        };
       } catch {
         trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, {
           status: "error", progress: null, errorCategory: "transcription_unavailable",
@@ -194,24 +206,63 @@ const processTrailerCandidateInternal = async (
     await validateTrailerCandidateOutput(waveformPath, durationSeconds, runner);
 
     let selectedOutputPath = waveformPath;
-    if (
-      transcriptValid && claimed.trailerTranscriptStatus === "done" && claimed.trailerTranscriptSha256 &&
-      claimed.trailerTranscriptRelativePath
-    ) {
+    let captionState: TrailerCandidateCaptionProvenance = {
+      status: "waveform_only",
+      reasonCode: candidateForCaption.captionMode === "disabled" ? "captions_disabled" : "quality_calibration_unavailable",
+      audioSha256: candidateForCaption.audioSha256,
+      transcriptSha256: candidateForCaption.trailerTranscriptSha256,
+      profileRevision: candidateForCaption.profileRevision,
+    };
+    const qualityGateAvailable = Boolean(seams.captionCalibration?.approved && seams.captionCapacity?.approved);
+    if (candidateForCaption.captionMode === "automatic" && !qualityGateAvailable) {
+      captionState.reasonCode = seams.captionCalibration?.approved ? "capacity_unavailable" : "quality_calibration_unavailable";
+    } else if (candidateForCaption.captionMode === "automatic" && (!transcriptValid
+      || candidateForCaption.trailerTranscriptStatus !== "done" || !candidateForCaption.trailerTranscriptSha256
+      || !candidateForCaption.trailerTranscriptRelativePath)) {
+      captionState.status = "unavailable";
+      captionState.reasonCode = "transcript_unavailable";
+    } else if (candidateForCaption.captionMode === "automatic") {
+      let renderingCaptions = false;
+      captionState.reasonCode = "alignment_failed";
       try {
         const align = seams.alignCaptions ?? ((input) => alignTrailerTranscript(input));
-        const aligned = await align({ candidate: claimed, audioPath: snapshot.audioPath });
-        const transcriptFilePath = await trailerCandidateExistingFilePath(claimed.trailerTranscriptRelativePath);
+        if (!trailerCandidateRepository.updateCaptionState(candidate.candidateId, captionRevision, {
+          ...captionState,
+          status: "aligning",
+          reasonCode: null,
+        })) {
+          if (trailerCandidateRepository.markStale(candidate.candidateId, "source_changed", "Caption result no longer matches the current candidate revision")) {
+            trailerCandidateRepository.queueFileCleanup(candidate.candidateId, candidate.snapshotRelativePath);
+          }
+          return;
+        }
+        const aligned = await align({ candidate: candidateForCaption, audioPath: snapshot.audioPath });
+        const transcriptFilePath = await trailerCandidateExistingFilePath(candidateForCaption.trailerTranscriptRelativePath!);
         const transcriptText = await fs.promises.readFile(transcriptFilePath, "utf8");
         const sourceAudioHash = await sha256File(snapshot.audioPath);
+        captionState = {
+          status: "waveform_only",
+          reasonCode: aligned.status === "unavailable"
+            ? aligned.reason === "model_unavailable" ? "model_unavailable"
+              : aligned.reason === "aligner_unavailable" ? "aligner_unavailable" : "alignment_failed"
+            : "alignment_provenance_stale",
+          audioSha256: candidateForCaption.audioSha256,
+          transcriptSha256: candidateForCaption.trailerTranscriptSha256,
+          alignerVersion: aligned.alignerVersion ?? null,
+          modelId: aligned.modelId ?? null,
+          modelRevision: aligned.modelRevision ?? null,
+          modelSha256: aligned.modelSha256 ?? null,
+          profileRevision: candidateForCaption.profileRevision,
+        };
         if (
           aligned.status === "aligned" && aligned.words &&
-          aligned.audioSha256 === sourceAudioHash && aligned.audioSha256 === claimed.audioSha256 &&
-          aligned.transcriptSha256 === claimed.trailerTranscriptSha256 &&
+          aligned.audioSha256 === sourceAudioHash && aligned.audioSha256 === candidateForCaption.audioSha256 &&
+          aligned.transcriptSha256 === candidateForCaption.trailerTranscriptSha256 &&
           aligned.modelRevision === TRAILER_CAPTION_MODEL_REVISION && aligned.modelId === TRAILER_CAPTION_MODEL_ID &&
           aligned.alignerVersion === TRAILER_CAPTION_ALIGNER_VERSION &&
-          aligned.profileId === claimed.profileId && aligned.profileRevision === claimed.profileRevision
+          aligned.profileId === candidateForCaption.profileId && aligned.profileRevision === candidateForCaption.profileRevision
         ) {
+          captionState = { ...captionState, status: "waveform_only", reasonCode: "alignment_coverage_insufficient" };
           const quality = evaluateTrailerCaptionQuality({
             transcript: transcriptText,
             words: aligned.words,
@@ -228,6 +279,17 @@ const processTrailerCandidateInternal = async (
             },
           });
           if (quality.eligible) {
+            if (!trailerCandidateRepository.updateCaptionState(candidate.candidateId, captionRevision, {
+              ...captionState,
+              status: "rendering",
+              reasonCode: null,
+            })) {
+              if (trailerCandidateRepository.markStale(candidate.candidateId, "source_changed", "Caption result no longer matches the current candidate revision")) {
+                trailerCandidateRepository.queueFileCleanup(candidate.candidateId, candidate.snapshotRelativePath);
+              }
+              return;
+            }
+            renderingCaptions = true;
             await renderTrailerCandidateCaptions({
               inputVideoPath: waveformPath,
               assPath,
@@ -235,14 +297,35 @@ const processTrailerCandidateInternal = async (
               durationSeconds,
               cues: [{ words: aligned.words }],
             }, runner);
-            await validateTrailerCandidateOutput(captionPath, durationSeconds, runner);
+            const captionEvidence = await validateTrailerCandidateOutput(captionPath, durationSeconds, runner);
             selectedOutputPath = captionPath;
+            captionState = {
+              ...captionState,
+              status: "included",
+              reasonCode: null,
+              outputSha256: captionEvidence.outputSha256,
+            };
+          } else {
+            const reasonCodes: Record<string, TrailerCandidateCaptionProvenance["reasonCode"]> = {
+              calibration_unavailable: "quality_calibration_unavailable",
+              capacity_unavailable: "capacity_unavailable",
+              cue_coverage_insufficient: "alignment_coverage_insufficient",
+              invalid_cue_timing: "alignment_timing_invalid",
+              quality_below_calibration: "quality_below_calibration",
+            };
+            captionState.reasonCode = reasonCodes[quality.reason] ?? "quality_below_calibration";
           }
         }
       } catch {
         // Alignment and caption rendering are optional; the validated waveform remains authoritative.
         await fs.promises.unlink(captionPath).catch(() => undefined);
         await fs.promises.unlink(assPath).catch(() => undefined);
+        captionState = {
+          ...captionState,
+          status: "waveform_only",
+          reasonCode: renderingCaptions ? "caption_render_failed" : captionState.reasonCode ?? "alignment_failed",
+          outputSha256: null,
+        };
       }
     }
     if (selectedOutputPath === captionPath) await fs.promises.unlink(waveformPath).catch(() => undefined);
@@ -265,7 +348,7 @@ const processTrailerCandidateInternal = async (
       bytes: evidence.outputBytes,
       durationSeconds: evidence.durationSeconds,
       probeJson: evidence.probeJson,
-    });
+    }, captionState, captionRevision);
     if (!markedReady) {
       await fs.promises.unlink(outputPaths.ready).catch(() => undefined);
       return;

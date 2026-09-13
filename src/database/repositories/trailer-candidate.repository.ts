@@ -3,6 +3,22 @@ import { getDb, nowIso } from "../sqlite";
 export type TrailerCandidateStatus = "pending" | "processing" | "waiting_capacity" | "retryable" | "ready" | "stale" | "superseded";
 export type TrailerCandidateAttemptStatus = "processing" | "waiting_capacity" | "ready" | "failed" | "stale" | "interrupted";
 export type TrailerTranscriptStatus = "not_started" | "processing" | "done" | "error";
+export type TrailerCaptionMode = "automatic" | "disabled";
+export type TrailerCaptionStatus = "checking" | "eligible" | "aligning" | "rendering" | "included" | "waveform_only" | "unavailable";
+export type TrailerCaptionReasonCode =
+  | "quality_calibration_unavailable"
+  | "capacity_unavailable"
+  | "captions_disabled"
+  | "transcript_unavailable"
+  | "model_unavailable"
+  | "aligner_unavailable"
+  | "alignment_failed"
+  | "alignment_provenance_stale"
+  | "alignment_coverage_insufficient"
+  | "alignment_timing_invalid"
+  | "quality_below_calibration"
+  | "caption_render_failed"
+  | null;
 
 export type TrailerCandidateRow = {
   candidateId: string;
@@ -19,6 +35,17 @@ export type TrailerCandidateRow = {
   trailerTranscriptSha256: string | null;
   trailerTranscriptionProvider: string | null;
   trailerTranscriptErrorCategory: string | null;
+  captionMode: TrailerCaptionMode;
+  captionStatus: TrailerCaptionStatus;
+  captionReasonCode: TrailerCaptionReasonCode;
+  captionAudioSha256: string | null;
+  captionTranscriptSha256: string | null;
+  captionAlignerVersion: string | null;
+  captionModelId: string | null;
+  captionModelRevision: string | null;
+  captionModelSha256: string | null;
+  captionProfileRevision: number | null;
+  captionOutputSha256: string | null;
   profileId: string;
   profileRevision: number;
   snapshotRelativePath: string;
@@ -63,9 +90,29 @@ export type CreateTrailerCandidateInput = {
   trailerTranscriptRelativePath?: string | null;
   trailerTranscriptSha256?: string | null;
   trailerTranscriptionProvider?: string | null;
+  captionMode?: TrailerCaptionMode;
   profileId: string;
   profileRevision: number;
   snapshotRelativePath: string;
+};
+
+export type TrailerCandidateCaptionProvenance = {
+  status: TrailerCaptionStatus;
+  reasonCode: TrailerCaptionReasonCode;
+  audioSha256: string;
+  transcriptSha256: string | null;
+  alignerVersion?: string | null;
+  modelId?: string | null;
+  modelRevision?: string | null;
+  modelSha256?: string | null;
+  profileRevision?: number | null;
+  outputSha256?: string | null;
+};
+
+export type TrailerCandidateCaptionRevision = {
+  sourceFingerprint: string;
+  audioSha256: string;
+  transcriptSha256: string | null;
 };
 
 type CandidateSqlRow = {
@@ -74,6 +121,10 @@ type CandidateSqlRow = {
   trailer_transcript_status: TrailerTranscriptStatus; trailer_transcript_progress: number | null;
   trailer_transcript_relative_path: string | null; trailer_transcript_sha256: string | null;
   trailer_transcription_provider: string | null; trailer_transcript_error_category: string | null;
+  caption_mode: TrailerCaptionMode; caption_status: TrailerCaptionStatus; caption_reason_code: TrailerCaptionReasonCode;
+  caption_audio_sha256: string | null; caption_transcript_sha256: string | null;
+  caption_aligner_version: string | null; caption_model_id: string | null; caption_model_revision: string | null;
+  caption_model_sha256: string | null; caption_profile_revision: number | null; caption_output_sha256: string | null;
   profile_id: string; profile_revision: number; snapshot_relative_path: string; output_relative_path: string | null;
   output_sha256: string | null; output_bytes: number | null; duration_seconds: number | null; probe_json: string | null;
   status: TrailerCandidateStatus; progress: number; error_category: string | null; error_message: string | null;
@@ -101,6 +152,17 @@ const mapCandidate = (row: CandidateSqlRow | undefined): TrailerCandidateRow | n
   trailerTranscriptSha256: row.trailer_transcript_sha256 ?? null,
   trailerTranscriptionProvider: row.trailer_transcription_provider ?? null,
   trailerTranscriptErrorCategory: row.trailer_transcript_error_category ?? null,
+  captionMode: row.caption_mode ?? "automatic",
+  captionStatus: row.caption_status ?? "waveform_only",
+  captionReasonCode: row.caption_reason_code ?? "quality_calibration_unavailable",
+  captionAudioSha256: row.caption_audio_sha256 ?? null,
+  captionTranscriptSha256: row.caption_transcript_sha256 ?? null,
+  captionAlignerVersion: row.caption_aligner_version ?? null,
+  captionModelId: row.caption_model_id ?? null,
+  captionModelRevision: row.caption_model_revision ?? null,
+  captionModelSha256: row.caption_model_sha256 ?? null,
+  captionProfileRevision: row.caption_profile_revision ?? null,
+  captionOutputSha256: row.caption_output_sha256 ?? null,
   profileId: row.profile_id,
   profileRevision: row.profile_revision,
   snapshotRelativePath: row.snapshot_relative_path,
@@ -156,9 +218,10 @@ export const trailerCandidateRepository = {
     const create = () => inImmediateTransaction(() => {
       const existing = db.prepare(`SELECT * FROM trailer_candidate_versions
         WHERE episode_id = ? AND source_fingerprint = ?
+          AND caption_mode = ?
           AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')
           AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
-        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined;
+        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.captionMode ?? "automatic", input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined;
       if (existing) return { candidate: mapCandidate(existing) as TrailerCandidateRow, reused: true };
       const version = Number((db.prepare("SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM trailer_candidate_versions WHERE episode_id = ?")
         .get(input.episodeId) as { next_version: number }).next_version);
@@ -166,12 +229,16 @@ export const trailerCandidateRepository = {
       db.prepare(`INSERT INTO trailer_candidate_versions (
         candidate_id, episode_id, draft_id, version, source_fingerprint, cover_sha256, audio_sha256,
         transcript_sha256, trailer_transcript_status, trailer_transcript_relative_path, trailer_transcript_sha256,
-        trailer_transcription_provider, profile_id, profile_revision, snapshot_relative_path, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+        trailer_transcription_provider, caption_mode, caption_status, caption_reason_code, profile_id, profile_revision,
+        snapshot_relative_path, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
         input.candidateId, input.episodeId, input.draftId ?? null, version, input.sourceFingerprint,
         input.coverSha256, input.audioSha256, input.transcriptSha256 ?? null,
         input.trailerTranscriptStatus ?? "not_started", input.trailerTranscriptRelativePath ?? null,
-        input.trailerTranscriptSha256 ?? null, input.trailerTranscriptionProvider ?? null, input.profileId,
+        input.trailerTranscriptSha256 ?? null, input.trailerTranscriptionProvider ?? null, input.captionMode ?? "automatic",
+        "waveform_only",
+        input.captionMode === "disabled" ? "captions_disabled" : "quality_calibration_unavailable",
+        input.profileId,
         input.profileRevision, input.snapshotRelativePath, now, now,
       );
       return { candidate: byId(input.candidateId) as TrailerCandidateRow, reused: false };
@@ -183,9 +250,10 @@ export const trailerCandidateRepository = {
       // converge on its durable identity instead of exposing a duplicate job.
       const winner = mapCandidate(db.prepare(`SELECT * FROM trailer_candidate_versions
         WHERE episode_id = ? AND source_fingerprint = ?
+          AND caption_mode = ?
           AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')
           AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
-        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined);
+        ORDER BY version DESC LIMIT 1`).get(input.episodeId, input.sourceFingerprint, input.captionMode ?? "automatic", input.trailerTranscriptSha256 ?? null) as CandidateSqlRow | undefined);
       if (winner) return { candidate: winner, reused: true };
       throw error;
     }
@@ -199,11 +267,12 @@ export const trailerCandidateRepository = {
       ORDER BY version DESC LIMIT 1`).get(episodeId) as CandidateSqlRow | undefined);
   },
 
-  findCurrentByFingerprint(episodeId: number, fingerprint: string): TrailerCandidateRow | null {
+  findCurrentByFingerprint(episodeId: number, fingerprint: string, captionMode?: TrailerCaptionMode): TrailerCandidateRow | null {
     return mapCandidate(getDb().prepare(`SELECT * FROM trailer_candidate_versions
       WHERE episode_id = ? AND source_fingerprint = ?
+        AND (? IS NULL OR caption_mode = ?)
         AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
-      ORDER BY version DESC LIMIT 1`).get(episodeId, fingerprint) as CandidateSqlRow | undefined);
+      ORDER BY version DESC LIMIT 1`).get(episodeId, fingerprint, captionMode ?? null, captionMode ?? null) as CandidateSqlRow | undefined);
   },
 
   findPreviousReady(episodeId: number, exceptCandidateId?: string): TrailerCandidateRow | null {
@@ -264,6 +333,20 @@ export const trailerCandidateRepository = {
         input.provider ?? null, input.errorCategory ?? null, nowIso(), candidateId).changes > 0;
   },
 
+  updateCaptionState(candidateId: string, expected: TrailerCandidateCaptionRevision, caption: TrailerCandidateCaptionProvenance): boolean {
+    if (!/^[a-f0-9]{64}$/u.test(expected.sourceFingerprint) || !/^[a-f0-9]{64}$/u.test(expected.audioSha256)
+      || (expected.transcriptSha256 !== null && !/^[a-f0-9]{64}$/u.test(expected.transcriptSha256))) return false;
+    const changed = getDb().prepare(`UPDATE trailer_candidate_versions SET caption_status = ?, caption_reason_code = ?,
+      caption_audio_sha256 = ?, caption_transcript_sha256 = ?, caption_aligner_version = ?, caption_model_id = ?,
+      caption_model_revision = ?, caption_model_sha256 = ?, caption_profile_revision = ?, caption_output_sha256 = NULL,
+      updated_at = ? WHERE candidate_id = ? AND source_fingerprint = ? AND audio_sha256 = ?
+        AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '') AND status = 'processing'`)
+      .run(caption.status, caption.reasonCode, caption.audioSha256, caption.transcriptSha256,
+        caption.alignerVersion ?? null, caption.modelId ?? null, caption.modelRevision ?? null, caption.modelSha256 ?? null,
+        caption.profileRevision ?? null, nowIso(), candidateId, expected.sourceFingerprint, expected.audioSha256, expected.transcriptSha256).changes;
+    return changed > 0;
+  },
+
   setAttemptPartialPath(candidateId: string, attemptNumber: number, relativePath: string): boolean {
     return getDb().prepare(`UPDATE trailer_candidate_attempts SET output_partial_relative_path = ?
       WHERE candidate_id = ? AND attempt_number = ? AND status = 'processing'`).run(relativePath, candidateId, attemptNumber).changes > 0;
@@ -279,13 +362,38 @@ export const trailerCandidateRepository = {
     return changed > 0;
   },
 
-  markReady(candidateId: string, output: { relativePath: string; sha256: string; bytes: number; durationSeconds: number; probeJson: string }): boolean {
+  markReady(
+    candidateId: string,
+    output: { relativePath: string; sha256: string; bytes: number; durationSeconds: number; probeJson: string },
+    caption?: TrailerCandidateCaptionProvenance,
+    expected?: TrailerCandidateCaptionRevision,
+  ): boolean {
     const db = getDb(); const now = nowIso();
+    const existing = byId(candidateId);
+    if (!existing) return false;
+    const captionState = caption ?? {
+      status: "waveform_only" as const,
+      reasonCode: existing.captionMode === "disabled" ? "captions_disabled" as const : "quality_calibration_unavailable" as const,
+      audioSha256: existing.audioSha256,
+      transcriptSha256: existing.trailerTranscriptSha256,
+    };
+    const guard = expected
+      ? " AND source_fingerprint = ? AND audio_sha256 = ? AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')"
+      : "";
     const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'ready', progress = 100,
       output_relative_path = ?, output_sha256 = ?, output_bytes = ?, duration_seconds = ?, probe_json = ?,
+      caption_status = ?, caption_reason_code = ?, caption_audio_sha256 = ?, caption_transcript_sha256 = ?,
+      caption_aligner_version = ?, caption_model_id = ?, caption_model_revision = ?, caption_model_sha256 = ?,
+      caption_profile_revision = ?, caption_output_sha256 = ?,
       error_category = NULL, error_message = NULL, ready_at = ?, updated_at = ?
-      WHERE candidate_id = ? AND status = 'processing'`).run(
-      output.relativePath, output.sha256, output.bytes, output.durationSeconds, output.probeJson, now, now, candidateId,
+      WHERE candidate_id = ? AND status = 'processing'${guard}`).run(
+      output.relativePath, output.sha256, output.bytes, output.durationSeconds, output.probeJson,
+      captionState.status, captionState.reasonCode, captionState.audioSha256, captionState.transcriptSha256,
+      captionState.alignerVersion ?? null, captionState.modelId ?? null, captionState.modelRevision ?? null,
+      captionState.modelSha256 ?? null, captionState.profileRevision ?? null,
+      captionState.status === "included" ? captionState.outputSha256 ?? output.sha256 : null,
+      now, now, candidateId,
+      ...(expected ? [expected.sourceFingerprint, expected.audioSha256, expected.transcriptSha256] : []),
     ).changes;
     if (changed) db.prepare(`UPDATE trailer_candidate_attempts SET status = 'ready', ended_at = ?
       WHERE candidate_id = ? AND attempt_number = (SELECT attempt_count FROM trailer_candidate_versions WHERE candidate_id = ?)

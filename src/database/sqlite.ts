@@ -314,6 +314,17 @@ CREATE TABLE IF NOT EXISTS trailer_candidate_versions (
   trailer_transcript_sha256 TEXT,
   trailer_transcription_provider TEXT,
   trailer_transcript_error_category TEXT,
+  caption_mode TEXT NOT NULL DEFAULT 'automatic' CHECK (caption_mode IN ('automatic', 'disabled')),
+  caption_status TEXT NOT NULL DEFAULT 'waveform_only' CHECK (caption_status IN ('checking', 'eligible', 'aligning', 'rendering', 'included', 'waveform_only', 'unavailable')),
+  caption_reason_code TEXT,
+  caption_audio_sha256 TEXT,
+  caption_transcript_sha256 TEXT,
+  caption_aligner_version TEXT,
+  caption_model_id TEXT,
+  caption_model_revision TEXT,
+  caption_model_sha256 TEXT,
+  caption_profile_revision INTEGER CHECK (caption_profile_revision IS NULL OR caption_profile_revision > 0),
+  caption_output_sha256 TEXT,
   profile_id TEXT NOT NULL,
   profile_revision INTEGER NOT NULL CHECK (profile_revision > 0),
   snapshot_relative_path TEXT NOT NULL,
@@ -569,6 +580,7 @@ export const getDb = (): DatabaseSync => {
     db = new DatabaseSync(dbPath);
     db.exec(schema);
     ensureTrailerCandidateTranscriptColumns(db);
+    ensureTrailerCandidateCaptionColumns(db);
     ensureYoutubeMetricSampleColumns(db);
     ensureEpisodeTranscriptColumns(db);
     ensureEpisodeDraftColumn(db);
@@ -600,6 +612,27 @@ export const ensureTrailerCandidateTranscriptColumns = (database: DatabaseSync):
     database.exec(`CREATE INDEX idx_trailer_candidate_episode_fingerprint_current
       ON trailer_candidate_versions(episode_id, source_fingerprint)
       WHERE status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')`);
+  }
+};
+
+export const ensureTrailerCandidateCaptionColumns = (database: DatabaseSync): void => {
+  const columns = database.prepare("PRAGMA table_info(trailer_candidate_versions)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  const additions: Array<[string, string]> = [
+    ["caption_mode", "TEXT NOT NULL DEFAULT 'automatic' CHECK (caption_mode IN ('automatic', 'disabled'))"],
+    ["caption_status", "TEXT NOT NULL DEFAULT 'waveform_only' CHECK (caption_status IN ('checking', 'eligible', 'aligning', 'rendering', 'included', 'waveform_only', 'unavailable'))"],
+    ["caption_reason_code", "TEXT DEFAULT 'quality_calibration_unavailable'"],
+    ["caption_audio_sha256", "TEXT"],
+    ["caption_transcript_sha256", "TEXT"],
+    ["caption_aligner_version", "TEXT"],
+    ["caption_model_id", "TEXT"],
+    ["caption_model_revision", "TEXT"],
+    ["caption_model_sha256", "TEXT"],
+    ["caption_profile_revision", "INTEGER CHECK (caption_profile_revision IS NULL OR caption_profile_revision > 0)"],
+    ["caption_output_sha256", "TEXT"],
+  ];
+  for (const [name, definition] of additions) {
+    if (!names.has(name)) database.exec(`ALTER TABLE trailer_candidate_versions ADD COLUMN ${name} ${definition}`);
   }
 };
 
