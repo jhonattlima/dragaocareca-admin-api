@@ -129,6 +129,12 @@ const run = async (): Promise<void> => {
   process.env.TRAILER_CANDIDATES_ROOT = privateRoot;
   process.env.TRAILER_CANDIDATE_RENDER_ENABLED = "true";
   process.env.DISABLE_BACKGROUND_WORKERS = "true";
+  process.env.FEED_BASE_LINK = "https://example.test/episodes";
+  process.env.FEED_AUDIO_BASE = "https://example.test/media";
+  process.env.FEED_IMAGE_BASE = "https://example.test/images/";
+  process.env.FEED_TITLE = "Offline verification feed";
+  process.env.FEED_DESCRIPTION = "Synthetic fake-only fixture";
+  process.env.FEED_SITE = "https://example.test";
 
   const originalWorkingDirectory = process.cwd();
   process.chdir(root);

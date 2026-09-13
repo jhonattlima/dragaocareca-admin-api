@@ -17,6 +17,12 @@ const run = async (): Promise<void> => {
   process.env.MEDIA_EPISODES_DIR = path.join(root, "media", "episodes");
   process.env.MEDIA_EPISODES_STAGING_DIR = path.join(root, "media", "staging");
   process.env.TRAILER_CANDIDATES_ROOT = path.join(root, "generated", "trailer-candidates");
+  process.env.FEED_BASE_LINK = "https://example.test/episodes";
+  process.env.FEED_AUDIO_BASE = "https://example.test/media";
+  process.env.FEED_IMAGE_BASE = "https://example.test/images/";
+  process.env.FEED_TITLE = "Offline verification feed";
+  process.env.FEED_DESCRIPTION = "Synthetic fake-only fixture";
+  process.env.FEED_SITE = "https://example.test";
   const [{ config }, { connectDb }, { episodeRepository }, { episodeSchema }, { episodePublicationRepository }, { publicationSourceRevision }, { deliverInstagramReel }, { normalizeMetaProviderStatus }] = await Promise.all([
     import("../config/env.js"), import("../database/connect.js"), import("../database/repositories/episode.repository.js"),
     import("../schemas/episode.js"), import("../database/repositories/episode-publication.repository.js"), import("../schemas/episode-publication.js"),
