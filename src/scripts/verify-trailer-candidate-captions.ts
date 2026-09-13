@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { TrailerCaptionCalibration, TrailerCaptionCapacityEvidence, TrailerCaptionAlignmentResult } from "../services/trailer-caption-alignment.service";
 
 const hash = (value: Buffer | string): string => createHash("sha256").update(value).digest("hex");
@@ -17,6 +18,29 @@ const run = async (): Promise<void> => {
   const mediaRoot = path.join(root, "media");
   const dbPath = path.join(root, "captions.sqlite");
   try {
+    const legacyDbPath = path.join(root, "legacy-candidates.sqlite");
+    const legacyDb = new DatabaseSync(legacyDbPath);
+    legacyDb.exec(`CREATE TABLE trailer_candidate_versions (
+      candidate_id TEXT PRIMARY KEY,
+      trailer_transcript_sha256 TEXT,
+      audio_sha256 TEXT NOT NULL,
+      profile_revision INTEGER NOT NULL
+    );
+    INSERT INTO trailer_candidate_versions (candidate_id, trailer_transcript_sha256, audio_sha256, profile_revision)
+    VALUES ('legacy-candidate', NULL, '${"a".repeat(64)}', 1);`);
+    const sqliteModule = await import("../database/sqlite.js") as unknown as {
+      ensureTrailerCandidateCaptionColumns: (database: DatabaseSync) => void;
+    };
+    sqliteModule.ensureTrailerCandidateCaptionColumns(legacyDb);
+    const legacyColumns = new Set((legacyDb.prepare("PRAGMA table_info(trailer_candidate_versions)").all() as Array<{ name: string }>).map((column) => column.name));
+    for (const column of ["caption_mode", "caption_status", "caption_reason_code", "caption_audio_sha256", "caption_transcript_sha256", "caption_aligner_version", "caption_model_id", "caption_model_revision", "caption_model_sha256", "caption_profile_revision", "caption_output_sha256"]) {
+      assert.equal(legacyColumns.has(column), true, `legacy migration adds ${column}`);
+    }
+    const migratedLegacy = legacyDb.prepare("SELECT * FROM trailer_candidate_versions WHERE candidate_id = 'legacy-candidate'").get() as Record<string, unknown>;
+    assert.equal(migratedLegacy.caption_mode, "automatic");
+    assert.equal(migratedLegacy.caption_status, "waveform_only");
+    assert.equal(migratedLegacy.caption_reason_code, "quality_calibration_unavailable");
+    legacyDb.close();
     // Creating the empty DB first prevents connectDb's legacy-database migration fallback.
     await fs.promises.writeFile(dbPath, Buffer.alloc(0), { flag: "wx", mode: 0o600 });
     Object.assign(process.env, {
@@ -122,6 +146,12 @@ const run = async (): Promise<void> => {
       });
       const ready = candidates.trailerCandidateRepository.findById(first.candidateId)!;
       assert.equal(ready.status, "ready");
+      assert.equal((ready as unknown as Record<string, unknown>).captionStatus, "included");
+      assert.equal((ready as unknown as Record<string, unknown>).captionAudioSha256, firstAudioHash);
+      assert.equal((ready as unknown as Record<string, unknown>).captionTranscriptSha256, transcriptHash);
+      assert.equal((ready as unknown as Record<string, unknown>).captionModelRevision, alignment.TRAILER_CAPTION_MODEL_REVISION);
+      assert.equal((ready as unknown as Record<string, unknown>).captionProfileRevision, first.profileRevision);
+      assert.equal(typeof (ready as unknown as Record<string, unknown>).captionOutputSha256, "string");
       const readyPath = await candidateService.trailerCandidateExistingFilePath(ready.outputRelativePath!);
       assert.equal(await fs.promises.readFile(readyPath, "utf8"), "FAKE-CAPTIONED-MP4");
       assert.equal(renderedCaption, true, "eligible exact-text cues produce a separate captioned output before ready promotion");
@@ -173,7 +203,16 @@ const run = async (): Promise<void> => {
       const fallbackReady = candidates.trailerCandidateRepository.findById(noCalibration.candidateId)!;
       const fallbackPath = await candidateService.trailerCandidateExistingFilePath(fallbackReady.outputRelativePath!);
       assert.equal(fallbackReady.status, "ready", "missing quality calibration and caption failure do not block the waveform candidate");
+      assert.equal((fallbackReady as unknown as Record<string, unknown>).captionStatus, "waveform_only");
+      assert.equal((fallbackReady as unknown as Record<string, unknown>).captionReasonCode, "quality_calibration_unavailable");
       assert.equal(await fs.promises.readFile(fallbackPath, "utf8"), "FAKE-WAVEFORM-MP4");
+
+      const reopened = new DatabaseSync(dbPath, { readOnly: true });
+      const persisted = reopened.prepare("SELECT caption_status, caption_transcript_sha256, caption_output_sha256 FROM trailer_candidate_versions WHERE candidate_id = ?").get(first.candidateId) as Record<string, unknown>;
+      assert.equal(persisted.caption_status, "included", "caption state must survive an independent SQLite reopen");
+      assert.equal(persisted.caption_transcript_sha256, transcriptHash);
+      assert.equal(persisted.caption_output_sha256, ready.outputSha256);
+      reopened.close();
 
       const unavailable = await alignment.alignTrailerTranscript({ candidate: first });
       assert.deepEqual(unavailable, { status: "unavailable", reason: "model_unavailable" });
