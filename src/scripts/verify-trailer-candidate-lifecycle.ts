@@ -5,7 +5,42 @@ import os from "node:os";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 
-type Fixture = { root: string; media: string; generated: string; database: string };
+type Fixture = {
+  root: string;
+  media: string;
+  generated: string;
+  database: string;
+  rootIdentity: { dev: number; ino: number };
+  protectedRoots: string[];
+};
+
+type FixtureManifest = {
+  root: string;
+  database: string;
+  media: string;
+  generated: string;
+  episodes: Array<{ episodeId: number; title: string }>;
+  drafts: string[];
+  candidates: Array<Record<string, unknown> & { candidateId: string; episodeId: number; version: number; createdAt: string; snapshotRelativePath: string; outputRelativePath: string | null; outputSha256: string | null }>;
+  files: Array<{ relativePath: string; bytes: number; sha256: string }>;
+  databaseRows?: Record<string, Array<Record<string, unknown>>>;
+};
+
+const manifestFileName = "fixture-manifest.json";
+
+const resolved = (value: string): string => path.resolve(value);
+const isWithin = (parent: string, child: string): boolean => {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+};
+
+const configuredDataRoots = (): string[] => [
+  process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "dragaocareca-admin.sqlite"),
+  process.env.MEDIA_STORAGE_ROOT ?? path.resolve(process.cwd(), "data", "media"),
+  process.env.TRAILER_CANDIDATES_ROOT ?? path.resolve(process.cwd(), "data", "generated", "trailer-candidates"),
+  process.env.MEDIA_EPISODES_DIR ?? path.resolve(process.cwd(), "data", "media", "episodes"),
+  process.env.MEDIA_EPISODES_STAGING_DIR ?? path.resolve(process.cwd(), "data", "media", "staging"),
+];
 
 const createSyntheticMedia = async (root: string, color: string, frequency: number): Promise<{ cover: string; audio: string }> => {
   const cover = path.join(root, `cover-${color}.jpeg`);
@@ -18,7 +53,19 @@ const createSyntheticMedia = async (root: string, color: string, frequency: numb
 };
 
 const createFixture = async (): Promise<Fixture> => {
+  const protectedRoots = configuredDataRoots().map(resolved);
+  const temporaryRoot = await fs.promises.realpath(os.tmpdir());
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "dc-trailer-candidate-"));
+  const actualRoot = await fs.promises.realpath(root);
+  const rootStat = await fs.promises.lstat(root);
+  if (!isWithin(temporaryRoot, actualRoot) || rootStat.isSymbolicLink() || !root.startsWith(path.join(os.tmpdir(), "dc-trailer-candidate-"))) {
+    throw new Error("candidate lifecycle fixture root is not an owned temporary directory");
+  }
+  for (const protectedRoot of protectedRoots) {
+    if (isWithin(protectedRoot, actualRoot) || isWithin(actualRoot, protectedRoot)) {
+      throw new Error("candidate lifecycle fixture overlaps a configured service data root");
+    }
+  }
   const media = path.join(root, "media");
   const generated = path.join(root, "generated");
   await fs.promises.mkdir(media, { recursive: true });
@@ -31,9 +78,87 @@ const createFixture = async (): Promise<Fixture> => {
   process.env.MEDIA_BACKUP_ROOT = path.join(media, "backups");
   process.env.MEDIA_BACKUP_EPISODES_DIR = path.join(media, "backups", "episodes");
   process.env.TRAILER_CANDIDATES_ROOT = path.join(generated, "trailer-candidates");
+  process.env.TRAILER_CANDIDATE_RENDER_ENABLED = "false";
   process.env.PROMOTION_ENABLED = "false";
   process.env.PROMOTION_LEGACY_LAUNCH_ENABLED = "false";
-  return { root, media, generated, database: process.env.SQLITE_PATH };
+  const database = resolved(process.env.SQLITE_PATH);
+  for (const fixtureRoot of [media, generated, path.dirname(database)]) {
+    if (!isWithin(actualRoot, resolved(fixtureRoot))) throw new Error("candidate lifecycle fixture data root escaped its temporary directory");
+  }
+  return { root: actualRoot, media, generated, database, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino }, protectedRoots };
+};
+
+const walkFiles = async (directory: string, root: string): Promise<Array<{ relativePath: string; bytes: number; sha256: string }>> => {
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  const files: Array<{ relativePath: string; bytes: number; sha256: string }> = [];
+  for (const entry of entries) {
+    const absolutePath = path.join(directory, entry.name);
+    const stat = await fs.promises.lstat(absolutePath);
+    if (stat.isSymbolicLink()) throw new Error("candidate lifecycle fixture contains an unexpected symbolic link");
+    if (stat.isDirectory()) files.push(...await walkFiles(absolutePath, root));
+    else if (stat.isFile()) {
+      files.push({ relativePath: path.relative(root, absolutePath), bytes: stat.size, sha256: createHash("sha256").update(await fs.promises.readFile(absolutePath)).digest("hex") });
+    } else throw new Error("candidate lifecycle fixture contains an unexpected filesystem object");
+  }
+  return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+};
+
+const removeFixtureAfterIdentityCheck = async (fixture: Fixture, manifest: FixtureManifest): Promise<void> => {
+  const rootStat = await fs.promises.lstat(fixture.root);
+  const actualRoot = await fs.promises.realpath(fixture.root);
+  if (rootStat.isSymbolicLink() || actualRoot !== fixture.root || rootStat.dev !== fixture.rootIdentity.dev || rootStat.ino !== fixture.rootIdentity.ino) {
+    throw new Error("candidate lifecycle fixture root identity changed; refusing cleanup");
+  }
+  if (resolved(manifest.database) !== fixture.database || resolved(manifest.media) !== fixture.media || resolved(manifest.generated) !== fixture.generated) {
+    throw new Error("candidate lifecycle manifest root mismatch; refusing cleanup");
+  }
+  const manifestPath = path.join(fixture.root, manifestFileName);
+  const writtenManifest = await fs.promises.readFile(manifestPath, "utf8");
+  if (writtenManifest !== JSON.stringify(manifest, null, 2)) throw new Error("candidate lifecycle manifest changed; refusing cleanup");
+  const currentFiles = (await walkFiles(fixture.root, fixture.root)).filter((file) => file.relativePath !== manifestFileName);
+  if (JSON.stringify(currentFiles) !== JSON.stringify(manifest.files)) {
+    throw new Error("candidate lifecycle fixture files changed after manifest; refusing cleanup");
+  }
+  for (const protectedRoot of fixture.protectedRoots) {
+    if (isWithin(protectedRoot, actualRoot) || isWithin(actualRoot, protectedRoot)) {
+      throw new Error("candidate lifecycle cleanup overlaps a configured service data root");
+    }
+  }
+  await fs.promises.rm(fixture.root, { recursive: true, force: false });
+  if (await fs.promises.access(fixture.root).then(() => true).catch(() => false)) {
+    throw new Error("candidate lifecycle temporary root remains after cleanup");
+  }
+};
+
+const persistManifest = async (fixture: Fixture, manifest: FixtureManifest): Promise<void> => {
+  await fs.promises.writeFile(path.join(fixture.root, manifestFileName), JSON.stringify(manifest, null, 2), { flag: "w" });
+};
+
+const persistManifestSync = (fixture: Fixture, manifest: FixtureManifest): void => {
+  fs.writeFileSync(path.join(fixture.root, manifestFileName), JSON.stringify(manifest, null, 2));
+};
+
+const captureFixtureRows = (getDb: () => any): Record<string, Array<Record<string, unknown>>> => {
+  const tables = ["episodes", "episode_trailer_video_drafts", "trailer_candidate_versions", "trailer_candidate_attempts", "trailer_candidate_file_cleanup"];
+  return Object.fromEntries(tables.map((table) => [table,
+    getDb().prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>,
+  ]));
+};
+
+const sealManifestAndCleanup = async (fixture: Fixture, manifest: FixtureManifest, getDb: () => any): Promise<void> => {
+  const rows = captureFixtureRows(getDb);
+  const episodeIds = new Set(manifest.episodes.map((episode) => episode.episodeId));
+  const candidateIds = new Set(manifest.candidates.map((candidate) => candidate.candidateId));
+  assert.ok(rows.episodes.every((row) => episodeIds.has(Number(row.episode_id))), "cleanup refused: SQLite contains an episode outside the fixture manifest");
+  assert.deepEqual(rows.episode_trailer_video_drafts.map((row) => row.draft_id).sort(), [...manifest.drafts].sort(), "cleanup refused: draft identities do not match the fixture manifest");
+  assert.ok(rows.trailer_candidate_versions.every((row) => candidateIds.has(String(row.candidate_id))), "cleanup refused: candidate rows do not match the fixture manifest");
+  assert.ok(rows.trailer_candidate_attempts.every((row) => candidateIds.has(String(row.candidate_id))), "cleanup refused: attempt rows are outside the fixture manifest");
+  assert.ok(rows.trailer_candidate_file_cleanup.every((row) => candidateIds.has(String(row.candidate_id))), "cleanup refused: cleanup intents are outside the fixture manifest");
+  manifest.databaseRows = rows;
+  manifest.files = (await walkFiles(fixture.root, fixture.root)).filter((file) => file.relativePath !== manifestFileName);
+  await persistManifest(fixture, manifest);
+  assert.deepEqual(captureFixtureRows(getDb), manifest.databaseRows, "cleanup refused: database rows changed after manifest capture");
+  await removeFixtureAfterIdentityCheck(fixture, manifest);
 };
 
 class MultipartRequest extends Readable {
@@ -106,9 +231,27 @@ const invoke = async (router: Router, routePath: string, req: any): Promise<{ re
 const main = async (): Promise<void> => {
   if (process.env.NODE_ENV && process.env.NODE_ENV !== "development") throw new Error("candidate lifecycle verifier is development-only");
   const fixture = await createFixture();
+  const manifest: FixtureManifest = {
+    root: fixture.root,
+    database: fixture.database,
+    media: fixture.media,
+    generated: fixture.generated,
+    episodes: [{ episodeId: 987654301, title: "Candidate fixture episode" }],
+    drafts: [],
+    candidates: [],
+    files: [],
+  };
+  await persistManifest(fixture, manifest);
   const originalFetch = globalThis.fetch;
+  let fixtureDbReader: (() => any) | null = null;
   let fetchCalls = 0;
-  globalThis.fetch = (async () => { fetchCalls += 1; throw new Error("network access is prohibited by candidate verifier"); }) as typeof fetch;
+  const blockedFetchCallSites: string[] = [];
+  const blockedFetch = (async () => {
+    fetchCalls += 1;
+    blockedFetchCallSites.push(new Error().stack?.split("\n").slice(2, 5).join("\n") ?? "unknown caller");
+    throw new Error("network access is prohibited by candidate verifier");
+  }) as typeof fetch;
+  globalThis.fetch = blockedFetch;
   try {
     const [{ connectDb }, { getDb }, { episodeRepository }, { trailerCandidateRepository }, mediaLayout, candidateService, candidateCleanup, draftService, { config }, renderer, candidateWorker] = await Promise.all([
       import("../database/connect.js"),
@@ -123,12 +266,85 @@ const main = async (): Promise<void> => {
       import("../services/trailer-candidate-renderer.service.js"),
       import("../workers/trailer-candidate.worker.js"),
     ]);
-    await connectDb();
+    fixtureDbReader = getDb;
+    const originalWorkingDirectory = process.cwd();
+    process.chdir(fixture.root);
+    try {
+      const temporaryLegacyDatabase = path.resolve(process.cwd(), "data", "dragaocareca-admin.sqlite");
+      assert.equal(await fs.promises.access(temporaryLegacyDatabase).then(() => true).catch(() => false), false, "temporary bootstrap cwd must not contain a legacy database to copy");
+      await connectDb();
+    } finally {
+      process.chdir(originalWorkingDirectory);
+    }
+    assert.equal(resolved(config.sqlitePath), fixture.database, "candidate verifier must use only its temporary SQLite root");
+    assert.equal(resolved(config.media.storageRoot), resolved(fixture.media), "candidate verifier must use only its temporary media root");
+    assert.equal(resolved(config.media.trailerCandidatesRoot), resolved(path.join(fixture.generated, "trailer-candidates")), "candidate verifier must use only its temporary generated-media root");
+    const originalCreateOrReuse = trailerCandidateRepository.createOrReuse.bind(trailerCandidateRepository);
+    trailerCandidateRepository.createOrReuse = (input) => {
+      const current = trailerCandidateRepository.findCurrentByEpisode(input.episodeId);
+      const reusable = current
+        && current.sourceFingerprint === input.sourceFingerprint
+        && current.captionMode === (input.captionMode ?? "automatic")
+        && (current.trailerTranscriptSha256 ?? null) === (input.trailerTranscriptSha256 ?? null);
+      if (reusable) return originalCreateOrReuse(input);
+      const nextVersion = current?.sourceFingerprint === input.sourceFingerprint
+        ? current.version
+        : Number(getDb().prepare("SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM trailer_candidate_versions WHERE episode_id = ?").get(input.episodeId)?.next_version ?? 1);
+      const entry: FixtureManifest["candidates"][number] = {
+        candidateId: input.candidateId,
+        episodeId: input.episodeId,
+        title: manifest.episodes.find((episode) => episode.episodeId === input.episodeId)?.title ?? "Synthetic fixture episode",
+        version: nextVersion,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        snapshotRelativePath: input.snapshotRelativePath,
+        outputRelativePath: null,
+        outputSha256: null,
+        sourceFingerprint: input.sourceFingerprint,
+        coverSha256: input.coverSha256,
+        audioSha256: input.audioSha256,
+      };
+      const existing = manifest.candidates.findIndex((candidate) => candidate.candidateId === entry.candidateId);
+      if (existing < 0) manifest.candidates.push(entry);
+      else manifest.candidates[existing] = entry;
+      persistManifestSync(fixture, manifest);
+      const result = originalCreateOrReuse(input);
+      const row = trailerCandidateRepository.findById(input.candidateId);
+      if (row) {
+        manifest.candidates[manifest.candidates.findIndex((candidate) => candidate.candidateId === row.candidateId)] = {
+          ...entry,
+          version: row.version,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          outputRelativePath: row.outputRelativePath,
+          outputSha256: row.outputSha256,
+        };
+        persistManifestSync(fixture, manifest);
+      }
+      return result;
+    };
+    const recordDraftFixture = (episodeId: number): void => {
+      const reservation = episodeRepository.findTrailerVideoDraftByEpisodeId(episodeId);
+      const episode = episodeRepository.findByEpisodeId(episodeId);
+      if (reservation && !manifest.drafts.includes(reservation.draftId)) manifest.drafts.push(reservation.draftId);
+      if (episode) {
+        const existingEpisode = manifest.episodes.findIndex((entry) => entry.episodeId === episode.episodeId);
+        const identity = { episodeId: episode.episodeId, title: episode.title };
+        if (existingEpisode < 0) manifest.episodes.push(identity);
+        else manifest.episodes[existingEpisode] = identity;
+      }
+      persistManifestSync(fixture, manifest);
+    };
+    const fixtureTableCounts = ["episodes", "episode_trailer_video_drafts", "trailer_candidate_versions", "trailer_candidate_attempts", "trailer_candidate_file_cleanup"]
+      .map((table) => ({ table, count: Number(getDb().prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0) }));
+    assert.ok(fixtureTableCounts.every((table) => table.count === 0), "temporary SQLite fixture database must start empty before fixture rows are created");
+    persistManifestSync(fixture, manifest);
     assert.equal(config.trailerCandidateRenderEnabled, false, "candidate rendering must be disabled by default");
     const router = loadRouter();
     config.auth.bypassInDev = true;
 
     const foreignDraftId = await draftService.reserveTrailerVideoDraft(987654300, "another-owner@example.com");
+    recordDraftFixture(987654300);
     const crossOwnerUpload = await invoke(router, "/:episodeId/cover", new MultipartRequest(987654300, Buffer.from("must-not-write"), "cover.jpeg", "image/jpeg"));
     assert.equal(crossOwnerUpload.response.statusCode, 409);
     assert.equal(await fs.promises.access(mediaLayout.getEpisodeMediaStagingPath(987654300, "cover")).then(() => true).catch(() => false), false);
@@ -141,14 +357,16 @@ const main = async (): Promise<void> => {
 
     const routeEpisodeId = 987654301;
     const coverOnly = await invoke(router, "/:episodeId/cover", new MultipartRequest(routeEpisodeId, Buffer.from("cover-one"), "cover.jpeg", "image/jpeg"));
+    recordDraftFixture(routeEpisodeId);
     assert.equal(coverOnly.response.statusCode, 200);
     assert.equal((coverOnly.response.jsonBody as any).trailerCandidate, undefined, "single input must wait without a candidate job");
     assert.equal((coverOnly.response.jsonBody as any).trailerCandidateEnqueue.status, "waiting_for_input");
     const secondInput = await invoke(router, "/:episodeId/trailer", new MultipartRequest(routeEpisodeId, Buffer.from("trailer-one"), "trailer.mp3", "audio/mpeg"));
+    recordDraftFixture(routeEpisodeId);
     assert.equal(secondInput.response.statusCode, 200);
     const routeBody = secondInput.response.jsonBody as Record<string, any>;
     assert.equal(routeBody.trailerCandidate.status, "pending", "second upload must enqueue a durable candidate");
-    assert.deepEqual(Object.keys(routeBody.trailerCandidate).sort(), ["candidateId", "createdAt", "episodeId", "errorCategory", "progress", "status", "updatedAt", "version"].sort());
+    assert.deepEqual(Object.keys(routeBody.trailerCandidate).sort(), ["candidateId", "captionMode", "captionReasonCode", "captionStatus", "createdAt", "episodeId", "errorCategory", "progress", "status", "updatedAt", "version"].sort());
     assert.equal(JSON.stringify(routeBody).includes("sha256"), false);
     assert.equal(JSON.stringify(routeBody).includes("generated"), false);
     const firstId = routeBody.trailerCandidate.candidateId as string;
@@ -386,6 +604,17 @@ const main = async (): Promise<void> => {
     episodeRepository.delete(routeEpisodeId);
     assert.equal(episodeRepository.findByEpisodeId(routeEpisodeId), null, "episode deletion should remove its record");
     assert.ok(trailerCandidateRepository.listFileCleanup(500).some((item: any) => item.candidateId === interruptedCandidate?.candidateId), "episode deletion must durably queue its candidate directory before cascading metadata");
+    const queuedCleanupBeforeFailure = trailerCandidateRepository.listFileCleanup(500);
+    assert.ok(queuedCleanupBeforeFailure.length > 0 && queuedCleanupBeforeFailure.every((item: any) => manifest.candidates.some((candidate) => candidate.candidateId === item.candidateId)), "all cleanup intents must be manifest-bound fixture candidates");
+    const configuredCandidateRoot = config.media.trailerCandidatesRoot;
+    config.media.trailerCandidatesRoot = path.join(fixture.media, "invalid-public-candidate-root");
+    const failedCleanup = await candidateCleanup.cleanupTrailerCandidateFiles();
+    config.media.trailerCandidatesRoot = configuredCandidateRoot;
+    assert.equal(failedCleanup.removed, 0, "invalid private-root proof must fail cleanup closed");
+    assert.equal(trailerCandidateRepository.listFileCleanup(500).length, queuedCleanupBeforeFailure.length, "failed candidate cleanup must remain durably queued for retry");
+    const failedCleanupIdentity = queuedCleanupBeforeFailure.find((item: any) => item.candidateId !== interruptedCandidate?.candidateId)?.candidateId;
+    assert.ok(failedCleanupIdentity, "at least one non-leased manifest candidate should exercise failed cleanup retry");
+    assert.equal(getDb().prepare("SELECT attempts FROM trailer_candidate_file_cleanup WHERE candidate_id = ?").get(failedCleanupIdentity)?.attempts, 1, "failed cleanup records one retryable attempt");
     const deferredCleanup = await candidateCleanup.cleanupTrailerCandidateFiles();
     assert.equal(deferredCleanup.deferred, 1, "cleanup must defer a directory still leased by an active renderer");
     assert.equal(await fs.promises.access(deletingCandidateDirectory).then(() => true).catch(() => false), true, "active candidate files must remain untouched");
@@ -396,11 +625,23 @@ const main = async (): Promise<void> => {
 
     const restartSnapshotHash = firstCandidate?.sourceFingerprint;
     assert.match(restartSnapshotHash ?? "", /^[a-f0-9]{64}$/);
-    assert.equal(fetchCalls, 0, "candidate enqueue must not call external providers or services");
-    console.log("trailer candidate lifecycle passed: draft and saved staged-source enqueue, visible retryable enqueue failure, private snapshots, idempotency, versioning, draft pinning, restart, retention, and no network side effects");
+    const foreignFixtureEpisode = episodeRepository.findByEpisodeId(987654300);
+    assert.equal(foreignFixtureEpisode?.title, "[Draft episode 987654300]", "foreign-owner fixture must still have its exact synthetic draft identity before deletion");
+    episodeRepository.delete(987654300);
+    assert.equal(episodeRepository.findByEpisodeId(987654300), null, "foreign-owner fixture episode must be removed from the temporary database");
+    assert.equal(globalThis.fetch, blockedFetch, "all provider requests must remain bound to the throwing network stub");
+    assert.equal(blockedFetchCallSites.length, fetchCalls, "every blocked network attempt must be captured by the verifier");
+    const databaseRows = captureFixtureRows(getDb);
+    assert.equal(databaseRows.episodes.length, 0, "fixture episode must be deleted before fixture cleanup");
+    assert.deepEqual(databaseRows.episode_trailer_video_drafts.map((row) => row.draft_id).sort(), [...manifest.drafts].sort(), "all remaining draft identities must belong to the manifest");
+    assert.ok(databaseRows.trailer_candidate_versions.every((row) => Number(row.episode_id) === routeEpisodeId && manifest.candidates.some((candidate) => candidate.candidateId === row.candidate_id)), "all candidate rows must be manifest-bound synthetic fixture rows");
+    assert.ok(databaseRows.trailer_candidate_attempts.every((row) => manifest.candidates.some((candidate) => candidate.candidateId === row.candidate_id)), "all attempt rows must belong to a manifest candidate");
+    assert.equal(databaseRows.trailer_candidate_file_cleanup.length, 0, "all fixture cleanup intents must be drained before cleanup");
+    assert.deepEqual(captureFixtureRows(getDb), databaseRows, "temporary SQLite row identities must remain stable through the end of verification");
+    console.log(`trailer candidate lifecycle passed: draft and saved staged-source enqueue, retryable cleanup, restart recovery, exact fixture cleanup, and ${fetchCalls} blocked network attempts`);
   } finally {
     globalThis.fetch = originalFetch;
-    await fs.promises.rm(fixture.root, { recursive: true, force: true });
+    if (fixtureDbReader) await sealManifestAndCleanup(fixture, manifest, fixtureDbReader);
   }
 };
 
