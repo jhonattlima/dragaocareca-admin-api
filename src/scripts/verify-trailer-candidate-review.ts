@@ -254,6 +254,69 @@ const run = async (): Promise<void> => {
     }), true);
 
     const router = routes.episodesRouter as unknown as Router;
+    const generationEpisodeId = episodeId + 3;
+    episodes.episodeRepository.create(episodeSchema.parse({
+      episodeId: generationEpisodeId, title: "Edited transcript fixture", summary: "", pubDate: new Date("2026-01-04T00:00:00.000Z"),
+      explicit: "no", authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Fixture", links: [{ url: "https://example.test/fixture" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    const generationCoverPath = mediaLayout.getEpisodeMediaStagingPath(generationEpisodeId, "cover");
+    const generationAudioPath = mediaLayout.getEpisodeMediaStagingPath(generationEpisodeId, "trailer");
+    await fs.promises.mkdir(path.dirname(generationCoverPath), { recursive: true });
+    await fs.promises.mkdir(path.dirname(generationAudioPath), { recursive: true });
+    await fs.promises.writeFile(generationCoverPath, "generation-cover-fixture");
+    await fs.promises.writeFile(generationAudioPath, "generation-audio-fixture");
+    const generationBase = await candidateService.enqueueTrailerCandidate(generationEpisodeId, "review-fixture@example.test");
+    if (generationBase.waitingForInput) throw new Error("Generation fixture unexpectedly waited for inputs");
+    const generationBaseRow = candidates.trailerCandidateRepository.findById(generationBase.candidate.candidateId)!;
+    const generationBody = {
+      transcriptText: "  Operator-edited trailer text.\nKeep the exact spacing.  ",
+      expectedSourceFingerprint: generationBaseRow.sourceFingerprint,
+    };
+    const generation = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, generationBody,
+    ));
+    assert.equal(generation.statusCode, 202, "explicit transcript-backed generation queues an immutable candidate version");
+    assert.equal(generation.headers["cache-control"], "private, no-store");
+    assert.equal(generation.jsonBody.transcriptText, generationBody.transcriptText);
+    const generatedCandidateId = generation.jsonBody.candidateId as string;
+    assert.notEqual(generatedCandidateId, generationBase.candidate.candidateId);
+    const generatedRow = candidates.trailerCandidateRepository.findById(generatedCandidateId)!;
+    const generatedTranscriptPath = await candidateService.trailerCandidateExistingFilePath(generatedRow.trailerTranscriptRelativePath!);
+    const generatedTranscriptBytes = await fs.promises.readFile(generatedTranscriptPath);
+    assert.equal(generatedTranscriptBytes.toString("utf8"), generationBody.transcriptText);
+    assert.equal(createHash("sha256").update(generatedTranscriptBytes).digest("hex"), generatedRow.trailerTranscriptSha256);
+    assert.equal(generatedRow.trailerTranscriptStatus, "done");
+    assert.equal(episodes.episodeRepository.findByEpisodeId(generationEpisodeId)?.transcriptStatus, "idle");
+    const generatedRepeat = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, generationBody,
+    ));
+    assert.equal(generatedRepeat.statusCode, 200, "identical transcript requests reuse the exact candidate revision");
+    assert.equal(generatedRepeat.jsonBody.candidateId, generatedCandidateId);
+    const generatedCount = getDb().prepare("SELECT COUNT(*) AS count FROM trailer_candidate_versions WHERE episode_id = ?").get(generationEpisodeId)?.count;
+    await fs.promises.writeFile(generationCoverPath, "changed-generation-cover");
+    const staleGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, generationBody,
+    ));
+    assert.equal(staleGeneration.statusCode, 409, "a stale source fingerprint cannot create a candidate version");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM trailer_candidate_versions WHERE episode_id = ?").get(generationEpisodeId)?.count, generatedCount);
+    await fs.promises.writeFile(generationCoverPath, "generation-cover-fixture");
+
+    const invalidRetry = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/retry", new Request(
+      trailerParams(generationEpisodeId, generatedCandidateId), {},
+    ));
+    assert.equal(invalidRetry.statusCode, 409, "retry conflicts unless the API marks the exact candidate retryable");
+    getDb().prepare("UPDATE trailer_candidate_versions SET status = 'retryable' WHERE candidate_id = ?").run(generatedCandidateId);
+    const validRetry = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/retry", new Request(
+      trailerParams(generationEpisodeId, generatedCandidateId), {},
+    ));
+    assert.equal(validRetry.statusCode, 202);
+    assert.equal(validRetry.jsonBody.candidateId, generatedCandidateId);
+    assert.equal(candidates.trailerCandidateRepository.findById(generatedCandidateId)?.status, "pending");
+    assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM promotion_notifications WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
+      "generation and retry must not trigger publication side effects");
+
     const statusRoute = "/:episodeId/trailer-candidates/current";
     const status = await invoke(router, "get", statusRoute, new Request({ episodeId: String(episodeId) }));
     assert.equal(status.statusCode, 200);
