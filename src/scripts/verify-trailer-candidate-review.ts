@@ -223,6 +223,9 @@ const run = async (): Promise<void> => {
     assert.equal(automaticRow.trailerTranscriptStatus, "done");
     assert.equal(automaticRow.trailerTranscriptProgress, 100);
     assert.equal(automaticRow.trailerTranscriptionProvider, "fake");
+    assert.equal(automaticRow.captionMode, "automatic", "an omitted caption preference resolves to the automatic gate");
+    assert.equal(automaticRow.captionStatus, "waveform_only", "missing production calibration keeps the waveform candidate ready");
+    assert.equal(automaticRow.captionReasonCode, "quality_calibration_unavailable");
     assert.ok(automaticRow.trailerTranscriptRelativePath);
     const privateTranscriptPath = await candidateService.trailerCandidateExistingFilePath(automaticRow.trailerTranscriptRelativePath!);
     const privateTranscript = await fs.promises.readFile(privateTranscriptPath);
@@ -311,6 +314,7 @@ const run = async (): Promise<void> => {
     const generationBody = {
       transcriptText: "  Operator-edited trailer text.\nKeep the exact spacing.  ",
       expectedSourceFingerprint: generationBaseRow.sourceFingerprint,
+      includeTimedCaptions: true,
     };
     const generation = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
       { episodeId: String(generationEpisodeId) }, generationBody,
@@ -319,6 +323,9 @@ const run = async (): Promise<void> => {
     assert.equal(generation.headers["cache-control"], "private, no-store");
     assert.equal(generation.jsonBody.transcriptText, generationBody.transcriptText);
     assert.equal(generation.jsonBody.transcriptStatus, "done");
+    assert.equal(generation.jsonBody.captionMode, "automatic");
+    assert.equal(generation.jsonBody.captionStatus, "waveform_only", "explicit opt-in cannot bypass unavailable quality/capacity evidence");
+    assert.equal(generation.jsonBody.captionReasonCode, "quality_calibration_unavailable");
     const generatedCandidateId = generation.jsonBody.candidateId as string;
     assert.notEqual(generatedCandidateId, generationBase.candidate.candidateId);
     const generatedRow = candidates.trailerCandidateRepository.findById(generatedCandidateId)!;
@@ -335,9 +342,19 @@ const run = async (): Promise<void> => {
     assert.equal(generatedReview.jsonBody.transcriptText, generationBody.transcriptText);
     assert.equal(generatedReview.jsonBody.transcriptStatus, "done");
     const serializedGeneratedReview = JSON.stringify(generatedReview.jsonBody);
-    for (const forbidden of ["trailerTranscriptRelativePath", "trailerTranscriptSha256", "snapshotRelativePath", "outputRelativePath"]) {
+    for (const forbidden of ["trailerTranscriptRelativePath", "trailerTranscriptSha256", "snapshotRelativePath", "outputRelativePath", "captionAudioSha256", "captionTranscriptSha256", "captionAlignerVersion", "captionModelId", "captionModelRevision", "captionModelSha256", "captionOutputSha256"]) {
       assert.equal(serializedGeneratedReview.includes(forbidden), false, `review DTO must not contain ${forbidden}`);
     }
+    assert.equal(["checking", "eligible", "aligning", "rendering", "included", "waveform_only", "unavailable"].includes(generatedReview.jsonBody.captionStatus), true);
+    assert.equal(["quality_calibration_unavailable", "capacity_unavailable", "captions_disabled", "transcript_unavailable", "model_unavailable", "aligner_unavailable", "alignment_failed", "alignment_provenance_stale", "alignment_coverage_insufficient", "alignment_timing_invalid", "quality_below_calibration", "caption_render_failed"].includes(generatedReview.jsonBody.captionReasonCode), true);
+    const disabledGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, { ...generationBody, includeTimedCaptions: false },
+    ));
+    assert.equal(disabledGeneration.statusCode, 202);
+    assert.equal(disabledGeneration.jsonBody.captionMode, "disabled");
+    assert.equal(disabledGeneration.jsonBody.captionStatus, "waveform_only");
+    assert.equal(disabledGeneration.jsonBody.captionReasonCode, "captions_disabled");
+    assert.notEqual(disabledGeneration.jsonBody.candidateId, generatedCandidateId, "caption preference is part of candidate identity");
     const generatedRepeat = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
       { episodeId: String(generationEpisodeId) }, generationBody,
     ));
@@ -575,6 +592,9 @@ const run = async (): Promise<void> => {
       assert.equal(serialized.includes("trailerCandidate"), false, "public episode/feed DTOs exclude candidate state");
       assert.equal(serialized.includes("previewGrant"), false, "public episode/feed DTOs exclude preview capability");
       assert.equal(serialized.includes(candidateId), false, "public episode/feed DTOs exclude candidate identity");
+      for (const privateCaptionField of ["captionMode", "captionStatus", "captionReasonCode", "captionTranscriptSha256", "captionOutputSha256"]) {
+        assert.equal(serialized.includes(privateCaptionField), false, `public episode/feed DTOs exclude ${privateCaptionField}`);
+      }
     }
     assert.equal(networkCalls, 0, "the verifier performs no outbound provider or network calls");
     console.log("Trailer candidate review and preview verification passed (fake-only; no outbound network calls).");
