@@ -136,7 +136,7 @@ const run = async (): Promise<void> => {
   const originalNow = Date.now;
   try {
     await verifyCandidateTranscriptMigration();
-    const [database, episodes, candidates, mediaLayout, candidateService, routes, publicCatalog, candidateWorker] = await Promise.all([
+    const [database, episodes, candidates, mediaLayout, candidateService, routes, publicCatalog, candidateWorker, openapi] = await Promise.all([
       import("../database/connect.js"),
       import("../database/repositories/episode.repository.js"),
       import("../database/repositories/trailer-candidate.repository.js"),
@@ -145,6 +145,7 @@ const run = async (): Promise<void> => {
       import("../routes/episodes.routes.js"),
       import("../services/public-episode-catalog.service.js"),
       import("../workers/trailer-candidate.worker.js"),
+      import("../docs/openapi.js"),
     ]);
     const [{ config }, { episodeSchema }] = await Promise.all([import("../config/env.js"), import("../schemas/episode.js")]);
     await database.connectDb();
@@ -339,6 +340,7 @@ const run = async (): Promise<void> => {
       trailerParams(generationEpisodeId, generatedCandidateId),
     ));
     assert.equal(generatedReview.statusCode, 200);
+    assert.equal(generatedReview.jsonBody.isCurrent, true);
     assert.equal(generatedReview.jsonBody.transcriptText, generationBody.transcriptText);
     assert.equal(generatedReview.jsonBody.transcriptStatus, "done");
     const serializedGeneratedReview = JSON.stringify(generatedReview.jsonBody);
@@ -347,14 +349,6 @@ const run = async (): Promise<void> => {
     }
     assert.equal(["checking", "eligible", "aligning", "rendering", "included", "waveform_only", "unavailable"].includes(generatedReview.jsonBody.captionStatus), true);
     assert.equal(["quality_calibration_unavailable", "capacity_unavailable", "captions_disabled", "transcript_unavailable", "model_unavailable", "aligner_unavailable", "alignment_failed", "alignment_provenance_stale", "alignment_coverage_insufficient", "alignment_timing_invalid", "quality_below_calibration", "caption_render_failed"].includes(generatedReview.jsonBody.captionReasonCode), true);
-    const disabledGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
-      { episodeId: String(generationEpisodeId) }, { ...generationBody, includeTimedCaptions: false },
-    ));
-    assert.equal(disabledGeneration.statusCode, 202);
-    assert.equal(disabledGeneration.jsonBody.captionMode, "disabled");
-    assert.equal(disabledGeneration.jsonBody.captionStatus, "waveform_only");
-    assert.equal(disabledGeneration.jsonBody.captionReasonCode, "captions_disabled");
-    assert.notEqual(disabledGeneration.jsonBody.candidateId, generatedCandidateId, "caption preference is part of candidate identity");
     const generatedRepeat = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
       { episodeId: String(generationEpisodeId) }, generationBody,
     ));
@@ -384,6 +378,20 @@ const run = async (): Promise<void> => {
     assert.equal(validRetry.statusCode, 202);
     assert.equal(validRetry.jsonBody.candidateId, generatedCandidateId);
     assert.equal(candidates.trailerCandidateRepository.findById(generatedCandidateId)?.status, "pending");
+    const disabledGeneration = await invoke(router, "post", "/:episodeId/trailer-candidates", new Request(
+      { episodeId: String(generationEpisodeId) }, { ...generationBody, includeTimedCaptions: false },
+    ));
+    assert.equal(disabledGeneration.statusCode, 202);
+    assert.equal(disabledGeneration.jsonBody.captionMode, "disabled");
+    assert.equal(disabledGeneration.jsonBody.captionStatus, "waveform_only");
+    assert.equal(disabledGeneration.jsonBody.captionReasonCode, "captions_disabled");
+    assert.notEqual(disabledGeneration.jsonBody.candidateId, generatedCandidateId, "caption preference is part of candidate identity");
+    assert.equal((await candidateService.getTrailerCandidateReviewStatus(generationEpisodeId, generatedCandidateId))?.isCurrent, false,
+      "a newer caption preference revision makes the previous transcript candidate non-current");
+    const staleRevisionRetry = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/retry", new Request(
+      trailerParams(generationEpisodeId, generatedCandidateId), { expectedSourceFingerprint: generationBody.expectedSourceFingerprint },
+    ));
+    assert.equal(staleRevisionRetry.statusCode, 409, "a superseded caption revision cannot be retried");
     assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM promotion_notifications WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
       "generation and retry must not trigger publication side effects");
     assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM youtube_trailer_jobs WHERE episode_id = ?").get(generationEpisodeId)?.count ?? 0, 0,
@@ -560,6 +568,9 @@ const run = async (): Promise<void> => {
       durationSeconds: 4,
       probeJson: JSON.stringify({ streams: [{ codec_type: "video", width: 1280, height: 1280 }] }),
     }), true);
+    const waveformCandidate = candidates.trailerCandidateRepository.findById(decisionCandidateId)!;
+    assert.equal(waveformCandidate.captionStatus, "waveform_only");
+    assert.equal(waveformCandidate.captionReasonCode, "quality_calibration_unavailable");
     const decision = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/decision", new Request(
       trailerParams(decisionEpisodeId, decisionCandidateId), {
         decision: "approve",
@@ -595,6 +606,10 @@ const run = async (): Promise<void> => {
       for (const privateCaptionField of ["captionMode", "captionStatus", "captionReasonCode", "captionTranscriptSha256", "captionOutputSha256"]) {
         assert.equal(serialized.includes(privateCaptionField), false, `public episode/feed DTOs exclude ${privateCaptionField}`);
       }
+    }
+    const openapiJson = JSON.stringify(openapi.swaggerSpec);
+    for (const privateCaptionField of ["captionMode", "captionStatus", "captionReasonCode", "captionTranscriptSha256", "captionOutputSha256"]) {
+      assert.equal(openapiJson.includes(privateCaptionField), false, `OpenAPI remains free of private caption lifecycle field ${privateCaptionField}`);
     }
     assert.equal(networkCalls, 0, "the verifier performs no outbound provider or network calls");
     console.log("Trailer candidate review and preview verification passed (fake-only; no outbound network calls).");

@@ -204,7 +204,9 @@ const parseResolution = (probeJson: string | null): string | null => {
 };
 
 const toReviewStatusDto = async (candidate: TrailerCandidateRow, currentFingerprint: string | null): Promise<TrailerCandidateReviewStatusDto> => {
+  const newestRevision = trailerCandidateRepository.findCurrentByFingerprint(candidate.episodeId, candidate.sourceFingerprint);
   const isCurrent = currentFingerprint !== null && candidate.sourceFingerprint === currentFingerprint
+    && newestRevision?.candidateId === candidate.candidateId
     && ["pending", "processing", "waiting_capacity", "retryable", "ready"].includes(candidate.status);
   const outputValid = isCurrent && await isValidReadyOutput(candidate);
   return {
@@ -229,7 +231,7 @@ const toReviewStatusDto = async (candidate: TrailerCandidateRow, currentFingerpr
     transcriptProgress: candidate.trailerTranscriptProgress,
     transcriptText: await readCandidateTranscript(candidate),
     transcriptProvider: candidate.trailerTranscriptionProvider,
-  transcriptErrorCategory: candidate.trailerTranscriptErrorCategory,
+    transcriptErrorCategory: candidate.trailerTranscriptErrorCategory,
     transcriptErrorMessage: safeTranscriptErrorMessage(candidate.trailerTranscriptErrorCategory),
     captionMode: candidate.captionMode,
     captionStatus: candidate.captionStatus,
@@ -260,7 +262,8 @@ export const getValidatedTrailerCandidatePreviewOutput = async (
     || !candidate.outputRelativePath || !candidate.outputSha256 || !candidate.outputBytes || candidate.outputBytes <= 0
     || (expectedOutputSha256 !== undefined && candidate.outputSha256 !== expectedOutputSha256)) return null;
   const currentFingerprint = await getCurrentTrailerCandidateSourceFingerprint(episodeId);
-  if (!currentFingerprint || currentFingerprint !== candidate.sourceFingerprint) return null;
+  const newestRevision = trailerCandidateRepository.findCurrentByFingerprint(episodeId, candidate.sourceFingerprint);
+  if (!currentFingerprint || currentFingerprint !== candidate.sourceFingerprint || newestRevision?.candidateId !== candidateId) return null;
   try {
     const filePath = await trailerCandidateExistingFilePath(candidate.outputRelativePath);
     const evidence = await hashFile(filePath);
@@ -414,7 +417,8 @@ export const retryTrailerCandidateGeneration = async (
   const candidate = trailerCandidateRepository.findById(candidateId);
   if (!candidate || candidate.episodeId !== episodeId) return { candidate: null, conflictCode: "not_found" };
   if (candidate.sourceFingerprint !== expectedSourceFingerprint
-    || await getCurrentTrailerCandidateSourceFingerprint(episodeId) !== expectedSourceFingerprint) {
+    || await getCurrentTrailerCandidateSourceFingerprint(episodeId) !== expectedSourceFingerprint
+    || trailerCandidateRepository.findCurrentByFingerprint(episodeId, expectedSourceFingerprint)?.candidateId !== candidateId) {
     return { candidate: null, conflictCode: "source_changed" };
   }
   const retried = trailerCandidateRepository.retry(candidateId);

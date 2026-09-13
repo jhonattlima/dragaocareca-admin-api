@@ -234,6 +234,11 @@ const persistDecisionAndJournal = (candidate: TrailerCandidateRow, actorEmail: s
     if (!current || current.status !== "ready" || current.source_fingerprint !== candidate.sourceFingerprint || current.version !== candidate.version) {
       throw new Error("candidate_changed");
     }
+    const newest = getDb().prepare(`SELECT candidate_id FROM trailer_candidate_versions
+      WHERE episode_id = ? AND source_fingerprint = ?
+        AND status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready')
+      ORDER BY version DESC LIMIT 1`).get(candidate.episodeId, candidate.sourceFingerprint) as { candidate_id: string } | undefined;
+    if (newest?.candidate_id !== candidate.candidateId) throw new Error("candidate_changed");
     getDb().prepare(`INSERT INTO trailer_candidate_decisions (
       candidate_id, episode_id, decision, expected_source_fingerprint, expected_version, output_sha256, actor_email, decided_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
@@ -258,6 +263,10 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
   const candidate = trailerCandidateRepository.findById(input.candidateId);
   if (!candidate || candidate.episodeId !== input.episodeId) return { status: "conflict", code: "not_found" };
   if (candidate.sourceFingerprint !== input.expectedSourceFingerprint || candidate.version !== input.expectedVersion) return { status: "conflict", code: "fingerprint_mismatch" };
+  const newestRevision = trailerCandidateRepository.findCurrentByFingerprint(candidate.episodeId, candidate.sourceFingerprint);
+  if (newestRevision?.candidateId !== candidate.candidateId || !await trailerCandidateSourcesStillCurrent(candidate)) {
+    return { status: "conflict", code: "stale" };
+  }
 
   const prior = getDb().prepare("SELECT decision FROM trailer_candidate_decisions WHERE candidate_id = ?").get(candidate.candidateId) as { decision: string } | undefined;
   if (prior) {

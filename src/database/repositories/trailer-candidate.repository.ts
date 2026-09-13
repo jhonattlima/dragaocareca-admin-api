@@ -340,7 +340,11 @@ export const trailerCandidateRepository = {
       caption_audio_sha256 = ?, caption_transcript_sha256 = ?, caption_aligner_version = ?, caption_model_id = ?,
       caption_model_revision = ?, caption_model_sha256 = ?, caption_profile_revision = ?, caption_output_sha256 = NULL,
       updated_at = ? WHERE candidate_id = ? AND source_fingerprint = ? AND audio_sha256 = ?
-        AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '') AND status = 'processing'`)
+        AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '') AND status = 'processing'
+        AND version = (SELECT MAX(current.version) FROM trailer_candidate_versions current
+          WHERE current.episode_id = trailer_candidate_versions.episode_id
+            AND current.source_fingerprint = trailer_candidate_versions.source_fingerprint
+            AND current.status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready'))`)
       .run(caption.status, caption.reasonCode, caption.audioSha256, caption.transcriptSha256,
         caption.alignerVersion ?? null, caption.modelId ?? null, caption.modelRevision ?? null, caption.modelSha256 ?? null,
         caption.profileRevision ?? null, nowIso(), candidateId, expected.sourceFingerprint, expected.audioSha256, expected.transcriptSha256).changes;
@@ -378,7 +382,11 @@ export const trailerCandidateRepository = {
       transcriptSha256: existing.trailerTranscriptSha256,
     };
     const guard = expected
-      ? " AND source_fingerprint = ? AND audio_sha256 = ? AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')"
+      ? ` AND source_fingerprint = ? AND audio_sha256 = ? AND COALESCE(trailer_transcript_sha256, '') = COALESCE(?, '')
+        AND version = (SELECT MAX(current.version) FROM trailer_candidate_versions current
+          WHERE current.episode_id = trailer_candidate_versions.episode_id
+            AND current.source_fingerprint = trailer_candidate_versions.source_fingerprint
+            AND current.status IN ('pending', 'processing', 'waiting_capacity', 'retryable', 'ready'))`
       : "";
     const changed = db.prepare(`UPDATE trailer_candidate_versions SET status = 'ready', progress = 100,
       output_relative_path = ?, output_sha256 = ?, output_bytes = ?, duration_seconds = ?, probe_json = ?,

@@ -332,9 +332,10 @@ const processTrailerCandidateInternal = async (
     await fs.promises.rename(selectedOutputPath, outputPaths.partial);
     await fs.promises.unlink(assPath).catch(() => undefined);
     const evidence = await validateTrailerCandidateOutput(outputPaths.partial, durationSeconds, runner);
-    if (!await trailerCandidateSourcesStillCurrent(candidate)) {
+    const newestRevision = trailerCandidateRepository.findCurrentByFingerprint(candidate.episodeId, candidate.sourceFingerprint);
+    if (!await trailerCandidateSourcesStillCurrent(candidate) || newestRevision?.candidateId !== candidate.candidateId) {
       await fs.promises.unlink(outputPaths.partial).catch(() => undefined);
-      if (trailerCandidateRepository.markStale(candidate.candidateId)) {
+      if (trailerCandidateRepository.markStale(candidate.candidateId, "source_changed", "Candidate transcript or source was superseded before completion")) {
         trailerCandidateRepository.queueFileCleanup(candidate.candidateId, candidate.snapshotRelativePath);
       }
       return;
