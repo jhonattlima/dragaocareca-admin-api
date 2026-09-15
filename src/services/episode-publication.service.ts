@@ -7,16 +7,29 @@ import { preflightEpisodePublicationMedia } from "./episode-publication-media.se
 import { postLaunchNotification } from "./launch-notification-client.service";
 import { deliverInstagramReel } from "./instagram-reel-publication.service";
 import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.service";
+import type { MetaPublicationProvider } from "./meta-publication.provider";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
 
-const metadataFor = (episode: EpisodeRow): PublicationMetadata => publicationMetadataSchema.parse({
-  title: episode.title,
-  summary: episode.summary ?? "",
-  captionMentions: [],
-  hashtags: [],
-  renderedCaption: [episode.title, episode.summary].filter(Boolean).join("\n\n").slice(0, 2200),
-});
+export const renderSocialCaption = (input: { title: string; summary: string; mentions: string[]; hashtags: string[] }): string => [
+  input.title,
+  input.summary,
+  input.mentions.join(" "),
+  input.hashtags.join(" "),
+].filter(Boolean).join("\n\n").slice(0, 2200);
+
+const metadataFor = (episode: EpisodeRow): PublicationMetadata => {
+  const captionMentions = episode.instagramCaptionMentions ?? [];
+  const hashtags = episode.instagramHashtags ?? [];
+
+  return publicationMetadataSchema.parse({
+    title: episode.title,
+    summary: episode.summary ?? "",
+    captionMentions,
+    hashtags,
+    renderedCaption: renderSocialCaption({ title: episode.title, summary: episode.summary ?? "", mentions: captionMentions, hashtags }),
+  });
+};
 
 const unavailableSource = (episodeId: number): PublicationSource => ({
   mediaReference: `episodes/${episodeId}/trailer.mp4`,

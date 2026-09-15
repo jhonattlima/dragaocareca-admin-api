@@ -26,8 +26,8 @@ media, or credentials into Git. Rollback is owned by
 `/srv/dragaocareca/deploy/scripts/rollback-git-release.sh`.
 
 Workspace layout:
-- `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
-- `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`
+- `/home/jhonatt/repos/dragaocareca-admin-api`
+- `/home/jhonatt/repos/dragaocareca-admin-web`
 
 Telegram launch notifications:
 - queueing/deduping happens in the backend episode lifecycle
@@ -113,6 +113,32 @@ Use authenticated `POST /v1/episodes/:episodeId/trailer-video` with one `multipa
 
 This video is distinct from the existing audio `trailer` artifact. Use the protected artifact-job selector `trailer-video` to archive only the canonical final `trailer.mp4`. Replacements are allowed; after a replacement, `trailerVideoSyncStatus` can be `manual-sync-required`, which means an administrator must explicitly re-sync the final video publication. Uploading never calls YouTube.
 
+## AI Trailer Render Profile
+
+The API-owned default profile for future generated trailer candidates is
+`square-reels-karaoke-v2`. It is intentionally not a generation endpoint or an
+enablement flag: the private candidate workflow remains gated by the ecosystem
+v0.7 phases. The fixture runner and future candidate renderer must consume
+`TRAILER_RENDER_VISUAL_PROFILE` and its fixed FFmpeg argument builders rather
+than defining a second visual profile.
+
+The profile produces a 1280×1280 square H.264 Main/AAC MP4 with square pixels
+and fast-start metadata. It uses one centered cyan-to-magenta cline waveform
+above a reserved bottom caption zone. When reviewed timed word cues are
+available, captions use bundled Montserrat ExtraBold at 75 pt, karaoke red to
+blue, at most two lines, and 35 px horizontal padding. Caption layout is fixed
+below the waveform; unavailable captions do not change the waveform-only path.
+The bundled font is under SIL Open Font License 1.1 (`assets/fonts/OFL.txt`).
+
+Verify the profile contract with `npm run verify:trailer-render-profile`; run a
+private fixture render with `npm run build` and
+`node dist/scripts/render-trailer-profile-fixture.js --fixture-root <root>
+--cover <cover-path> --audio <audio-path> --output <empty-root>
+--captions <optional-ass-file>`. Input and output paths must resolve inside the
+fixture root. The script validates square
+dimensions, codec tags, sample aspect ratio, duration, and full decode. It does
+not mutate canonical episode media or publish to any destination.
+
 ### Trailer title and hashtags
 
 The authenticated publication flow accepts the editable title prefix and up to
@@ -133,7 +159,7 @@ and save again.
 Import old `all_episodes.json` into SQLite:
 
 ```bash
-npm run import:episodes -- "/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api/data/all_episodes.json"
+npm run import:episodes -- "/home/jhonatt/repos/dragaocareca-admin-api/data/all_episodes.json"
 ```
 
 The importer supports both array and object JSON shapes and upserts by `episodeId`.

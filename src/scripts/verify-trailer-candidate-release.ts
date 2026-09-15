@@ -405,6 +405,7 @@ const main = async (): Promise<void> => {
     }, {}, {}, { grant: reviewGrant as string }));
     assert.equal(reviewPreview.statusCode, 200);
     assert.equal(reviewPreview.headers["content-type"], "video/mp4");
+    assert.equal(reviewPreview.headers["cross-origin-resource-policy"], "cross-origin");
     assert.deepEqual(reviewPreview.body, outputBytes[1]);
 
     const candidateStatus = await invoke(router, "get", "/:episodeId/trailer-candidates/current", new Request({ episodeId: String(episodeIds[0]) }, {}, authHeaders));
@@ -419,6 +420,7 @@ const main = async (): Promise<void> => {
     const approvalPreview = await invoke(router, "get", "/:episodeId/trailer-candidates/:candidateId/preview", new Request({
       episodeId: String(episodeIds[0]), candidateId: candidateIds[0],
     }, {}, {}, { grant: approvalGrant as string }));
+    assert.equal(approvalPreview.headers["cross-origin-resource-policy"], "cross-origin");
     assert.deepEqual(approvalPreview.body, outputBytes[0]);
 
     const publicEpisode = episodeRepository.findByEpisodeId(episodeIds[0])!;

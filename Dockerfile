@@ -16,6 +16,7 @@ RUN apt-get update \
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/assets/fonts ./assets/fonts
 COPY --from=build /app/requirements-vps.txt ./requirements-vps.txt
 COPY --from=build /app/requirements-faster-whisper.txt ./requirements-faster-whisper.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements-vps.txt

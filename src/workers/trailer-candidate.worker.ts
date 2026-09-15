@@ -18,6 +18,7 @@ import {
 } from "../services/trailer-caption-alignment.service";
 import {
   getTrailerCandidateSnapshotPaths,
+  normalizeTrailerTranscriptText,
   trailerCandidateExistingFilePath,
   trailerCandidateStoragePath,
   trailerCandidateSourcesStillCurrent,
@@ -174,7 +175,7 @@ const processTrailerCandidateInternal = async (
         const result = await transcribe(snapshot.audioPath, (progress) => {
           trailerCandidateRepository.updateTrailerTranscript(candidate.candidateId, { status: "processing", progress });
         });
-        const transcriptText = result.text.trim();
+        const transcriptText = normalizeTrailerTranscriptText(result.text);
         if (transcriptText.length > 100_000) throw new Error("Transcript exceeds the private candidate limit");
         const bytes = Buffer.from(transcriptText, "utf8");
         const transcriptHash = createHash("sha256").update(bytes).digest("hex");

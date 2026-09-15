@@ -157,7 +157,7 @@ const mapCandidate = (row: CandidateSqlRow | undefined): TrailerCandidateRow | n
   trailerTranscriptErrorCategory: row.trailer_transcript_error_category ?? null,
   captionMode: row.caption_mode ?? "automatic",
   captionStatus: row.caption_status ?? "waveform_only",
-  captionReasonCode: row.caption_reason_code ?? "quality_calibration_unavailable",
+  captionReasonCode: row.caption_reason_code ?? (row.caption_status === "included" ? null : "quality_calibration_unavailable"),
   captionAudioSha256: row.caption_audio_sha256 ?? null,
   captionTranscriptSha256: row.caption_transcript_sha256 ?? null,
   captionAlignerVersion: row.caption_aligner_version ?? null,

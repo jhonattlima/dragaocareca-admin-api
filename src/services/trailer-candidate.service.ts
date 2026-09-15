@@ -67,6 +67,12 @@ export type TrailerCandidateEnqueueResult = {
 
 type Source = { kind: "cover" | "audio" | "transcript"; path: string; sha256: string; bytes: number };
 
+export const normalizeTrailerTranscriptText = (text: string): string => text
+  .split(/\r?\n/u)
+  .map((line) => line.trim())
+  .filter((line) => line.length > 0)
+  .join("\n");
+
 const toStatusDto = (row: TrailerCandidateRow): TrailerCandidateStatusDto => ({
   candidateId: row.candidateId,
   episodeId: row.episodeId,
@@ -355,6 +361,7 @@ export const createTrailerCandidateWithTranscript = async (
   if (typeof transcriptText !== "string" || transcriptText.length > 50_000 || Buffer.byteLength(transcriptText, "utf8") > 200_000 || transcriptText.includes("\u0000")) {
     throw new Error("Trailer transcript is outside the accepted size or content limits");
   }
+  const normalizedTranscriptText = normalizeTrailerTranscriptText(transcriptText);
   const episode = episodeRepository.findByEpisodeId(episodeId);
   if (!episode) throw new Error("Episode not found");
   if (episode.isDraft) {
@@ -378,7 +385,7 @@ export const createTrailerCandidateWithTranscript = async (
   const snapshotRelativePath = await copySnapshot(sources, candidateRoot, candidateId);
   const transcriptRelativePath = path.posix.join(candidateId, "trailer-transcript.txt");
   try {
-    const transcriptBytes = Buffer.from(transcriptText, "utf8");
+    const transcriptBytes = Buffer.from(normalizedTranscriptText, "utf8");
     const transcriptSha256 = createHash("sha256").update(transcriptBytes).digest("hex");
     const transcriptPath = await trailerCandidateStoragePath(transcriptRelativePath);
     await fs.promises.writeFile(transcriptPath, transcriptBytes, { flag: "wx", mode: 0o600 });

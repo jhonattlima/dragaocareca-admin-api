@@ -1374,6 +1374,9 @@ episodesRouter.post("/:episodeId/trailer-candidates/:candidateId/preview-grant",
 });
 
 episodesRouter.get("/:episodeId/trailer-candidates/:candidateId/preview", noStoreTrailerCandidateReview, async (req, res) => {
+  // The private preview is consumed by the admin web on a different origin/port.
+  // Override Helmet's global `same-origin` policy only for this opaque-grant route.
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   let handle: fs.promises.FileHandle | null = null;
   let streaming = false;
   try {

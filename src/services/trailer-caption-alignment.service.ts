@@ -68,8 +68,13 @@ const sha256File = async (filePath: string): Promise<string> => {
   return digest.digest("hex");
 };
 
+const stripTranscriptTimestampPrefixes = (text: string): string => text
+  .split(/\r?\n/u)
+  .map((line) => line.replace(/^\s*(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?\s+/u, ""))
+  .join("\n");
+
 export const normalizePortugueseTokens = (text: string): string[] =>
-  text.normalize("NFC").toLocaleLowerCase("pt-BR").match(/[\p{L}\p{N}]+/gu) ?? [];
+  stripTranscriptTimestampPrefixes(text).normalize("NFC").toLocaleLowerCase("pt-BR").match(/[\p{L}\p{N}]+/gu) ?? [];
 
 const percentile95 = (values: number[]): number => {
   if (!values.length) return Number.POSITIVE_INFINITY;

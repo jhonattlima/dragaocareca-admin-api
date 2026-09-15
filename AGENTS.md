@@ -17,5 +17,5 @@
   - delivery in `src/services/telegram.service.ts`
   - startup worker in `src/workers/launch-notification.worker.ts`
 - Use the WSL workspace layout:
-  - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-api`
-  - `/home/jhonatt/repos/jhonatt_projects/dragaocareca-admin-web`
+  - `/home/jhonatt/repos/dragaocareca-admin-api`
+  - `/home/jhonatt/repos/dragaocareca-admin-web`

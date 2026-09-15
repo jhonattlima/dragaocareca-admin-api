@@ -92,7 +92,14 @@ def run_alignment(audio_path: Path, transcript_path: Path, model_dir: Path) -> d
     transcript = transcript_bytes.decode("utf-8", errors="strict")
     if not transcript.strip() or "\x00" in transcript:
         raise ValueError("invalid transcript")
-    tokens = canonical_tokens(transcript)
+    # Provider transcripts may retain human-friendly line timestamps (for example
+    # `0:07 É o maior.`). Keep them in the stored transcript, but exclude them
+    # from the spoken text sent to WhisperX.
+    alignment_transcript = "\n".join(
+        re.sub(r"^\s*(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?\s+", "", line)
+        for line in transcript.splitlines()
+    )
+    tokens = canonical_tokens(alignment_transcript)
     if not tokens or len(tokens) > MAX_WORDS:
         raise ValueError("invalid transcript token count")
 
@@ -115,7 +122,7 @@ def run_alignment(audio_path: Path, transcript_path: Path, model_dir: Path) -> d
         model_cache_only=True,
     )
     aligned = whisperx.align(
-        [{"start": 0.0, "end": audio_seconds, "text": transcript}],
+        [{"start": 0.0, "end": audio_seconds, "text": alignment_transcript}],
         model,
         metadata,
         audio,

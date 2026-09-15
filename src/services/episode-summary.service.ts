@@ -101,6 +101,7 @@ export type SuggestedTagsSnapshot = {
   errorCategory: EpisodeDraftState["suggestedTags"]["errorCategory"];
   promptVersion: string | null;
   provider: string | null;
+  candidates: EpisodeDraftState["suggestedTags"]["candidates"];
   suggestions: EpisodeDraftState["suggestedTags"]["suggestions"];
 };
 
@@ -570,6 +571,7 @@ const toSuggestedTagsSnapshot = (state: EpisodeDraftState): SuggestedTagsSnapsho
   errorCategory: state.suggestedTags.errorCategory,
   promptVersion: state.suggestedTags.promptVersion,
   provider: state.suggestedTags.provider ?? null,
+  candidates: state.suggestedTags.candidates,
   suggestions: state.suggestedTags.suggestions.slice(0, 3),
 });
 
