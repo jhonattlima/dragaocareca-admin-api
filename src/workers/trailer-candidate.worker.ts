@@ -214,7 +214,7 @@ const processTrailerCandidateInternal = async (
       transcriptSha256: candidateForCaption.trailerTranscriptSha256,
       profileRevision: candidateForCaption.profileRevision,
     };
-    const qualityGateAvailable = Boolean(seams.captionCalibration?.approved && seams.captionCapacity?.approved);
+    const qualityGateAvailable = config.trailerCaptionUnsafeTestMode || Boolean(seams.captionCalibration?.approved && seams.captionCapacity?.approved);
     if (candidateForCaption.captionMode === "automatic" && !qualityGateAvailable) {
       captionState.reasonCode = seams.captionCalibration?.approved ? "capacity_unavailable" : "quality_calibration_unavailable";
     } else if (candidateForCaption.captionMode === "automatic" && (!transcriptValid
@@ -264,7 +264,10 @@ const processTrailerCandidateInternal = async (
           aligned.profileId === candidateForCaption.profileId && aligned.profileRevision === candidateForCaption.profileRevision
         ) {
           captionState = { ...captionState, status: "waveform_only", reasonCode: "alignment_coverage_insufficient" };
-          const quality = evaluateTrailerCaptionQuality({
+          const quality = config.trailerCaptionUnsafeTestMode ? {
+            eligible: true,
+            reason: "unsafe_test_override",
+          } : evaluateTrailerCaptionQuality({
             transcript: transcriptText,
             words: aligned.words,
             durationSeconds,

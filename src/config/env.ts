@@ -162,6 +162,9 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   trailerCandidateRenderEnabled: (process.env.TRAILER_CANDIDATE_RENDER_ENABLED ?? "false").toLowerCase() === "true",
+  // Temporary operator opt-in for live visual validation only. This bypasses
+  // the Portuguese quality/capacity gates and must never be treated as approval.
+  trailerCaptionUnsafeTestMode: (process.env.TRAILER_CAPTION_UNSAFE_TEST_MODE ?? "false").toLowerCase() === "true",
   trailerCandidateRetentionDays: parseTrailerCandidateRetentionDays(process.env.TRAILER_CANDIDATE_RETENTION_DAYS),
   port: Number(process.env.PORT ?? 3000),
   sqlitePath: process.env.SQLITE_PATH ?? path.resolve(process.cwd(), "data", "database", "dragaocareca-admin.sqlite"),
