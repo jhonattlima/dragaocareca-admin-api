@@ -1,10 +1,10 @@
-# Exact wheel admitted for disposable local evaluation only. This is not consumed by
-# requirements-vps.txt or any production image in Phase 21.
-# Any evaluation install must use a temporary virtualenv, --no-deps, and --require-hashes.
+# Exact aligner admitted for the optional trailer-caption runtime. The production
+# image installs this file with normal dependency resolution; model weights remain
+# separately staged and hash-verified under the private generated-data mount.
 whisperx==3.8.6 \
     --hash=sha256:cb6d4fcd3fb6c42305cb8b222a33a0b78f6b657e9db3b714345fe43dc0a69c1f
 
-# Model weights are never downloaded by the runtime adapter. Phase 22 must stage
-# these exact weights offline and create a manifest with per-file SHA-256 records.
+# Model weights are never downloaded by the runtime adapter. Deployment must stage
+# these exact weights separately and create a manifest with per-file SHA-256 records.
 # Model ID: jonatasgrosman/wav2vec2-large-xlsr-53-portuguese
 # Immutable revision: 634ac655299bcdc46c83bc01da9bab52d2987e4f
