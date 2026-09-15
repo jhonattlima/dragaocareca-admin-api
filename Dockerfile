@@ -22,7 +22,10 @@ COPY --from=build /app/requirements-faster-whisper.txt ./requirements-faster-whi
 COPY --from=build /app/requirements-trailer-captions.txt ./requirements-trailer-captions.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements-vps.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements-faster-whisper.txt
-RUN python3 -m pip install --no-cache-dir --break-system-packages whisperx==3.8.6
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.8.0+cpu torchaudio==2.8.0+cpu \
+  && python3 -m pip install --no-cache-dir --break-system-packages whisperx==3.8.6
 COPY --from=build /app/scripts/faster_whisper_transcribe.py ./scripts/faster_whisper_transcribe.py
 COPY --from=build /app/src/scripts/spotify-metrics.py ./src/scripts/spotify-metrics.py
 USER node
