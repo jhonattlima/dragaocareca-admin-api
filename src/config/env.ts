@@ -211,6 +211,7 @@ export const config = {
     sampleIntervalMs: Number(process.env.SPOTIFY_METRICS_SAMPLE_INTERVAL_MS ?? 86400000),
     episodeResolver: {
       enabled: (process.env.SPOTIFY_EPISODE_RESOLVER_ENABLED ?? "false").toLowerCase() === "true",
+      fullScanEnabled: (process.env.SPOTIFY_EPISODE_RESOLVER_FULL_SCAN_ENABLED ?? "false").toLowerCase() === "true",
       showId: process.env.SPOTIFY_EPISODE_SHOW_ID ?? "",
       // Reuse the existing Spotify application credentials unless the resolver
       // is explicitly given a separate pair.

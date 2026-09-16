@@ -1073,6 +1073,17 @@ export const episodeRepository = {
     `).run(spotifyId, nowIso(), episodeId);
     return Number(result.changes) === 1;
   },
+  replaceSpotifyIdIfExpected(episodeId: number, expectedSpotifyId: string, spotifyId: string): boolean {
+    const result = getDb().prepare(`
+      UPDATE episodes SET spotify_id = ?, updated_at = ?
+      WHERE episode_id = ? AND is_draft = 0 AND COALESCE(spotify_id, '') = ?
+    `).run(spotifyId, nowIso(), episodeId, expectedSpotifyId);
+    return Number(result.changes) === 1;
+  },
+  recordSpotifyResolutionAudit(input: { auditId: string; runId: string; episodeId?: number; previousSpotifyId?: string | null; newSpotifyId?: string | null; decision: "valid" | "replaced" | "missing" | "ambiguous" | "provider_error"; reason: string }): void {
+    getDb().prepare(`INSERT OR IGNORE INTO spotify_episode_resolution_audits (audit_id, run_id, episode_id, previous_spotify_id, new_spotify_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(input.auditId, input.runId, input.episodeId ?? null, input.previousSpotifyId ?? null, input.newSpotifyId ?? null, input.decision, input.reason.slice(0, 240), nowIso());
+  },
   getPendingLaunchNotifications(): EpisodeRow[] {
     const rows = getDb()
       .prepare(`

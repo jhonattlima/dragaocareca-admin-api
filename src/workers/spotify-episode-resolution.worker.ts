@@ -1,17 +1,36 @@
+import { randomUUID } from "node:crypto";
 import { config } from "../config/env";
 import { episodeRepository } from "../database/repositories/episode.repository";
-import { resolveEpisodeSpotifyId } from "../services/spotify-episode-resolver.service";
+import { createSpotifyEpisodeProvider, reconcileSpotifyEpisodeIds, resolveEpisodeSpotifyId, type SpotifyEpisodeProvider } from "../services/spotify-episode-resolver.service";
 import { setSpotifyResolutionWakeListener } from "./spotify-episode-resolution.signal";
 
 let timer: NodeJS.Timeout | undefined;
 let active: Promise<void> | null = null;
 const retryDelayMs = 5 * 60 * 1000;
+let fullScanCompleted = false;
+
+const runFullScan = async (): Promise<void> => {
+  if (!config.spotify.episodeResolver.fullScanEnabled || fullScanCompleted) return;
+  const provider: SpotifyEpisodeProvider = createSpotifyEpisodeProvider();
+  const runId = randomUUID();
+  try {
+    const catalog = await (provider.listAllEpisodes ? provider.listAllEpisodes() : provider.listRecentEpisodes());
+    const results = reconcileSpotifyEpisodeIds(episodeRepository.listPublished(), catalog, (episodeId, expected, next) => episodeRepository.replaceSpotifyIdIfExpected(episodeId, expected, next));
+    for (const result of results) episodeRepository.recordSpotifyResolutionAudit({ auditId: `${runId}:${result.episodeId}`, runId, ...result });
+    fullScanCompleted = true;
+    console.info("Spotify episode resolution reconciliation completed", { run_id: runId, catalog_count: catalog.length, processed: results.length });
+  } catch (error) {
+    episodeRepository.recordSpotifyResolutionAudit({ auditId: `${runId}:provider`, runId, decision: "provider_error", reason: error instanceof Error ? error.message : "unknown provider error" });
+    console.warn("Spotify episode resolution reconciliation failed", { run_id: runId });
+  }
+};
 
 const runOnce = async (): Promise<void> => {
   if (active) return active;
   active = (async () => {
     const recovered = episodeRepository.recoverSpotifyResolutionJobs();
     const expired = episodeRepository.expireSpotifyResolutionJobs();
+    await runFullScan();
     const due = episodeRepository.getDueSpotifyResolutionJobs();
     for (const job of due) {
       if (!episodeRepository.claimSpotifyResolutionJob(job.episodeId)) continue;

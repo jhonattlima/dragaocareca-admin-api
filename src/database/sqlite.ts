@@ -151,6 +151,18 @@ CREATE TABLE IF NOT EXISTS spotify_episode_resolution_jobs (
 CREATE INDEX IF NOT EXISTS idx_spotify_resolution_due
   ON spotify_episode_resolution_jobs(status, next_attempt_at, deadline_at);
 
+CREATE TABLE IF NOT EXISTS spotify_episode_resolution_audits (
+  audit_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  episode_id INTEGER REFERENCES episodes(episode_id) ON DELETE CASCADE,
+  previous_spotify_id TEXT,
+  new_spotify_id TEXT,
+  decision TEXT NOT NULL CHECK (decision IN ('valid', 'replaced', 'missing', 'ambiguous', 'provider_error')),
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spotify_resolution_audits_run ON spotify_episode_resolution_audits(run_id, created_at);
+
 CREATE TABLE IF NOT EXISTS promotion_notifications (
   notification_id TEXT PRIMARY KEY,
   episode_id INTEGER NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
