@@ -33,6 +33,12 @@ const imageUrl = (coverFileName: string | undefined, episodeId: number): string 
   return `${config.feed.imageBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
 };
 
+const episodeDescription = (summary: string | null | undefined): string => {
+  const supportCallout = `🐉 Guilda do Dragão Careca 🐉: Torne-se um integrante da nossa guilda! Descubra sobre os cargos e recompensas: ${config.public.supportersLink}`;
+  const body = summary?.trim() ?? "";
+  return body ? `${supportCallout}\n\n${body}` : supportCallout;
+};
+
 const normalizeLegacySnapshotImages = (xmlSnapshot: string, episodeId: number): string => {
   const canonical = `${config.feed.imageBase.replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
   return xmlSnapshot.replace(/https?:\/\/[^\s"<>]+\/files\/images\/[^\s"<>]+/gu, canonical);
@@ -115,12 +121,13 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
 
     const item = root.ele("item");
     item.ele("title").txt(ep.title).up();
-    item.ele("description").txt(ep.summary ?? "").up();
+    const description = episodeDescription(ep.summary);
+    item.ele("description").txt(description).up();
     item.ele("guid").txt(audioUrl(ep.fileName, ep.episodeId)).up();
     item.ele("link").txt(`${config.feed.baseLink}${ep.episodeId}`).up();
     item.ele("pubDate").txt(toRfc822(new Date(ep.pubDate))).up();
     if (config.feed.itunesAuthor) item.ele("itunes:author").txt(config.feed.itunesAuthor).up();
-    item.ele("itunes:summary").txt(ep.summary ?? "").up();
+    item.ele("itunes:summary").txt(description).up();
     item.ele("itunes:episode").txt(String(ep.episodeId)).up();
     item.ele("itunes:explicit").txt(ep.explicit).up();
     if (ep.duration) item.ele("itunes:duration").txt(ep.duration).up();
