@@ -135,7 +135,13 @@ const bootstrap = async (): Promise<void> => {
     await startEpisodeTranscriptionWorker();
     await startSpotifyMetricsWorker();
     await startYouTubeMetricsWorker();
-    await startTelegramBotWorker();
+    // The standalone dona-sonja bot owns Telegram long polling in production.
+    // Do not start a second getUpdates consumer unless explicitly enabled;
+    // two consumers with the same token cause Telegram 409 conflicts and can
+    // prevent supporter-group launch notifications from being delivered.
+    if (telegramWorkersEnabled) {
+      await startTelegramBotWorker();
+    }
   }
 
   app.listen(config.port, () => {
