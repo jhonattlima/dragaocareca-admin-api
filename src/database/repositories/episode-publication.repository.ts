@@ -188,12 +188,19 @@ export const episodePublicationRepository = {
       SELECT * FROM episode_publication_effects
       WHERE destination IN ('instagram_reel', 'facebook_native_video')
         AND eligibility = 'eligible'
+        -- Social networks publish only at the public release time. Telegram
+        -- promotion is dispatched separately at save time.
+        AND EXISTS (
+          SELECT 1 FROM episodes e
+          WHERE e.episode_id = episode_publication_effects.episode_id
+            AND datetime(e.pub_date) <= datetime(?)
+        )
         AND (lifecycle = 'eligible' OR lifecycle = 'failed' OR (lifecycle = 'delivering' AND datetime(updated_at) <= datetime(?, '-60 seconds')))
         AND attempts < 12
         AND (lifecycle = 'eligible' OR next_attempt_at IS NULL OR next_attempt_at <= ?)
       ORDER BY COALESCE(next_attempt_at, updated_at), updated_at
       LIMIT ?
-    `).all(now.toISOString(), now.toISOString(), limit) as Row[];
+    `).all(now.toISOString(), now.toISOString(), now.toISOString(), limit) as Row[];
     return rows.map((row) => ({ episodeId: row.episode_id, effect: map(row) }));
   },
   claimSocialEffect(effectKey: string, now = new Date()): PublicationEffectProjection | null {

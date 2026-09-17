@@ -14,6 +14,8 @@ import {
 } from "./episode-promotion.service";
 import { postEpisodePromotion } from "./episode-promotion-client.service";
 import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath } from "./episode-media-layout.service";
+import { createYoutubeTrailerJob } from "./youtube-trailer-job.service";
+import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
 
 export type EpisodePromotionSaveInput = {
   episodeId: number;
@@ -121,6 +123,32 @@ export const saveEpisodeAndQueuePromotion = async (
         retryable: false,
       },
     };
+  }
+
+  // YouTube publication is intentionally independent from Telegram/Meta. Once
+  // the episode is saved with a canonical trailer, enqueue its private upload
+  // and mark publication requested; the YouTube worker promotes it to public
+  // when processing completes. Existing public jobs for the same bytes are
+  // reused, so ordinary metadata edits never duplicate a trailer.
+  if (config.youtube.trailerJob.enabled && config.youtube.trailerPublication.enabled && trailer) {
+    const alreadyPublic = youtubeTrailerJobRepository.findByEpisodeId(input.episodeId)
+      .some((job) => job.sourceSha256 === trailer.sha256 && job.sourceBytes === trailer.byteCount && job.publicationStatus === "public_confirmed");
+    if (!alreadyPublic) {
+      try {
+        const job = await createYoutubeTrailerJob(input.episodeId, {
+          title: payload.title,
+          summary: payload.summary ?? "",
+          hashtags: (payload.instagramHashtags ?? []).slice(0, 3),
+        });
+        youtubeTrailerJobRepository.requestPublication(job, {
+          title: payload.title,
+          summary: payload.summary ?? "",
+          hashtags: (payload.instagramHashtags ?? []).slice(0, 3),
+        });
+      } catch (error) {
+        console.warn("Automatic YouTube trailer publication could not be queued", error instanceof Error ? error.message : "Unknown error");
+      }
+    }
   }
 
   const acknowledgement = await dispatchPromotionAfterCommit(committed.intent.notification.notificationId, input.transport);
