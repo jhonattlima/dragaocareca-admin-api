@@ -20,7 +20,14 @@ const toSaoPauloIso = (d: Date): string => {
 };
 
 const audioUrl = (fileName: string | undefined, episodeId: number): string => {
-  const direct = `${config.feed.audioBase}${fileName ?? `episode_${episodeId}.mp3`}`;
+  const configuredBase = config.feed.audioBase;
+  // Media files are now served from the canonical per-episode layout. Keep
+  // accepting legacy configuration/file names, but never emit a dead /files
+  // URL in the feed.
+  const canonicalBase = configuredBase.replace(/\/files(?=\/|$)/u, "/media");
+  const direct = /\/media(?:\/|$)/u.test(canonicalBase)
+    ? `${canonicalBase.replace(/\/episodes\/?$/u, "").replace(/\/+$/u, "")}/episodes/${episodeId}/audio.mp3`
+    : `${canonicalBase}${fileName ?? `episode_${episodeId}.mp3`}`;
   const trackerPrefix = config.feed.audioTrackerPrefix.trim();
   if (!trackerPrefix) return direct;
 
@@ -30,7 +37,12 @@ const audioUrl = (fileName: string | undefined, episodeId: number): string => {
 };
 
 const imageUrl = (coverFileName: string | undefined, episodeId: number): string => {
-  return `${config.feed.imageBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
+  const configuredBase = config.feed.imageBase;
+  const canonicalBase = configuredBase.replace(/\/files(?=\/|$)/u, "/media");
+  if (/\/media(?:\/|$)/u.test(canonicalBase)) {
+    return `${canonicalBase.replace(/\/episodes\/?$/u, "").replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
+  }
+  return `${canonicalBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
 };
 
 const episodeDescription = (summary: string | null | undefined): string => {
@@ -39,9 +51,13 @@ const episodeDescription = (summary: string | null | undefined): string => {
   return body ? `${supportCallout}\n\n${body}` : supportCallout;
 };
 
-const normalizeLegacySnapshotImages = (xmlSnapshot: string, episodeId: number): string => {
-  const canonical = `${config.feed.imageBase.replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
-  return xmlSnapshot.replace(/https?:\/\/[^\s"<>]+\/files\/images\/[^\s"<>]+/gu, canonical);
+const normalizeLegacySnapshotMedia = (xmlSnapshot: string, episodeId: number): string => {
+  const canonicalImageBase = config.feed.imageBase.replace(/\/files(?=\/|$)/u, "/media");
+  const canonical = `${canonicalImageBase.replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
+  const audio = audioUrl(undefined, episodeId);
+  return xmlSnapshot
+    .replace(/https?:\/\/[^\s"<>]+\/files\/images\/[^\s"<>]+/gu, canonical)
+    .replace(/https?:\/\/[^\s"<>]+\/files\/episodes\/[^\s"<>]+/gu, audio);
 };
 
 export const buildFeedXml = (episodes: EpisodeRow[]): string => {
@@ -111,7 +127,7 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
   for (const ep of episodes) {
     if (ep.xmlSnapshot) {
       try {
-        const legacyItem = create(normalizeLegacySnapshotImages(ep.xmlSnapshot, ep.episodeId)).root();
+        const legacyItem = create(normalizeLegacySnapshotMedia(ep.xmlSnapshot, ep.episodeId)).root();
         root.import(legacyItem);
         continue;
       } catch {
