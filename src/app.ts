@@ -44,14 +44,12 @@ const isProviderMediaExposed = (episodeId: number): boolean => {
   if (!config.meta.providerMediaExposureEnabled) return false;
   if (config.meta.providerMediaEpisodeId > 0 && episodeId === config.meta.providerMediaEpisodeId) return true;
 
-  // Scheduled episodes remain private. Once an episode is released, expose
-  // only its finalized trailer through the provider-specific MP4 route.
+  // Trailers are promotional assets and must be fetchable by Instagram and
+  // Facebook immediately after an episode is saved, even when the full
+  // episode is scheduled for a later release. The episode audio remains
+  // protected by the normal feed/publication gates.
   const episode = episodeRepository.findByEpisodeId(episodeId);
-  if (!episode) return false;
-  const publicationDate = new Date(episode.pubDate);
-  return Number.isFinite(publicationDate.getTime())
-    && publicationDate <= new Date()
-    && fs.existsSync(getEpisodeMediaFinalPath(episodeId, "trailerVideo"));
+  return Boolean(episode && !episode.isDraft && fs.existsSync(getEpisodeMediaFinalPath(episodeId, "trailerVideo")));
 };
 
 app.use(helmet());
