@@ -53,11 +53,11 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
 
 export const metaPublicationProvider: MetaPublicationProvider = {
   createInstagramContainer: async (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: await pagePublicationToken() }) }),
-  // Meta Graph API v23 no longer exposes `status_code` as a selectable field
-  // for Reel containers. The current `status` field contains the processing
-  // state (sometimes nested as `video_status`), which normalizeMetaProviderStatus
-  // already handles.
-  getInstagramContainer: async (id) => request(`${id}?fields=id,status&access_token=${encodeURIComponent(await pagePublicationToken())}`),
+  // Some Graph API versions reject both legacy status fields for Reel
+  // containers. Fetch the container without a field projection; when Meta
+  // returns a status it is still normalized, otherwise publication is
+  // attempted and Meta's publish response provides the definitive result.
+  getInstagramContainer: async (id) => request(`${id}?access_token=${encodeURIComponent(await pagePublicationToken())}`),
   publishInstagramContainer: async (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: await pagePublicationToken() }) }),
   uploadFacebookVideo: async (input) => {
     const token = await pagePublicationToken();
