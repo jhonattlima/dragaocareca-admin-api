@@ -11,12 +11,21 @@ import type { MetaPublicationProvider } from "./meta-publication.provider";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
 
-export const renderSocialCaption = (input: { title: string; summary: string; mentions: string[]; hashtags: string[] }): string => [
+const truncateUtf8 = (value: string, maxBytes: number): string => {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  let result = value;
+  while (result.length > 0 && Buffer.byteLength(result, "utf8") > maxBytes) {
+    result = result.slice(0, -1);
+  }
+  return result;
+};
+
+export const renderSocialCaption = (input: { title: string; summary: string; mentions: string[]; hashtags: string[] }): string => truncateUtf8([
   input.title,
   input.summary,
   input.mentions.join(" "),
   input.hashtags.join(" "),
-].filter(Boolean).join("\n\n").slice(0, 2200);
+].filter(Boolean).join("\n\n"), 2_100);
 
 const metadataFor = (episode: EpisodeRow): PublicationMetadata => {
   const captionMentions = episode.instagramCaptionMentions ?? [];
