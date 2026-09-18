@@ -45,10 +45,79 @@ const imageUrl = (coverFileName: string | undefined, episodeId: number): string 
   return `${canonicalBase}${coverFileName ?? `episode_${episodeId}.jpeg`}`;
 };
 
-const episodeDescription = (summary: string | null | undefined): string => {
+const AUTHOR_CONTACTS: Record<string, { character: string; links: Array<[string, string]> }> = {
+  "Jhonatt Lima": { character: "Tiamat", links: [["instagram", "https://www.instagram.com/jhonattlima"]] },
+  "Gabriel Moraes": { character: "Galdrim", links: [["instagram", "https://www.instagram.com/gaabrielrmoraes"]] },
+  "Diego Broniszak": { character: "Troah", links: [["instagram", "https://www.instagram.com/troah_o_bardo"]] },
+  "Eric Farias": { character: "Bron", links: [["instagram", "https://www.instagram.com/eric_frs"]] },
+  "Jader Brasil": { character: "Baldur", links: [["facebook", "https://www.facebook.com/jader.eb"], ["twitter", "https://www.twitter.com/balduroficial"]] },
+  "Eduardo Montenegro": { character: "Aldabonero", links: [["instagram", "https://www.instagram.com/emontenegroo"]] },
+  "Luísa Zelmanowicz": { character: "Lusa", links: [["instagram", "https://www.instagram.com/luzelmanowicz"]] },
+  "Walquiria Lima": { character: "Wal", links: [["instagram", "https://www.instagram.com/wal_killer"]] },
+  "Diogo Truylio": { character: "Aurin", links: [["instagram", "https://www.instagram.com/diogarts"]] },
+  "Vicente Raiol": { character: "Kavartu", links: [["facebook", "https://www.facebook.com/vicente.raioI"]] },
+};
+
+const escapeHtml = (value: string): string => value
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+const safeUrl = (value: string): string => /^https?:\/\//u.test(value.trim()) ? value.trim() : "";
+
+const linksHtml = (links: Array<[string, string]>): string => links
+  .map(([label, url]) => {
+    const href = safeUrl(url);
+    return href ? ` <a href="${escapeHtml(href)}">[${escapeHtml(label)}]</a>` : "";
+  }).join("");
+
+const creditSection = (heading: string, rows: string[]): string => rows.length > 0
+  ? `<p><h3>${heading}</h3></p> ${rows.map((row) => `<p>${row}</p>`).join("")}`
+  : "";
+
+const structuredMusicCredit = (value: string): { name: string; links: Array<[string, string]> } | null => {
+  try {
+    const parsed = JSON.parse(value) as { name?: unknown; links?: unknown };
+    if (typeof parsed.name !== "string" || !parsed.name.trim()) return null;
+    const links = Array.isArray(parsed.links) ? parsed.links.flatMap((link) => {
+      if (!link || typeof link !== "object") return [];
+      const label = typeof (link as { label?: unknown }).label === "string" ? (link as { label: string }).label : "link";
+      let url = typeof (link as { url?: unknown }).url === "string" ? (link as { url: string }).url : "";
+      url = url.replace(/^Link:\s*/iu, "").trim();
+      return url ? [[label, url] as [string, string]] : [];
+    }) : [];
+    return { name: parsed.name.trim(), links };
+  } catch {
+    return value.trim() ? { name: value.trim(), links: [] } : null;
+  }
+};
+
+const episodeDescription = (episode: Pick<EpisodeRow, "summary" | "authors" | "guests" | "coverCredits" | "musicCredits">): string => {
   const supportCallout = `🐉 Guilda do Dragão Careca 🐉: Torne-se um integrante da nossa guilda! Descubra sobre os cargos e recompensas: ${config.public.supportersLink}`;
-  const body = summary?.trim() ?? "";
-  return body ? `${supportCallout}\n\n${body}` : supportCallout;
+  const body = episode.summary?.trim() ? `<p>${escapeHtml(episode.summary.trim()).replace(/\r?\n/g, "<br>")}</p>` : "";
+  const guests = episode.guests.map((name) => {
+    const contact = AUTHOR_CONTACTS[name];
+    return `${escapeHtml(name)}${contact ? `: ${linksHtml(contact.links)}` : ""}`;
+  });
+  const covers = episode.coverCredits.map((name) => {
+    const contact = AUTHOR_CONTACTS[name];
+    return `${escapeHtml(name)}${contact ? `: ${linksHtml(contact.links)}` : ""}`;
+  });
+  const music = episode.musicCredits.flatMap((value) => {
+    const credit = structuredMusicCredit(value);
+    return credit ? [`${escapeHtml(credit.name)}:${linksHtml(credit.links)}`] : [];
+  });
+  const authors = episode.authors.map((name) => {
+    const contact = AUTHOR_CONTACTS[name];
+    return `${escapeHtml(name)}${contact ? ` - ${escapeHtml(contact.character)}:${linksHtml(contact.links)}` : ""}`;
+  });
+  const credits = [
+    creditSection("👤 Convidadas & convidados 👤", guests),
+    creditSection("🎨 Arte de Capa 🎨", covers),
+    creditSection("🎵 Créditos das Músicas 🎵", music),
+    creditSection("✒️ Autores ✒️", authors),
+  ].filter(Boolean).join("");
+  const footer = `<p>🏰 Site 🏰: Venha saber mais sobre a gente e nossas aventuras! Clique <a href="${escapeHtml(config.feed.site)}">aqui!</a></p><p>✉️ Contato ✉️: <a href="mailto:contato@dragaocarecaoficial@gmail.com">dragaocarecaoficial@gmail.com</a></p>`;
+  return `${escapeHtml(supportCallout)}${body}${footer}${credits}`;
 };
 
 const normalizeLegacySnapshotMedia = (xmlSnapshot: string, episodeId: number): string => {
@@ -137,13 +206,13 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
 
     const item = root.ele("item");
     item.ele("title").txt(ep.title).up();
-    const description = episodeDescription(ep.summary);
-    item.ele("description").txt(description).up();
+    const description = episodeDescription(ep);
+    item.ele("description").dat(description).up();
     item.ele("guid").txt(audioUrl(ep.fileName, ep.episodeId)).up();
     item.ele("link").txt(`${config.feed.baseLink}${ep.episodeId}`).up();
     item.ele("pubDate").txt(toRfc822(new Date(ep.pubDate))).up();
     if (config.feed.itunesAuthor) item.ele("itunes:author").txt(config.feed.itunesAuthor).up();
-    item.ele("itunes:summary").txt(description).up();
+    item.ele("itunes:summary").dat(description).up();
     item.ele("itunes:episode").txt(String(ep.episodeId)).up();
     item.ele("itunes:explicit").txt(ep.explicit).up();
     if (ep.duration) item.ele("itunes:duration").txt(ep.duration).up();
