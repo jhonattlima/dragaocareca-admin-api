@@ -5,7 +5,7 @@ import multer from "multer";
 import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { config } from "../config/env";
-import { episodeSchema } from "../schemas/episode";
+import { episodeCreateSchema, episodeSchema } from "../schemas/episode";
 import { requireAuth } from "../middleware/auth.middleware";
 import { queueLaunchNotification } from "../services/launch-notification.service";
 import { saveEpisodeAndQueuePromotion } from "../services/episode-promotion-save.service";
@@ -1586,7 +1586,7 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
       res.status(draftCheck.status).json({ message: draftCheck.message });
       return;
     }
-    const payload = episodeSchema.parse(req.body);
+    const payload = episodeCreateSchema.parse(req.body);
     payload.title = buildCanonicalEpisodeTitle(payload);
     if (draftCheck && payload.episodeId !== draftCheck.reservation.episodeId) {
       res.status(403).json({ message: "Episode draft reservation does not match episodeId" });

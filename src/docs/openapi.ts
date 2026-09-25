@@ -1058,7 +1058,7 @@ export const swaggerSpec = swaggerJsdoc({
             required: true,
             content: {
               "application/json": {
-                schema: { allOf: [{ $ref: "#/components/schemas/Episode" }, { type: "object", required: ["draftId"], properties: { draftId: { type: "string", format: "uuid" } } }] },
+                schema: { allOf: [{ $ref: "#/components/schemas/Episode" }, { type: "object", required: ["draftId", "youtube"], properties: { draftId: { type: "string", format: "uuid" }, youtube: { type: "string", minLength: 1, description: "YouTube link returned after the trailer upload; required before creating a new episode." } } }] },
               },
             },
           },

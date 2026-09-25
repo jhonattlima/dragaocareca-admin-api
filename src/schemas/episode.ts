@@ -69,4 +69,11 @@ export const episodeSchema = z.object({
   instagramHashtags: z.array(z.string().trim().max(100)).max(50).optional(),
 });
 
+// A new episode is not publishable until its trailer has been sent to
+// YouTube and the resulting link is present. Existing episodes may still be
+// edited while retaining legacy records that predate this requirement.
+export const episodeCreateSchema = episodeSchema.extend({
+  youtube: z.string().trim().min(1, "YouTube link is required before saving a new episode"),
+});
+
 export type EpisodeInput = z.infer<typeof episodeSchema>;
