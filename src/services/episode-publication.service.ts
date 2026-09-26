@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { EpisodeRow } from "../database/repositories/episode.repository";
 import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
+import { episodeRepository } from "../database/repositories/episode.repository";
 import { config } from "../config/env";
 import { publicationMetadataSchema, publicationSourceRevision, type PublicationEffectProjection, type PublicationMetadata, type PublicationPreflight, type PublicationSource } from "../schemas/episode-publication";
 import { preflightEpisodePublicationMedia } from "./episode-publication-media.service";
@@ -10,6 +11,9 @@ import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.
 import type { MetaPublicationProvider } from "./meta-publication.provider";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
+// Instagram rejects captions that contain more than 30 hashtags. Keep the
+// persisted authoring payload untouched, but cap the rendered social payload.
+const MAX_SOCIAL_HASHTAGS = 30;
 
 const truncateUtf8 = (value: string, maxBytes: number): string => {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
@@ -29,7 +33,7 @@ export const renderSocialCaption = (input: { title: string; summary: string; men
 
 const metadataFor = (episode: EpisodeRow): PublicationMetadata => {
   const captionMentions = episode.instagramCaptionMentions ?? [];
-  const hashtags = episode.instagramHashtags ?? [];
+  const hashtags = (episode.instagramHashtags ?? []).slice(0, MAX_SOCIAL_HASHTAGS);
 
   return publicationMetadataSchema.parse({
     title: episode.title,
@@ -100,6 +104,10 @@ export const dispatchEpisodeReplacementPublication = async (
   provider?: MetaPublicationProvider,
 ): Promise<PublicationEffectProjection[]> => {
   const effects = episodePublicationRepository.list(episodeId, sourceRevision);
+  const episode = episodeRepository.findByEpisodeId(episodeId);
+  // Trailer approval may happen before the scheduled release. The retry worker
+  // will pick these eligible effects up once the episode is public.
+  if (!episode || new Date(episode.pubDate) > new Date()) return effects;
   await Promise.all(effects.map((effect) => {
     if (effect.destination === "instagram_reel" && config.meta.instagramEnabled) return deliverInstagramReel(episodeId, effect, provider);
     if (effect.destination === "facebook_native_video" && config.meta.facebookReelEnabled) return deliverFacebookNativeVideo(episodeId, effect, provider);
