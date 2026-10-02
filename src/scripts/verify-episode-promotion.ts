@@ -14,6 +14,7 @@ type Scenario =
   | "state-replay"
   | "post-save-isolation"
   | "scheduled-update-replay"
+  | "metadata-revision"
   | "private-media-handoff"
   | "restart-recovery"
   | "failure-matrix";
@@ -31,6 +32,7 @@ const scenarios: Scenario[] = [
   "state-replay",
   "post-save-isolation",
   "scheduled-update-replay",
+  "metadata-revision",
   "private-media-handoff",
   "restart-recovery",
   "failure-matrix",
@@ -455,6 +457,27 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
     assert.equal((getDb().prepare("SELECT COUNT(*) AS count FROM promotion_notifications WHERE notification_id = ?").get(request.notification_id) as { count: number }).count, 1);
     assert.equal((getDb().prepare("SELECT COUNT(*) AS count FROM promotion_effects WHERE notification_id = ?").get(request.notification_id) as { count: number }).count, 2);
 
+    if (scenario === "metadata-revision") {
+      const updatedMetadata = await service.createOrReusePromotionIntent({
+        ...requestInput,
+        title: "Final episode title",
+        episodeNumber: 43,
+      }, transport);
+      assert.notEqual(updatedMetadata.notification.sourceRevision, first.notification.sourceRevision, "metadata-only changes must create a new promotion revision");
+      assert.equal(updatedMetadata.request.source_revision_ordinal, 2);
+      assert.equal(transport.requests.length, 2, "final title metadata must be dispatched rather than deduplicated by trailer hash");
+      assert.equal(updatedMetadata.request.title, "Final episode title");
+      const replay = await service.createOrReusePromotionIntent({
+        ...requestInput,
+        title: "Final episode title",
+        episodeNumber: 43,
+      }, transport);
+      assert.equal(replay.notification.sourceRevision, updatedMetadata.notification.sourceRevision);
+      assert.equal(transport.requests.length, 2, "identical final metadata retry must remain idempotent");
+      console.log("metadata-only episode promotion changes dispatch one new revision and identical retries remain idempotent");
+      return;
+    }
+
     if (scenario === "contract-outbox-tracer") {
       assert.ok(first.effects.every((effect) => effect.status === "complete"));
       assert.equal(first.request.source_revision_ordinal, 1);
@@ -511,7 +534,6 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
     assert.equal(replay.effects.find((effect) => effect.destination === "advance_access")?.topicId, "fake-topic");
     assert.equal(replay.effects.find((effect) => effect.destination === "advance_access")?.messageThreadId, "fake-thread");
 
-    await assert.rejects(() => service.createOrReusePromotionIntent({ ...requestInput, title: "Different title" }), /Conflicting promotion payload fingerprint/);
     const incomplete = episodePromotionRepository.listIncompletePromotionEffects(request.notification_id);
     assert.equal(incomplete.length, 0);
     console.log("episode promotion state/replay verifier passed with fake acknowledgement loss and no duplicate send");

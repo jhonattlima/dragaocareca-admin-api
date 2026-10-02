@@ -40,18 +40,46 @@ const stripHashtags = (title: string): string => title
   .replace(/\s+/g, " ")
   .trim();
 
-const sourceRevisionFor = (sha256: string): string => `${PROMOTION_CONTRACT_SOURCE_REVISION}:${sha256}`;
+const sourceRevisionFor = (input: {
+  trailerSha256: string;
+  title: string;
+  episodeNumber: number;
+  publicDownloadUrl: string;
+  imageUrl?: string;
+}): string => {
+  // A promotion revision represents the complete Telegram payload, not only
+  // the MP4 bytes. Draft candidates can be approved before the episode form is
+  // saved; when the final title/number is saved, this must become a new
+  // revision so the bot updates the already-delivered trailer/topic metadata.
+  const digest = createHash("sha256").update(JSON.stringify({
+    trailerSha256: input.trailerSha256,
+    title: stripHashtags(input.title),
+    episodeNumber: input.episodeNumber,
+    publicDownloadUrl: input.publicDownloadUrl,
+    imageUrl: input.imageUrl ?? null,
+  })).digest("hex");
+  return `${PROMOTION_CONTRACT_SOURCE_REVISION}:${digest}`;
+};
 
 export const buildEpisodePromotionRequest = (input: EpisodePromotionInput): PromotionRequest => {
+  const title = stripHashtags(input.title);
+  const publicDownloadUrl = input.publicDownloadUrl;
+  const imageUrl = input.imageUrl;
   const request = {
     contract_version: PROMOTION_CONTRACT_VERSION,
-    source_revision: sourceRevisionFor(input.trailerSha256),
+    source_revision: sourceRevisionFor({
+      trailerSha256: input.trailerSha256,
+      title,
+      episodeNumber: input.episodeNumber ?? input.episodeId,
+      publicDownloadUrl,
+      imageUrl,
+    }),
     notification_id: `episode:${input.episodeId}`,
     episode_id: input.episodeId,
     episode_number: input.episodeNumber ?? input.episodeId,
-    title: stripHashtags(input.title),
-    public_download_url: input.publicDownloadUrl,
-    ...(input.imageUrl ? { image_url: input.imageUrl } : {}),
+    title,
+    public_download_url: publicDownloadUrl,
+    ...(imageUrl ? { image_url: imageUrl } : {}),
     trailer: {
       media_reference: input.trailerMediaReference ?? `episodes/${input.episodeId}/trailer.mp4`,
       sha256: input.trailerSha256,
