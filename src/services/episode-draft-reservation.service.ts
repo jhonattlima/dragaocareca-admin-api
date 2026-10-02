@@ -55,10 +55,10 @@ export const reserveTrailerVideoDraft = async (episodeId: number, ownerEmail: st
   return { draftId: reservation.draftId, episodeId, state: "reserved", expiresAt: reservation.expiresAt };
 };
 
-export type TrailerDraftCheck = { ok: true; reservation: EpisodeTrailerVideoDraftReservation } | { ok: false; status: 401 | 403 | 409; message: string };
+export type TrailerDraftCheck = { ok: true; reservation: EpisodeTrailerVideoDraftReservation } | { ok: false; status: 403 | 409; message: string };
 
 export const checkTrailerVideoDraft = (draftId: unknown, episodeId: number, ownerEmail: string, options?: { allowStaged?: boolean }): TrailerDraftCheck => {
-  if (typeof draftId !== "string" || !draftId.trim()) return { ok: false, status: 401, message: "Episode draft reservation is required" };
+  if (typeof draftId !== "string" || !draftId.trim()) return { ok: false, status: 409, message: "Episode draft reservation is required" };
   const reservation = episodeRepository.findTrailerVideoDraft(draftId);
   if (!reservation) return { ok: false, status: 409, message: "Episode draft reservation is invalid" };
   if (new Date(reservation.expiresAt).getTime() <= Date.now() && !trailerCandidateRepository.hasActiveForDraft(reservation.draftId)) {

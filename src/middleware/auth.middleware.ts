@@ -11,7 +11,7 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
 
   const raw = req.headers.authorization;
   if (!raw?.startsWith("Bearer ")) {
-    res.status(401).json({ message: "Missing Bearer token" });
+    res.status(401).json({ code: "authentication_required", message: "Missing Bearer token" });
     return;
   }
 
@@ -20,6 +20,6 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
     req.user = verifyAccessToken(token);
     next();
   } catch (_error) {
-    res.status(401).json({ message: "Invalid or expired token" });
+    res.status(401).json({ code: "invalid_access_token", message: "Invalid or expired token" });
   }
 };
