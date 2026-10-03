@@ -4,6 +4,7 @@ import type { PublicationEffectProjection } from "../schemas/episode-publication
 import { metaPublicationProvider, type MetaPublicationProvider } from "./meta-publication.provider";
 import { readTrailerBytes } from "./instagram-reel-publication.service";
 import { getEpisodeMediaFinalPath } from "./episode-media-layout.service";
+import { renderStoredSocialCaption } from "./social-caption";
 
 const keyFor = (effect: PublicationEffectProjection, episodeId: number): string => `episode:${episodeId}:${effect.sourceRevision}:facebook_native_video`;
 const MAX_PROVIDER_ATTEMPTS = 12;
@@ -15,24 +16,25 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
   effect = claimed;
   if (effect.lifecycle === "published" && effect.remoteId) return;
   let currentCheckpoint = effect.checkpoint;
+  const description = renderStoredSocialCaption(effect.metadata);
   try {
     let identity = effect.checkpoint.providerId;
     if (!identity) {
       const media = await readTrailerBytes(getEpisodeMediaFinalPath(episodeId, "trailerVideo"));
-      const uploaded = await provider.uploadFacebookVideo({ media, title: effect.metadata.title, description: effect.metadata.renderedCaption });
+      const uploaded = await provider.uploadFacebookVideo({ media, title: effect.metadata.title, description });
       identity = uploaded.id;
       currentCheckpoint = { stage: "upload_accepted", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
     }
     if (currentCheckpoint.stage === "upload_accepted") {
-      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
+      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description });
       currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
       return;
     }
     const processing = await provider.getFacebookVideo(identity);
     if (processing.status === "upload_complete") {
-      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
+      const finished = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description });
       currentCheckpoint = { stage: "publish_complete", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], finished.id || identity, finished.permalink ?? null);
       return;
@@ -45,7 +47,7 @@ export const deliverFacebookNativeVideo = async (episodeId: number, effect: Publ
     }
     currentCheckpoint = { stage: "processing", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
     episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
-    const published = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description: effect.metadata.renderedCaption });
+    const published = await provider.publishFacebookVideo(identity, { title: effect.metadata.title, description });
     currentCheckpoint = { stage: "remote_identity", providerId: identity, uploadId: identity, updatedAt: new Date().toISOString() };
     episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "published", [], published.id || identity, published.permalink ?? null);
   } catch (error) {

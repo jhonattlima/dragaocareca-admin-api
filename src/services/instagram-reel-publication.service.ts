@@ -3,6 +3,7 @@ import { config } from "../config/env";
 import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
 import type { PublicationEffectProjection } from "../schemas/episode-publication";
 import { metaPublicationProvider, type MetaPublicationProvider, type ProviderResult } from "./meta-publication.provider";
+import { renderStoredSocialCaption } from "./social-caption";
 
 const keyFor = (effect: PublicationEffectProjection, episodeId: number): string => `episode:${episodeId}:${effect.sourceRevision}:instagram_reel`;
 const checkpoint = (stage: "provider_created" | "processing" | "publish_complete" | "remote_identity", result: ProviderResult) => ({ stage, providerId: result.id, uploadId: null, updatedAt: new Date().toISOString() });
@@ -19,7 +20,7 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
   try {
     let identity = effect.checkpoint.providerId;
     if (!identity) {
-      const result = await provider.createInstagramContainer({ mediaUrl: `${config.meta.providerMediaBaseUrl}/${episodeId}/trailer.mp4`, caption: effect.metadata.renderedCaption });
+      const result = await provider.createInstagramContainer({ mediaUrl: `${config.meta.providerMediaBaseUrl}/${episodeId}/trailer.mp4`, caption: renderStoredSocialCaption(effect.metadata) });
       identity = result.id;
       currentCheckpoint = checkpoint("provider_created", result);
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");

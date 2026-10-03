@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { publicationDestinationSchema, publicationMetadataSchema, publicationPreflightSchema, publicationSourceSchema, publicationSourceRevision } from "../schemas/episode-publication";
-import { renderSocialCaption } from "../services/episode-publication.service";
+import { renderSocialCaption } from "../services/social-caption";
 
 const fakeSource = (episodeId: number, digest = createHash("sha256").update("fixture").digest("hex")) => ({
   mediaReference: `episodes/${episodeId}/trailer.mp4`, sha256: digest, byteCount: 7, mimeType: "video/mp4" as const,
@@ -18,8 +18,9 @@ const main = (): void => {
   assert.throws(() => publicationMetadataSchema.parse({ ...metadata, captionMentions: ["@verified account"] }));
   const hashtags = Array.from({ length: 50 }, (_, index) => `#tema${index + 1}`);
   const rendered = renderSocialCaption({ title: "Fixture", summary: "Summary", mentions: ["@operator"], hashtags });
-  assert.equal(rendered.endsWith(hashtags.join(" ")), true);
-  assert.equal((rendered.match(/#[a-z0-9]+/g) ?? []).length, 50);
+  assert.equal(rendered.endsWith(hashtags.slice(0, 30).join(" ")), true);
+  assert.equal((rendered.match(/#[^\s#]+/gu) ?? []).length, 30);
+  assert.equal((rendered.match(/#[a-z0-9]+/g) ?? []).length, 30);
   const ready = publicationPreflightSchema.parse({ status: "ready", checkedAt: new Date().toISOString(), providerReachability: "ready", contentType: "video/mp4", contentLength: 7, rangeSupported: true, failureCategory: null });
   const blocked = publicationPreflightSchema.parse({ ...ready, status: "blocked", providerReachability: "blocked", failureCategory: "digest_mismatch" });
   assert.equal(blocked.status, "blocked");

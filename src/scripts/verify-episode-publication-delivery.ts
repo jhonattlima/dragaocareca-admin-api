@@ -39,9 +39,10 @@ const run = async (): Promise<void> => {
   assert.equal(normalizeMetaProviderStatus({ status_code: "FINISHED" }), "FINISHED");
   assert.equal(normalizeMetaProviderStatus({ status: { video_status: "ready" } }), "ready");
   const calls: string[] = [];
+  let sentInstagramCaption = "";
   const result = (id: string, status = "FINISHED"): ProviderResult => ({ id, status, permalink: `https://example.invalid/${id}` });
   const fake: MetaPublicationProvider = {
-    async createInstagramContainer() { calls.push("instagram:create"); return result("container-1", "IN_PROGRESS"); },
+    async createInstagramContainer(input) { calls.push("instagram:create"); sentInstagramCaption = input.caption; return result("container-1", "IN_PROGRESS"); },
     async getInstagramContainer() { calls.push("instagram:status"); return result("container-1"); },
     async publishInstagramContainer() { calls.push("instagram:publish"); return result("media-1"); },
     async uploadFacebookVideo() { calls.push("facebook:upload"); return result("video-1"); },
@@ -57,11 +58,19 @@ const run = async (): Promise<void> => {
     const preflight = { status: "ready" as const, checkedAt: new Date().toISOString(), providerReachability: "ready" as const, contentType: "video/mp4" as const, contentLength: 10, rangeSupported: true, failureCategory: null };
     const [instagramEffect] = episodePublicationRepository.createOrGet({
       episodeId: 1, sourceRevision, source, destinations: ["instagram_reel"],
-      metadata: { title: "Fixture", summary: "Offline fixture", captionMentions: [], hashtags: [], renderedCaption: "Fixture" },
+      // Simulate a legacy pending publication row created before the 30-tag
+      // cap. Delivery must rebuild the caption and never resend all 50.
+      metadata: {
+        title: "Fixture", summary: "Offline fixture", captionMentions: [],
+        hashtags: Array.from({ length: 50 }, (_, index) => `#legacy${index + 1}`),
+        renderedCaption: `Fixture\n\n${Array.from({ length: 50 }, (_, index) => `#legacy${index + 1}`).join(" ")}`,
+      },
       preflight,
     });
     await deliverInstagramReel(1, instagramEffect, fake);
     assert.deepEqual(calls.slice(0, 3), ["instagram:create", "instagram:status", "instagram:publish"]);
+    assert.equal((sentInstagramCaption.match(/#[^\s#]+/gu) ?? []).length, 30, "legacy snapshots are capped at send time");
+    assert.equal(sentInstagramCaption.includes("#legacy31"), false, "hashtags after the cap are never sent");
     assert.equal(calls.some((call) => call === "facebook:publish"), false);
   } finally {
     config.meta.instagramEnabled = previous;

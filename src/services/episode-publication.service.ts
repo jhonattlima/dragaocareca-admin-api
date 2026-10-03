@@ -9,27 +9,9 @@ import { postLaunchNotification } from "./launch-notification-client.service";
 import { deliverInstagramReel } from "./instagram-reel-publication.service";
 import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.service";
 import type { MetaPublicationProvider } from "./meta-publication.provider";
+import { MAX_SOCIAL_HASHTAGS, renderSocialCaption } from "./social-caption";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
-// Instagram rejects captions that contain more than 30 hashtags. Keep the
-// persisted authoring payload untouched, but cap the rendered social payload.
-const MAX_SOCIAL_HASHTAGS = 30;
-
-const truncateUtf8 = (value: string, maxBytes: number): string => {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let result = value;
-  while (result.length > 0 && Buffer.byteLength(result, "utf8") > maxBytes) {
-    result = result.slice(0, -1);
-  }
-  return result;
-};
-
-export const renderSocialCaption = (input: { title: string; summary: string; mentions: string[]; hashtags: string[] }): string => truncateUtf8([
-  input.title,
-  input.summary,
-  input.mentions.join(" "),
-  input.hashtags.join(" "),
-].filter(Boolean).join("\n\n"), 2_100);
 
 const metadataFor = (episode: EpisodeRow): PublicationMetadata => {
   const captionMentions = episode.instagramCaptionMentions ?? [];
