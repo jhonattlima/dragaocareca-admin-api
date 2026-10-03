@@ -121,6 +121,12 @@ Recent decisions affecting current work:
 - Milestone v1.1 was archived as an override closeout because Phases 6-8 did not retain their original GSD phase directories and summaries.
 - Phase 5 runtime validation is now captured through `npm run verify:public-episodes`, which verifies the shipped route handler without relying on sandboxed localhost networking.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261003-4no | Prevent Instagram hashtag overflow on new and retried publication effects | 2026-10-03 | 305cc3e | [261003-4no](./quick/261003-4no-prevent-instagram-hashtag-overflow-on-ne/) |
+
 ### Roadmap Evolution
 
 - Phase 13 edited: formalized ZIP preparation goal, success criteria, and ZIP-01 through ZIP-07 requirements
