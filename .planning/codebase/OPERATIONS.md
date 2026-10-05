@@ -14,15 +14,19 @@ Use `scripts/bootstrap-vps.sh` for the full bootstrap or `scripts/install-vps-de
 
 ## Episode AI configuration
 
-The current development configuration uses Gemini first and Groq as the automatic fallback for summary and hashtag authoring. Keep secrets outside version control.
+Episode transcription tries Gemini first and falls back to Groq. Faster Whisper and local Whisper CLI transcription are no longer installed. Keep provider secrets outside version control.
 
 ```bash
 EPISODE_TRANSCRIPTION_ENABLED=true
 EPISODE_TRANSCRIPTION_PROVIDER=gemini
-EPISODE_TRANSCRIPTION_GEMINI_MODEL=gemini-3.6-flash
-EPISODE_TRANSCRIPTION_GEMINI_MAX_OUTPUT_TOKENS=32768
-EPISODE_TRANSCRIPTION_GEMINI_THINKING_LEVEL=minimal
+EPISODE_TRANSCRIPTION_LANGUAGE=pt
+EPISODE_TRANSCRIPTION_TIMEOUT_MS=7200000
 
+# Optional alternative transcription providers
+GEMINI_API_KEY=replace-with-secret
+EPISODE_TRANSCRIPTION_GEMINI_MODEL=gemini-3.6-flash
+
+# Summary and hashtag authoring are separate from speech transcription
 EPISODE_SUMMARY_ENABLED=true
 EPISODE_SUMMARY_PRIMARY_PROVIDER=gemini
 EPISODE_SUMMARY_PROVIDER=groq
@@ -31,10 +35,9 @@ YOUTUBE_HASHTAG_PROVIDER=groq
 EPISODE_SUMMARY_GEMINI_MODEL=gemini-3.6-flash
 EPISODE_SUMMARY_GEMINI_THINKING_LEVEL=low
 EPISODE_SUMMARY_PROMPT_VERSION=4
-GEMINI_API_KEY=replace-with-secret
 ```
 
-`internal` transcription requires a Whisper-family CLI and model path. `llama` summary generation requires a local command and model path. Those providers are fallbacks, not parallel workers.
+The xAI key and provider selection are server-side only. WhisperX remains only for optional timed-caption alignment of edited trailer transcripts. Keep transcription and summary generation sequential on the 4 GB VPS.
 
 ## Runtime contract
 
@@ -43,7 +46,7 @@ GEMINI_API_KEY=replace-with-secret
 3. Summary generation starts only after transcription and writes draft `summary.txt`.
 4. The final database summary remains operator-owned and is saved only through the episode form.
 
-Never run transcription and summary generation in parallel on the 4 GB VPS. The production RSS feed guides the summary prompt's style but is never fetched by a job and is not factual input. Status snapshots expose the provider actually used for transcript, summary, and hashtag authoring; the UI must not infer it from configuration.
+The production RSS feed guides the summary prompt's style but is never fetched by a job and is not factual input. Status snapshots expose the provider actually used for transcript, summary, and hashtag authoring; the UI must not infer it from configuration.
 
 ## Deployment verification
 

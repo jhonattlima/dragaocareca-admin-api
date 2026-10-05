@@ -16,7 +16,7 @@ cat <<'EOF'
 This helper does not install Node.js. Use scripts/bootstrap-vps.sh for a full machine setup.
 
 Next manual steps:
-- Install a transcription binary and set EPISODE_TRANSCRIPTION_COMMAND.
-- Download a Whisper model and set EPISODE_TRANSCRIPTION_MODEL_PATH.
+- Configure GEMINI_API_KEY and GROQ_API_KEY for remote transcription (no local ASR model is required).
+- Stage the approved WhisperX alignment model only if timed trailer captions are enabled.
 - Ensure the process can write to data/database/, data/media/, and data/generated/.
 EOF

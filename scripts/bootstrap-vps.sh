@@ -21,8 +21,7 @@ cat <<'EOF'
 Bootstrap complete.
 
 You still need to provide:
-- a transcription binary via EPISODE_TRANSCRIPTION_COMMAND
-- a Whisper model via EPISODE_TRANSCRIPTION_MODEL_PATH
+- GEMINI_API_KEY and GROQ_API_KEY for Gemini-first transcription with Groq fallback
 - writable data directories for the app user
 
 Recommended next step:

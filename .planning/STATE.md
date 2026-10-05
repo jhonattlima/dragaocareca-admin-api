@@ -139,11 +139,11 @@ Recent decisions affecting current work:
 | artifact | Missing original GSD phase directories/summaries for Phases 6-8 | acknowledged at milestone closeout | 2026-07-23 |
 | verification | Milestone closeout used reconciled code/docs evidence for Phases 6-8 rather than preserved phase-level verification artifacts | acknowledged at milestone closeout | 2026-07-23 |
 | feature | admin-web summary-field prefill | deferred to later frontend milestone | 2026-07-23 |
-| technology | production transcription-provider evaluation (Gemini vs `whisper.cpp` / `faster-whisper`) | deferred tech debt | 2026-07-28 |
+| technology | local ASR removal with Gemini and Groq transcription | implemented locally; production deployment pending | 2026-10-04 |
 
-### TD-001: Validate the permanent transcription provider
+### TD-001: Deploy remote-only transcription
 
-The current development configuration uses `EPISODE_TRANSCRIPTION_PROVIDER=gemini`; `internal` keeps the local `whisper.cpp` path available as a fallback. Before making Gemini the permanent production default, compare quality, cost, quota, privacy, long-episode latency, and memory behavior on the 4 GB Hostinger VPS. Revisit when transcription becomes slow, unreliable, or cost-sensitive.
+The application tries Gemini first for episode and trailer speech-to-text, falls back to Groq on error, and leaves the transcript available for manual correction if both fail. Faster Whisper/local CLI transcription was removed; WhisperX remains only for timed trailer-caption alignment. Production already has both provider keys and uses `EPISODE_TRANSCRIPTION_PROVIDER=gemini`; deploy after disk capacity is resolved and perform an operator-reviewed audio smoke test.
 
 ## Session Continuity
 

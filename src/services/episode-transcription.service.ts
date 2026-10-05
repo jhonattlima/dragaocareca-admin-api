@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "../config/env";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
@@ -34,7 +34,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const tempRoot = path.resolve(os.tmpdir(), "dragaocareca-episode-transcription");
-const chunkDurationSeconds = 60;
+const cloudChunkDurationSeconds = 300;
 
 type DraftTranscriptionStatus = EpisodeDraftStepStatus;
 
@@ -182,11 +182,11 @@ const isDraftStateCurrent = (episodeId: number, version: number): boolean => {
   return Boolean(current && current.version === version);
 };
 
-type TranscriptionProvider = "gemini" | "groq" | "internal" | "faster-whisper";
+type TranscriptionProvider = "gemini" | "groq";
 
 const getConfiguredTranscriptionProvider = (): TranscriptionProvider => {
   const provider = config.transcription.provider.trim().toLowerCase();
-  return provider === "gemini" || provider === "groq" || provider === "faster-whisper" ? provider : "internal";
+  return provider === "gemini" || provider === "groq" ? provider : "gemini";
 };
 
 const getTranscriptionConfigurationError = (provider: TranscriptionProvider = getConfiguredTranscriptionProvider()): string | null => {
@@ -195,12 +195,8 @@ const getTranscriptionConfigurationError = (provider: TranscriptionProvider = ge
   }
 
   if (provider === "gemini") {
-    if (!config.summary.geminiApiKey.trim()) {
-      return "GEMINI_API_KEY is not configured";
-    }
-    if (!config.transcription.geminiModel.trim()) {
-      return "EPISODE_TRANSCRIPTION_GEMINI_MODEL is not configured";
-    }
+    if (!config.summary.geminiApiKey.trim()) return "GEMINI_API_KEY is not configured";
+    if (!config.transcription.geminiModel.trim()) return "EPISODE_TRANSCRIPTION_GEMINI_MODEL is not configured";
     return null;
   }
 
@@ -210,44 +206,8 @@ const getTranscriptionConfigurationError = (provider: TranscriptionProvider = ge
     return null;
   }
 
-  if (provider === "faster-whisper") {
-    if (!config.transcription.fasterWhisperPython.trim()) {
-      return "EPISODE_TRANSCRIPTION_FASTER_WHISPER_PYTHON is not configured";
-    }
-    if (!fs.existsSync(config.transcription.fasterWhisperScript.trim())) {
-      return `faster-whisper script not found: ${config.transcription.fasterWhisperScript.trim()}`;
-    }
-    const pythonCheck = spawnSync(config.transcription.fasterWhisperPython.trim(), ["--version"], { stdio: "ignore" });
-    if (pythonCheck.error && (pythonCheck.error as NodeJS.ErrnoException).code === "ENOENT") {
-      return `Python command not found: ${config.transcription.fasterWhisperPython.trim()}`;
-    }
-    return null;
-  }
-
-  if (provider !== "internal") {
-    return `Unsupported EPISODE_TRANSCRIPTION_PROVIDER: ${provider}`;
-  }
-
-  if (!config.transcription.command.trim()) {
-    return "EPISODE_TRANSCRIPTION_COMMAND is not configured";
-  }
-
-  if (!config.transcription.modelPath.trim()) {
-    return "EPISODE_TRANSCRIPTION_MODEL_PATH is not configured";
-  }
-
-  const commandCheck = spawnSync(config.transcription.command.trim(), ["--version"], {
-    stdio: "ignore",
-  });
-
-  if (commandCheck.error && (commandCheck.error as NodeJS.ErrnoException).code === "ENOENT") {
-    return `Transcription command not found: ${config.transcription.command.trim()}`;
-  }
-
-  if (!fs.existsSync(config.transcription.modelPath.trim())) {
-    return `Transcription model not found: ${config.transcription.modelPath.trim()}`;
-  }
-
+  if (!config.summary.groqApiKey.trim()) return "GROQ_API_KEY is not configured";
+  if (!config.transcription.groqModel.trim()) return "EPISODE_TRANSCRIPTION_GROQ_MODEL is not configured";
   return null;
 };
 
@@ -435,26 +395,6 @@ const transcribeAudioWithGemini = async (
   }
 };
 
-const convertToWav = async (inputPath: string, outputPath: string): Promise<void> => {
-  await execFileAsync(
-    "ffmpeg",
-    [
-      "-y",
-      "-i",
-      inputPath,
-      "-ac",
-      "1",
-      "-ar",
-      "16000",
-      "-vn",
-      "-f",
-      "wav",
-      outputPath,
-    ],
-    { maxBuffer: 20 * 1024 * 1024 }
-  );
-};
-
 const getAudioDurationSeconds = async (wavPath: string): Promise<number> => {
   const { stdout } = await execFileAsync(
     "ffprobe",
@@ -474,9 +414,8 @@ const getAudioDurationSeconds = async (wavPath: string): Promise<number> => {
   return Number.isFinite(duration) && duration > 0 ? duration : 0;
 };
 
-const runTranscriptionCommand = async (
+const runCloudTranscription = async (
   wavPath: string,
-  outputBase: string,
   provider: TranscriptionProvider,
   timestampOffsetSeconds = 0,
 ): Promise<string> => {
@@ -505,155 +444,36 @@ const runTranscriptionCommand = async (
     }
     return body.text ?? "";
   }
-
-  if (provider === "faster-whisper") {
-    const { stdout } = await execFileAsync(
-      config.transcription.fasterWhisperPython,
-      [
-        config.transcription.fasterWhisperScript,
-        "--audio", wavPath,
-        "--model", config.transcription.fasterWhisperModel,
-        "--language", config.transcription.language,
-        "--device", config.transcription.fasterWhisperDevice,
-        "--compute-type", config.transcription.fasterWhisperComputeType,
-        "--cpu-threads", String(Math.max(1, Math.floor(config.transcription.whisperThreads))),
-      ],
-      { maxBuffer: 20 * 1024 * 1024, timeout: config.transcription.timeoutMs }
-    );
-    return stdout.toString();
-  }
-
-  const transcriptPath = `${outputBase}.txt`;
-  const { stdout } = await execFileAsync(
-    config.transcription.command,
-    [
-      "-m",
-      config.transcription.modelPath,
-      "-f",
-      wavPath,
-      "-l",
-      config.transcription.language,
-      "-t",
-      String(Math.max(1, Math.floor(config.transcription.whisperThreads))),
-      "-otxt",
-      "-of",
-      outputBase,
-      "-nt",
-      "-np",
-    ],
-    {
-      maxBuffer: 20 * 1024 * 1024,
-      timeout: config.transcription.timeoutMs,
-    }
-  );
-
-  if (fs.existsSync(transcriptPath)) {
-    return fs.readFileSync(transcriptPath, "utf8");
-  }
-
-  return stdout.toString();
+  throw new Error(`Unsupported transcription provider: ${provider}`);
 };
 
-const transcribeAudioInChunks = async (
+const transcribeAudioWithCloudProvider = async (
   audioPath: string,
+  provider: "groq",
   onProgress?: (progress: number) => void,
-  provider: TranscriptionProvider = "internal"
 ): Promise<string> => {
   ensureTempRoot();
-  const workingDir = fs.mkdtempSync(path.join(tempRoot, "episode-"));
-  const tempWavPath = path.join(workingDir, "source.wav");
-  const chunksDir = path.join(workingDir, "chunks");
-  fs.mkdirSync(chunksDir, { recursive: true });
-
-  try {
-    if (!fs.existsSync(audioPath)) {
-      throw new Error(`Audio file not found: ${path.basename(audioPath)}`);
-    }
-
-    await convertToWav(audioPath, tempWavPath);
-    const durationSeconds = await getAudioDurationSeconds(tempWavPath);
-    const totalChunks = Math.max(
-      1,
-      Math.ceil((durationSeconds > 0 ? durationSeconds : chunkDurationSeconds) / chunkDurationSeconds)
-    );
-    const chunkTexts: string[] = [];
-
-    onProgress?.(0);
-
-    for (let index = 0; index < totalChunks; index += 1) {
-      const chunkStart = index * chunkDurationSeconds;
-      const remainingSeconds = durationSeconds > 0 ? Math.max(durationSeconds - chunkStart, 0) : chunkDurationSeconds;
-      const chunkLength = index === totalChunks - 1 ? Math.max(1, remainingSeconds) : chunkDurationSeconds;
-      const chunkBase = path.join(chunksDir, `chunk_${String(index + 1).padStart(4, "0")}`);
-      const chunkPath = `${chunkBase}.wav`;
-
-      await execFileAsync(
-        "ffmpeg",
-        [
-          "-y",
-          "-ss",
-          String(chunkStart),
-          "-i",
-          tempWavPath,
-          "-t",
-          String(chunkLength),
-          "-ac",
-          "1",
-          "-ar",
-          "16000",
-          "-vn",
-          "-f",
-          "wav",
-          chunkPath,
-        ],
-        { maxBuffer: 20 * 1024 * 1024 }
-      );
-
-      const rawTranscript = await runTranscriptionCommand(chunkPath, chunkBase, provider, chunkStart);
-      const transcript = normalizeTranscriptText(rawTranscript);
-      if (transcript) {
-        chunkTexts.push(transcript);
-      }
-
-      onProgress?.(clampProgress(((index + 1) / totalChunks) * 100));
-    }
-
-    const transcript = normalizeTranscriptText(chunkTexts.join("\n\n"));
-    if (!transcript) {
-      throw new Error("Transcription completed without output");
-    }
-
-    onProgress?.(100);
-    return transcript;
-  } finally {
-    await fs.promises.rm(workingDir, { recursive: true, force: true }).catch(() => undefined);
-  }
-};
-
-const transcribeAudioWithGroq = async (audioPath: string, onProgress?: (progress: number) => void): Promise<string> => {
-  ensureTempRoot();
-  const workingDir = fs.mkdtempSync(path.join(tempRoot, "groq-episode-"));
+  const workingDir = fs.mkdtempSync(path.join(tempRoot, `${provider}-episode-`));
   const durationSeconds = await getAudioDurationSeconds(audioPath).catch(() => 0);
-  const groqChunkDurationSeconds = 300;
-  const totalChunks = Math.max(1, Math.ceil((durationSeconds || groqChunkDurationSeconds) / groqChunkDurationSeconds));
+  const totalChunks = Math.max(1, Math.ceil((durationSeconds || cloudChunkDurationSeconds) / cloudChunkDurationSeconds));
   const chunkTexts: string[] = [];
 
   try {
     for (let index = 0; index < totalChunks; index += 1) {
       const chunkPath = path.join(workingDir, `chunk_${String(index + 1).padStart(4, "0")}.wav`);
-      const chunkStart = index * groqChunkDurationSeconds;
-      const remainingSeconds = durationSeconds > 0 ? Math.max(durationSeconds - chunkStart, 0) : groqChunkDurationSeconds;
+      const chunkStart = index * cloudChunkDurationSeconds;
+      const remainingSeconds = durationSeconds > 0 ? Math.max(durationSeconds - chunkStart, 0) : cloudChunkDurationSeconds;
       await execFileAsync("ffmpeg", [
-        "-y", "-ss", String(chunkStart), "-i", audioPath, "-t", String(Math.max(1, Math.min(groqChunkDurationSeconds, remainingSeconds))),
+        "-y", "-ss", String(chunkStart), "-i", audioPath, "-t", String(Math.max(1, Math.min(cloudChunkDurationSeconds, remainingSeconds))),
         "-ac", "1", "-ar", "16000", "-vn", "-f", "wav", chunkPath,
       ], { maxBuffer: 20 * 1024 * 1024 });
 
-      const text = normalizeTranscriptText(await runTranscriptionCommand(chunkPath, chunkPath, "groq", chunkStart));
+      const text = normalizeTranscriptText(await runCloudTranscription(chunkPath, provider, chunkStart));
       if (text) chunkTexts.push(text);
       onProgress?.(clampProgress(((index + 1) / totalChunks) * 100));
     }
     const transcript = normalizeTranscriptText(chunkTexts.join("\n\n"));
-    if (!transcript) throw new Error("Groq transcription completed without output");
+    if (!transcript) throw new Error(`${provider} transcription completed without output`);
     assertTranscriptTimestampQuality(transcript, durationSeconds);
     return transcript;
   } finally {
@@ -673,16 +493,14 @@ const transcribeAudio = async (
     } catch (geminiError) {
       const geminiMessage = geminiError instanceof Error ? geminiError.message : String(geminiError);
       console.warn(`[transcription] provider=gemini failed; fallback=groq error=${geminiMessage}`);
-
       const groqConfigurationError = getTranscriptionConfigurationError("groq");
       if (groqConfigurationError) {
         throw new Error(`Gemini transcription failed: ${geminiMessage}; Groq fallback unavailable: ${groqConfigurationError}`);
       }
-
       onProvider?.("groq");
       onProgress?.(0);
       try {
-        return await transcribeAudioWithGroq(audioPath, onProgress);
+        return await transcribeAudioWithCloudProvider(audioPath, "groq", onProgress);
       } catch (groqError) {
         const groqMessage = groqError instanceof Error ? groqError.message : String(groqError);
         throw new Error(`Gemini transcription failed: ${geminiMessage}; Groq transcription failed: ${groqMessage}`);
@@ -690,11 +508,7 @@ const transcribeAudio = async (
     }
   }
 
-  if (provider === "groq") {
-    return transcribeAudioWithGroq(audioPath, onProgress);
-  }
-
-  return transcribeAudioInChunks(audioPath, onProgress, provider);
+  return transcribeAudioWithCloudProvider(audioPath, provider, onProgress);
 };
 
 /** Transcribes an already-resolved immutable media snapshot without touching episode state. */

@@ -17,10 +17,11 @@
   - Queue/orchestration: `src/services/launch-notification.service.ts`
 
 **Episode AI:**
-- Gemini API - optional audio transcription and summary drafting
-  - Transcription: temporary Files API upload followed by `gemini-3.6-flash` in `src/services/episode-transcription.service.ts`
+- Gemini API - primary episode/trailer transcription and summary drafting.
+- Groq API - automatic episode/trailer transcription fallback after Gemini errors and summary provider; five-minute chunks preserve progress.
+  - Gemini transcription: temporary Files API upload followed by `gemini-3.6-flash` in `src/services/episode-transcription.service.ts`
   - Summary: structured JSON generation through `gemini-3.6-flash` in `src/services/episode-summary.service.ts`
-  - Auth: `GEMINI_API_KEY`
+  - Auth: `GEMINI_API_KEY`, `GROQ_API_KEY`
   - Provider switches: `EPISODE_TRANSCRIPTION_PROVIDER`, `EPISODE_SUMMARY_PRIMARY_PROVIDER`, `EPISODE_SUMMARY_PROVIDER`, `YOUTUBE_HASHTAG_PRIMARY_PROVIDER`, `YOUTUBE_HASHTAG_PROVIDER`
   - Gemini is primary for summary/hashtag authoring and Groq is the automatic fallback; actual provider identity is persisted in episode state and returned in protected status DTOs.
 

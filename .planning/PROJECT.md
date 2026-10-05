@@ -8,7 +8,7 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 - Latest shipped milestone: **v1.4 Trailer Video Publishing** on 2026-08-21
 - Current milestone: None — ready to plan the next cycle
-- Transcript and summary generation can use Gemini or local fallback providers, run sequentially for the 4 GB VPS target, and expose a protected read contract for future frontend reuse
+- Episode and trailer transcripts try Gemini first and fall back to Groq; WhisperX remains only for timed trailer-caption alignment. Summary generation remains an independent remote-provider workflow.
 - Next planning step: define the next milestone with `$gsd-new-milestone`.
 
 ## Core Value
@@ -69,7 +69,7 @@ Serve the public frontend with stable backend-owned data contracts so page rende
 - Public frontend redesign work — this milestone provides data contracts, not UI changes.
 - Replacing the admin authentication model — auth bypass and admin auth behavior remain as-is.
 - `admin-web` integration for pre-filling the summary field — defer to a later milestone in the frontend project.
-- Finalizing Gemini as the permanent transcription provider — tracked in `.planning/STATE.md` as deferred technical debt.
+- Local Whisper-family speech transcription — removed in favor of remote speech-to-text; WhisperX remains only for timed caption alignment.
 - Staging, backup, and arbitrary-path downloads — v1.3 is limited to final episode artifacts.
 - Angular controls remain in `admin-web`; this API milestone exposes contracts only. Automatic/scheduled publication, browser-side YouTube/OAuth calls, playlist curation, and deleting local videos before a successful public publish remain out of scope.
 
@@ -99,11 +99,11 @@ The backend already owns episode media layout, transcript generation, summary dr
 | Keep public data split across distinct endpoints | Matches the requested scope and avoids one oversized contract | ✓ Good |
 | Treat the live site and `dragaocareca_frontend` repo as the migration reference | They define the real public data needs better than a greenfield spec | ✓ Good |
 | Add a repo-native public-catalog verification script | Sandbox networking made localhost validation unreliable | ✓ Good |
-| Defer transcription-engine re-evaluation out of v1.2 | Summary generation can proceed on top of the existing transcript pipeline | — Pending |
+| Use Gemini first with Groq fallback for transcription, and remove local speech-recognition runtimes | Preserve the existing remote-provider flow while avoiding local ASR runtimes on the constrained VPS | ✓ Good |
 | Keep summary generation transcript-only and sequential | The 4 GB VPS target requires lightweight, backend-owned processing | ✓ Good |
 | Store suggested summaries as draft artifacts beside the episode files | This preserves operator review/editability before save | ✓ Good |
 | Expose summary drafts through a protected backend read endpoint | Future frontend integration can bind without rederiving workflow logic | ✓ Good |
-| Use Gemini first for transcript-adjacent summary and hashtag authoring, with Groq fallback and local transcription options | Remote generation avoids local model pressure on the 4 GB VPS while keeping an operational fallback; actual provider identity remains visible | ✓ Good |
+| Keep transcription provider selection independent from summary and hashtag authoring | Each workflow can use its own remote provider; actual provider identity remains visible without exposing credentials | ✓ Good |
 | Use the production RSS feed only as a static editorial-style reference | Preserve the established description shape without using other episodes as factual context | ✓ Good |
 | Preserve `/v1/episodes/:episodeId/artifacts/jobs` as the artifact lifecycle contract | The v1.3 audit found the checked-out implementation, OpenAPI, and verifier already converge on jobs routes | ✓ Good |
 | Keep trailer-video publishing backend-owned and manually triggered | It preserves the existing authenticated media workflow and avoids browser-side OAuth or scheduled publication rules | ✓ Good |

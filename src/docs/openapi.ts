@@ -1273,15 +1273,30 @@ export const swaggerSpec = swaggerJsdoc({
           },
         },
       },
-      "/v1/episodes/{episodeId}/transcription/whisper": {
+      "/v1/episodes/{episodeId}/transcription/groq": {
         post: {
           tags: ["Episodes"],
-          summary: "Retry episode transcription with faster-whisper",
-          description: "Queues the available staged or finalized episode audio with the server-configured faster-whisper worker. This endpoint is intended as an explicit fallback after a Gemini transcription failure; provider credentials and filesystem paths remain server-owned.",
+          summary: "Retry episode transcription with Groq",
+          description: "Queues available staged or finalized episode audio through the API-configured Groq speech-to-text provider. Provider credentials and filesystem paths remain server-owned.",
           security: [{ bearerAuth: [] }],
           parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
           responses: {
-            "200": { description: "faster-whisper transcription queued or already processing." },
+            "200": { description: "Groq transcription queued or already processing." },
+            "400": { description: "Invalid episodeId." },
+            "401": { description: "Missing, invalid, or expired bearer token." },
+            "404": { description: "Episode audio is not available." },
+          },
+        },
+      },
+      "/v1/episodes/{episodeId}/transcription/whisper": {
+        post: {
+          tags: ["Episodes"],
+          summary: "Deprecated compatibility alias for Groq transcription",
+          description: "Compatibility alias. New clients should use /transcription/groq; this route queues the Groq provider and no local Whisper runtime.",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "episodeId", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+          responses: {
+            "200": { description: "Groq transcription queued or already processing." },
             "400": { description: "Invalid episodeId." },
             "401": { description: "Missing, invalid, or expired bearer token." },
             "404": { description: "Episode audio is not available." },

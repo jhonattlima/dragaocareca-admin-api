@@ -768,7 +768,7 @@ episodesRouter.get("/:episodeId/transcription", requireAuth, async (req, res, ne
   }
 });
 
-episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, episodeSourceMutationLockMiddleware, async (req, res, next) => {
+const queueGroqEpisodeTranscription: RequestHandler = async (req, res, next) => {
   try {
     const episodeId = Number(req.params.episodeId);
     if (!Number.isInteger(episodeId) || episodeId <= 0) {
@@ -779,12 +779,12 @@ episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, episodeSou
     const audioPath = getEpisodeMediaStagingPath(episodeId, "audio");
     const finalizedAudioPath = getEpisodeMediaFinalPath(episodeId, "audio");
     if (!fs.existsSync(audioPath) && !fs.existsSync(finalizedAudioPath)) {
-      res.status(404).json({ message: "Episode audio is not available for Whisper transcription" });
+      res.status(404).json({ message: "Episode audio is not available for Groq transcription" });
       return;
     }
 
     await abortDraftEpisodeTranscription(episodeId);
-    const draftState = await queueDraftEpisodeTranscription(episodeId, "faster-whisper");
+    const draftState = await queueDraftEpisodeTranscription(episodeId, "groq");
     res.setHeader("Cache-Control", "no-store");
     res.json({
       episodeId,
@@ -794,13 +794,17 @@ episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, episodeSou
       progress: draftState.progress,
       transcriptError: draftState.error ?? null,
       message: draftState.status === "error"
-        ? `Whisper transcription could not start: ${draftState.error ?? "unknown error"}`
-        : "Whisper transcription started.",
+        ? `Groq transcription could not start: ${draftState.error ?? "unknown error"}`
+        : "Groq transcription started.",
     });
   } catch (error) {
     next(error);
   }
-});
+};
+
+episodesRouter.post("/:episodeId/transcription/groq", requireAuth, episodeSourceMutationLockMiddleware, queueGroqEpisodeTranscription);
+// Temporary compatibility alias for already-deployed Admin Web clients.
+episodesRouter.post("/:episodeId/transcription/whisper", requireAuth, episodeSourceMutationLockMiddleware, queueGroqEpisodeTranscription);
 
 episodesRouter.get("/:episodeId/episodes-generated-summary", noStoreHashtagAuthoring, requireAuth, async (req, res, next) => {
   try {

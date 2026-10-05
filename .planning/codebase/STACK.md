@@ -75,7 +75,7 @@
 - Long-running Node.js host or VPS
 - Writable SQLite and media storage paths
 - Env-var based secret/config injection for Google auth, JWT, Telegram, Spotify, YouTube, Gemini, feed metadata, transcription, and summary generation
-- Episode AI providers: Gemini Files API / `gemini-3.6-flash` or local Whisper/Llama fallbacks; jobs are sequential for the 4 GB VPS target
+- Episode transcription tries Gemini first and falls back to Groq. WhisperX is retained only for trailer-caption alignment, while summary/hashtag jobs remain sequential for the 4 GB VPS target.
 
 ---
 
