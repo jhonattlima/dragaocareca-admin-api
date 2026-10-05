@@ -54,7 +54,11 @@ export const episodePublicationRepository = {
           ORDER BY created_at DESC, effect_key DESC LIMIT 1`).get(input.episodeId, destination, input.sourceRevision) as { remote_id: string; permalink: string | null } | undefined;
         db.prepare(`INSERT INTO episode_publication_effects (effect_key, intent_id, episode_id, destination, source_revision, source_json, metadata_json, eligibility, lifecycle, diagnostics_json, preflight_json, predecessor_remote_id, predecessor_permalink, retirement_status, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting_for_successor', ?, ?)
-          ON CONFLICT(intent_id, destination, source_revision) DO NOTHING`).run(effectKey, intentId, input.episodeId, destination, input.sourceRevision, JSON.stringify(input.source), JSON.stringify(input.metadata), blocked ? "blocked" : "eligible", blocked ? "blocked" : "eligible", JSON.stringify(blocked ? ["Finalized trailer/provider media preflight is not ready."] : []), JSON.stringify(input.preflight), predecessor?.remote_id ?? null, predecessor?.permalink ?? null, now, now);
+          ON CONFLICT(intent_id, destination, source_revision) DO UPDATE SET
+            metadata_json = excluded.metadata_json,
+            updated_at = excluded.updated_at
+          WHERE episode_publication_effects.remote_id IS NULL
+            AND episode_publication_effects.lifecycle IN ('eligible', 'blocked', 'failed', 'uncertain')`).run(effectKey, intentId, input.episodeId, destination, input.sourceRevision, JSON.stringify(input.source), JSON.stringify(input.metadata), blocked ? "blocked" : "eligible", blocked ? "blocked" : "eligible", JSON.stringify(blocked ? ["Finalized trailer/provider media preflight is not ready."] : []), JSON.stringify(input.preflight), predecessor?.remote_id ?? null, predecessor?.permalink ?? null, now, now);
       }
     };
     if (input.withinTransaction) {

@@ -16,6 +16,7 @@ import { postEpisodePromotion } from "./episode-promotion-client.service";
 import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath } from "./episode-media-layout.service";
 import { createYoutubeTrailerJob } from "./youtube-trailer-job.service";
 import { youtubeTrailerJobRepository } from "../database/repositories/youtube-trailer-job.repository";
+import { createEpisodePublication } from "./episode-publication.service";
 
 export type EpisodePromotionSaveInput = {
   episodeId: number;
@@ -124,6 +125,12 @@ export const saveEpisodeAndQueuePromotion = async (
       },
     };
   }
+
+  // A generated trailer can be approved while its owner-bound episode row is
+  // still a draft. Refresh the not-yet-published social effect after the
+  // canonical episode fields are committed, before either background worker
+  // has a chance to deliver the stale draft snapshot.
+  await createEpisodePublication(committed.episode);
 
   // YouTube publication is intentionally independent from Telegram/Meta. Once
   // the episode is saved with a canonical trailer, enqueue its private upload

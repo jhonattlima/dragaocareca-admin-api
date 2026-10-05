@@ -67,10 +67,20 @@ const run = async (): Promise<void> => {
       },
       preflight,
     });
-    await deliverInstagramReel(1, instagramEffect, fake);
+    const [savedEpisodeMetadata] = episodePublicationRepository.createOrGet({
+      episodeId: 1, sourceRevision, source, destinations: ["instagram_reel"],
+      metadata: {
+        title: "Final saved title", summary: "Final saved summary", captionMentions: [], hashtags: ["#final"],
+        renderedCaption: "Final saved title\n\nFinal saved summary\n\n#final",
+      },
+      preflight,
+    });
+    assert.equal(savedEpisodeMetadata.metadata.title, "Final saved title", "an unpublished trailer effect must use final episode metadata");
+    await deliverInstagramReel(1, savedEpisodeMetadata, fake);
     assert.deepEqual(calls.slice(0, 3), ["instagram:create", "instagram:status", "instagram:publish"]);
-    assert.equal((sentInstagramCaption.match(/#[^\s#]+/gu) ?? []).length, 30, "legacy snapshots are capped at send time");
-    assert.equal(sentInstagramCaption.includes("#legacy31"), false, "hashtags after the cap are never sent");
+    assert.equal((sentInstagramCaption.match(/#[^\s#]+/gu) ?? []).length, 1, "the refreshed final snapshot replaces draft hashtags");
+    assert.equal(sentInstagramCaption.includes("#legacy31"), false, "draft hashtags are not retained after the episode is saved");
+    assert.equal(sentInstagramCaption.startsWith("Final saved title"), true, "delivery uses metadata refreshed after the draft was saved");
     assert.equal(calls.some((call) => call === "facebook:publish"), false);
   } finally {
     config.meta.instagramEnabled = previous;
