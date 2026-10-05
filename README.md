@@ -74,6 +74,31 @@ secret store and never commit them.
 - `GOOGLE_CLIENT_ID` and `JWT_SECRET` set
 - `ALLOWED_GOOGLE_EMAILS` populated if you want to restrict login
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `TELEGRAM_POLL_INTERVAL_MS>0` set for launch notifications
+- `META_SYSTEM_USER_ACCESS_TOKEN` set to a Meta token whose debug type is `SYSTEM_USER` when Instagram/Facebook trailer publication is enabled
+
+## Meta social publication operations
+
+The production publisher uses only `META_SYSTEM_USER_ACCESS_TOKEN`. Do not
+configure obsolete user, Page, or Instagram access-token variables as a normal
+production fallback. The token must belong to the configured Meta business
+system user, be assigned to the target Facebook Page and linked professional
+Instagram account, and include the Page/Instagram publication permissions.
+
+After changing the token, restart the API container and perform a
+**read-only** verification through authenticated `GET
+/v1/meta-connection/status`. A usable configuration reports a valid token,
+validated Page identity and Instagram linkage, and `ready` gates for both
+Instagram and Facebook. A `USER` token that expires soon is intentionally
+blocked before it can interrupt a scheduled publication.
+
+Social effects store a snapshot of title, summary, mentions, and at most 30
+hashtags. The save flow refreshes any undelivered effect from a draft before
+delivery. For an already-published legacy post whose snapshot begins with
+`[Draft`, never reset or requeue the effect before its remote post has been
+retired: that would create a duplicate. Facebook video metadata can be updated
+or, if necessary, replaced. The current Meta production permissions may not
+allow API deletion of a published Instagram Reel; delete that Reel manually in
+Instagram first, then run the controlled requeue/republication recovery.
 
 ## Google Authentication
 
@@ -104,6 +129,7 @@ Authenticated:
 - `PUT /v1/episodes/:episodeId`
 - `GET /v1/feed/preview` (includes future episodes)
 - `GET /v1/feed/status`
+- `GET /v1/meta-connection/status`
 - `GET /v1/assets/cover-mosaic.json`
 - `GET /v1/assets/cover-mosaic.svg`
 

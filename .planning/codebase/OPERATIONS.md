@@ -48,6 +48,33 @@ The xAI key and provider selection are server-side only. WhisperX remains only f
 
 The production RSS feed guides the summary prompt's style but is never fetched by a job and is not factual input. Status snapshots expose the provider actually used for transcript, summary, and hashtag authoring; the UI must not infer it from configuration.
 
+## Meta social-publication configuration and recovery
+
+Production Facebook/Instagram publication is configured with
+`META_SYSTEM_USER_ACCESS_TOKEN`; legacy `META_USER_ACCESS_TOKEN`,
+`META_PAGE_ACCESS_TOKEN`, and `META_INSTAGRAM_ACCESS_TOKEN` are not part of
+the normal deployment profile. Generate the credential from the Meta Business
+system user that has the target Facebook Page and linked professional Instagram
+account assigned. The token debug response must report `type: SYSTEM_USER`;
+do not place a short-lived `USER` token in the system-user variable.
+
+Keep these values private in the ignored production environment file. After a
+token change, recreate only the API service and verify the authenticated
+`GET /v1/meta-connection/status` response. Both publication gates must be
+`ready`; a token with fewer than seven days remaining is deliberately blocked
+before the workers can start a social upload.
+
+The social effects retain their caption snapshot so retries do not rebuild
+unreviewed copy. Finalizing an episode refreshes only effects that have not
+been published. If an old published post contains `[Draft ...]`, first inspect
+the exact remote ID and final episode metadata. Do not clear the local remote
+ID or requeue while the incorrect remote post exists. Correct Facebook fields
+in place when Meta accepts it; otherwise replace the Facebook video. Published
+Instagram Reels can require manual deletion in Instagram because the current
+system-user token may publish but still receive Graph error `(#10)` on delete.
+After manual deletion, reset/requeue the matching Instagram effect exactly once
+and verify the newly persisted remote ID and final caption.
+
 ## Deployment verification
 
 ```bash
@@ -56,4 +83,6 @@ npm run build
 npm run verify:public-episodes
 npm run verify:summary-runtime-contract
 npm run verify:summary-quality-contract
+npm run verify:meta-connection
+npm run verify:episode-publication-delivery
 ```

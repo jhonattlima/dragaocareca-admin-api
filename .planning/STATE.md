@@ -111,10 +111,13 @@ Recent decisions affecting current work:
 - [Phase 18]: Keep hashtag authoring advisory: a failed or invalid provider response must not invalidate a completed summary, and its retry/error state stays in `suggestedTags`.
 - [Phase 18]: Keep provider status in the existing episode state and protected DTOs rather than creating parallel status files or UI-trigger endpoints.
 - [Post-v1.4]: Preserve title/summary/hashtags in the publication job snapshot while hashing only provider metadata; a save of an already-public trailer reconciles YouTube title/description so missing hashtags can be corrected without re-uploading.
+- [Operational]: Production Meta publication uses one `META_SYSTEM_USER_ACCESS_TOKEN`; validate that Meta reports token type `SYSTEM_USER`, not a short-lived `USER` token. The protected Meta status endpoint intentionally blocks publication when the token expires within seven days.
+- [Operational]: Episode save refreshes social metadata only while an effect is undelivered. A historical published `[Draft ...]` social post is a manual recovery: retire the exact remote post before requeueing, then verify the replacement remote ID and final caption to avoid duplicates.
 
 ### Pending Todos
 
 - Run a live provider smoke test after deployment/restart and observe Gemini quota, Groq fallback quality, and YouTube lookup quota. Offline verification is the release gate.
+- The DC 347 Facebook post was replaced with its final metadata. The legacy Instagram Reel remains operator-manual recovery because the validated system-user token can publish but Meta rejected deletion with Graph error `(#10)`; after manual deletion, perform one controlled requeue/republication.
 
 ### Blockers/Concerns
 
