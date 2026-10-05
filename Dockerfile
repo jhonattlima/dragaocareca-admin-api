@@ -21,7 +21,7 @@ COPY --from=build /app/requirements-vps.txt ./requirements-vps.txt
 COPY --from=build /app/requirements-trailer-captions.txt ./requirements-trailer-captions.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements-vps.txt
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    --index-url https://download.pytorch.org/whl/cpu \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
     torch==2.8.0+cpu torchaudio==2.8.0+cpu \
   && python3 -m pip install --no-cache-dir --break-system-packages transformers==4.48.3 \
     && python3 -m pip install --no-cache-dir --break-system-packages whisperx==3.8.6 \
