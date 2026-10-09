@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "verify:episode-promotion": "npm run build && NODE_ENV=development DISABLE_BACKGROUND_WORKERS=true node dist/scripts/verify-episode-promotion.js --all --fake-only",
     "verify:public-episodes": "NODE_ENV=development node dist/scripts/verify-public-episodes.js",
+    "verify:feed-guid-stability": "npm run build && NODE_ENV=development node dist/scripts/verify-feed-guid-stability.js",
     "verify:episode-artifact-downloads": "NODE_ENV=development node dist/scripts/verify-episode-artifact-downloads.js",
     "verify:trailer-video-upload-config": "NODE_ENV=development node dist/scripts/verify-trailer-video-upload-config.js",
     "verify:trailer-video-persistence": "NODE_ENV=development SQLITE_PATH=/tmp/dragaocareca-trailer-video-persistence.sqlite node dist/scripts/verify-trailer-video-persistence.js",

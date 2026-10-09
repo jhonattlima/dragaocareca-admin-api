@@ -120,14 +120,38 @@ const episodeDescription = (episode: Pick<EpisodeRow, "summary" | "authors" | "g
   return `${escapeHtml(supportCallout)}${body}${footer}${credits}`;
 };
 
+// The last current-path GUID emitted before the stable GUID policy is episode
+// 364. Snapshot-backed items preserve their historical HostGator GUIDs.
+const FIRST_NUMERIC_GUID_EPISODE_ID = 365;
+
+const replaceXmlAttribute = (
+  xml: string,
+  elementName: string,
+  attributeName: string,
+  value: string,
+): string => xml.replace(
+  new RegExp(`(<${elementName}\\b[^>]*\\s${attributeName}=")[^"]*(")`, "giu"),
+  `$1${value}$2`,
+);
+
 const normalizeLegacySnapshotMedia = (xmlSnapshot: string, episodeId: number): string => {
-  const canonicalImageBase = config.feed.imageBase.replace(/\/files(?=\/|$)/u, "/media");
-  const canonical = `${canonicalImageBase.replace(/\/+$/u, "")}/episodes/${episodeId}/cover.jpeg`;
+  const canonical = imageUrl(undefined, episodeId);
   const audio = audioUrl(undefined, episodeId);
-  return xmlSnapshot
-    .replace(/https?:\/\/[^\s"<>]+\/files\/images\/[^\s"<>]+/gu, canonical)
-    .replace(/https?:\/\/[^\s"<>]+\/files\/episodes\/[^\s"<>]+/gu, audio);
+  // XML snapshots are the only source for the historical RSS identity. Do not
+  // globally replace old media URLs: doing so also changes <guid> text.
+  return replaceXmlAttribute(
+    replaceXmlAttribute(xmlSnapshot, "enclosure", "url", audio),
+    "itunes:image",
+    "href",
+    canonical,
+  );
 };
+
+const episodeGuid = (episode: Pick<EpisodeRow, "episodeId" | "fileName">): { value: string; isPermalink: boolean } => (
+  episode.episodeId >= FIRST_NUMERIC_GUID_EPISODE_ID
+    ? { value: String(episode.episodeId), isPermalink: false }
+    : { value: audioUrl(episode.fileName, episode.episodeId), isPermalink: true }
+);
 
 export const buildFeedXml = (episodes: EpisodeRow[]): string => {
   const latest = episodes[0]?.pubDate ? new Date(episodes[0].pubDate) : new Date();
@@ -208,7 +232,8 @@ export const buildFeedXml = (episodes: EpisodeRow[]): string => {
     item.ele("title").txt(ep.title).up();
     const description = episodeDescription(ep);
     item.ele("description").dat(description).up();
-    item.ele("guid").txt(audioUrl(ep.fileName, ep.episodeId)).up();
+    const guid = episodeGuid(ep);
+    item.ele("guid", guid.isPermalink ? {} : { isPermaLink: "false" }).txt(guid.value).up();
     item.ele("link").txt(`${config.feed.baseLink}${ep.episodeId}`).up();
     item.ele("pubDate").txt(toRfc822(new Date(ep.pubDate))).up();
     if (config.feed.itunesAuthor) item.ele("itunes:author").txt(config.feed.itunesAuthor).up();
