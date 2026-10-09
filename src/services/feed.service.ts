@@ -144,6 +144,10 @@ const preserveLegacyGuid = (xmlSnapshot: string, guid: string | null): string =>
   return xmlSnapshot.replace(/(<guid(?:\s+[^>]*)?>)[\s\S]*?(<\/guid>)/iu, `$1${guid}$2`);
 };
 
+const legacyItemXml = (xmlSnapshot: string): string => (
+  /^\s*<item(?:\s|>)/iu.test(xmlSnapshot) ? xmlSnapshot : `<item>${xmlSnapshot}</item>`
+);
+
 const normalizeLegacySnapshotMedia = (xmlSnapshot: string, episodeId: number): string => {
   const canonical = imageUrl(undefined, episodeId);
   const audio = audioUrl(undefined, episodeId);

@@ -37,7 +37,7 @@ const legacyGuid = "https://www.dragaocareca.com/files/episodes/episode_356.mp3"
 const legacy = {
   ...baseEpisode(356),
   title: "Legacy item",
-  xmlSnapshot: `<item><title>Legacy item</title><guid>${legacyGuid}</guid><enclosure url="https://www.dragaocareca.com/files/episodes/episode_356.mp3" length="1" type="audio/mpeg"></enclosure><itunes:image href="https://www.dragaocareca.com/files/images/episode_356.jpeg"></itunes:image></item>`,
+  xmlSnapshot: `<guid>${legacyGuid}</guid><title>Legacy item</title><enclosure url="https://www.dragaocareca.com/files/episodes/episode_356.mp3" length="1" type="audio/mpeg"></enclosure><itunes:image href="https://www.dragaocareca.com/files/images/episode_356.jpeg"></itunes:image>`,
 };
 const current = { ...baseEpisode(364), title: "Current item", fileName: "episode_364.mp3" };
 const future = { ...baseEpisode(365), title: "Future item", fileName: "episode_365.mp3" };
