@@ -13,6 +13,9 @@ import { MAX_SOCIAL_HASHTAGS, renderSocialCaption } from "./social-caption";
 
 const groups = ["telegram", "instagram_reel", "facebook_native_video"] as const;
 
+export const isSocialPublicationDue = (episode: Pick<EpisodeRow, "pubDate">, now = new Date()): boolean =>
+  new Date(episode.pubDate) <= now;
+
 const metadataFor = (episode: EpisodeRow): PublicationMetadata => {
   const captionMentions = episode.instagramCaptionMentions ?? [];
   const hashtags = (episode.instagramHashtags ?? []).slice(0, MAX_SOCIAL_HASHTAGS);
@@ -89,7 +92,7 @@ export const dispatchEpisodeReplacementPublication = async (
   const episode = episodeRepository.findByEpisodeId(episodeId);
   // Trailer approval may happen before the scheduled release. The retry worker
   // will pick these eligible effects up once the episode is public.
-  if (!episode || new Date(episode.pubDate) > new Date()) return effects;
+  if (!episode || !isSocialPublicationDue(episode)) return effects;
   await Promise.all(effects.map((effect) => {
     if (effect.destination === "instagram_reel" && config.meta.instagramEnabled) return deliverInstagramReel(episodeId, effect, provider);
     if (effect.destination === "facebook_native_video" && config.meta.facebookReelEnabled) return deliverFacebookNativeVideo(episodeId, effect, provider);
@@ -100,6 +103,9 @@ export const dispatchEpisodeReplacementPublication = async (
 
 export const deliverEpisodePublication = async (episode: EpisodeRow): Promise<{ delivered: boolean; effects: PublicationEffectProjection[] }> => {
   const publication = await createEpisodePublication(episode);
+  // This service is also called directly by the launch worker. Keep the
+  // release boundary here so no caller can publish Meta content early.
+  if (!isSocialPublicationDue(episode)) return { delivered: false, effects: publication.effects };
   const instagram = publication.effects.find((effect) => effect.destination === "instagram_reel");
   const facebook = publication.effects.find((effect) => effect.destination === "facebook_native_video");
   await Promise.all([

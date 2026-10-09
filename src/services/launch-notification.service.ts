@@ -1,5 +1,5 @@
 import { episodeRepository } from "../database/repositories/episode.repository";
-import { deliverEpisodePublication } from "./episode-publication.service";
+import { deliverEpisodePublication, isSocialPublicationDue } from "./episode-publication.service";
 import { deliverInstagramReel } from "./instagram-reel-publication.service";
 import { deliverFacebookNativeVideo } from "./facebook-native-video-publication.service";
 import { episodePublicationRepository } from "../database/repositories/episode-publication.repository";
@@ -107,6 +107,10 @@ export const processDueSocialPublicationEffects = async (): Promise<{
   for (const item of due) {
     const episode = episodeRepository.findByEpisodeId(item.episodeId);
     if (!episode) continue;
+    // listDueSocialEffects intentionally remains a persistence-level recovery
+    // query. Recheck the canonical episode here before provider delegation so
+    // a future scheduled episode can never be sent to Meta by this worker.
+    if (!isSocialPublicationDue(episode)) continue;
     attempted += 1;
     try {
       if (item.effect.destination === "instagram_reel") {

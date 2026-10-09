@@ -81,23 +81,27 @@ export const saveEpisodeAndQueuePromotion = async (
 ): Promise<EpisodePromotionSaveResult> => {
   const payload = episodeSchema.parse(input.payload);
   const trailer = await readCanonicalTrailerFingerprint(input.episodeId);
-  const request = trailer
-    ? buildEpisodePromotionRequest({
-        episodeId: input.episodeId,
-        title: payload.title,
-        episodeNumber: payload.episodeNumber,
-        publicDownloadUrl: publicDownloadUrlFor(input.episodeId),
-        imageUrl: `${config.feed.imageBase}${payload.coverFileName ?? `episodes/${input.episodeId}/cover.jpeg`}`,
-        trailerMediaReference: getEpisodeMediaRelativePath(input.episodeId, "trailerVideo"),
-        trailerSha256: trailer.sha256,
-        trailerByteCount: trailer.byteCount,
-      })
-    : null;
 
   const committed = withImmediateTransaction(() => {
     const saved = episodeRepository.update(input.episodeId, payload);
     if (!saved) throw new Error("Episode could not be finalized");
     let finalEpisode = episodeRepository.updateMedia(input.episodeId, input.mediaUpdates ?? {}) ?? saved;
+    // Promotion metadata must come from the row that has just been committed,
+    // never from a browser payload that may still contain the draft placeholder.
+    // A draft has no public promotion contract yet; the later final save will
+    // create the immediate Telegram promotion from its canonical metadata.
+    const request = trailer && !finalEpisode.isDraft
+      ? buildEpisodePromotionRequest({
+          episodeId: finalEpisode.episodeId,
+          title: finalEpisode.title,
+          episodeNumber: finalEpisode.episodeNumber,
+          publicDownloadUrl: publicDownloadUrlFor(finalEpisode.episodeId),
+          imageUrl: `${config.feed.imageBase}${finalEpisode.coverFileName ?? `episodes/${finalEpisode.episodeId}/cover.jpeg`}`,
+          trailerMediaReference: getEpisodeMediaRelativePath(finalEpisode.episodeId, "trailerVideo"),
+          trailerSha256: trailer.sha256,
+          trailerByteCount: trailer.byteCount,
+        })
+      : null;
     const intent = request
       ? episodePromotionRepository.upsertPromotionIntent({
           request,
@@ -116,6 +120,9 @@ export const saveEpisodeAndQueuePromotion = async (
   });
 
   if (!committed.intent) {
+    if (committed.episode.isDraft) {
+      return committed;
+    }
     return {
       ...committed,
       promotionError: {
@@ -130,7 +137,9 @@ export const saveEpisodeAndQueuePromotion = async (
   // still a draft. Refresh the not-yet-published social effect after the
   // canonical episode fields are committed, before either background worker
   // has a chance to deliver the stale draft snapshot.
-  await createEpisodePublication(committed.episode);
+  if (!committed.episode.isDraft) {
+    await createEpisodePublication(committed.episode);
+  }
 
   // YouTube publication is intentionally independent from Telegram/Meta. Once
   // the episode is saved with a canonical trailer, enqueue its private upload

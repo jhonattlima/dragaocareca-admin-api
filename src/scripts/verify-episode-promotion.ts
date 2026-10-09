@@ -280,7 +280,7 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
       );
       const payload = {
         episodeId,
-        title: "Scheduled episode #future",
+        title: "Scheduled final title",
         summary: "Immediate promotion despite a future publication date",
         pubDate: new Date("2099-01-01T00:00:00.000Z"),
         explicit: "no" as const,
@@ -295,6 +295,8 @@ const runScenario = async (scenario: Scenario): Promise<void> => {
       assert.ok(first.intent);
       assert.equal(first.episode.pubDate, "2099-01-01T00:00:00.000Z");
       assert.equal(transport.requests.length, 1, "future-dated saves dispatch immediately");
+      assert.equal((transport.requests[0]?.request as PromotionRequest).title, "Scheduled final title", "Telegram promotion uses the final saved title");
+      assert.equal((transport.requests[0]?.request as PromotionRequest).title.includes("[Draft"), false, "Telegram promotion never receives a draft placeholder");
       const firstRevision = first.intent.notification.sourceRevision;
       const firstFingerprint = first.intent.notification.requestFingerprint;
       const replay = await saveService.saveEpisodeAndQueuePromotion({ episodeId, payload, transport });

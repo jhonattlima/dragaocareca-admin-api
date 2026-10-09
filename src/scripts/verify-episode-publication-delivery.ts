@@ -23,10 +23,11 @@ const run = async (): Promise<void> => {
   process.env.FEED_TITLE = "Offline verification feed";
   process.env.FEED_DESCRIPTION = "Synthetic fake-only fixture";
   process.env.FEED_SITE = "https://example.test";
-  const [{ config }, { connectDb }, { episodeRepository }, { episodeSchema }, { episodePublicationRepository }, { publicationSourceRevision }, { deliverInstagramReel }, { normalizeMetaProviderStatus }] = await Promise.all([
+  const [{ config }, { connectDb }, { episodeRepository }, { getDb }, { episodeSchema }, { episodePublicationRepository }, { publicationSourceRevision }, { deliverInstagramReel }, { normalizeMetaProviderStatus }, { deliverEpisodePublication, dispatchEpisodeReplacementPublication }] = await Promise.all([
     import("../config/env.js"), import("../database/connect.js"), import("../database/repositories/episode.repository.js"),
+    import("../database/sqlite.js"),
     import("../schemas/episode.js"), import("../database/repositories/episode-publication.repository.js"), import("../schemas/episode-publication.js"),
-    import("../services/instagram-reel-publication.service.js"), import("../services/meta-publication.provider.js"),
+    import("../services/instagram-reel-publication.service.js"), import("../services/meta-publication.provider.js"), import("../services/episode-publication.service.js"),
   ]);
   await connectDb();
   episodeRepository.create(episodeSchema.parse({
@@ -50,8 +51,9 @@ const run = async (): Promise<void> => {
     async publishFacebookVideo() { calls.push("facebook:publish"); return result("video-1"); },
   };
   globalThis.fetch = (async () => { throw new Error("Outbound network is forbidden in fake-only verification"); }) as typeof fetch;
-  const previous = config.meta.instagramEnabled;
+  const previous = { instagramEnabled: config.meta.instagramEnabled, facebookReelEnabled: config.meta.facebookReelEnabled };
   config.meta.instagramEnabled = true;
+  config.meta.facebookReelEnabled = true;
   try {
     const source = { mediaReference: "episodes/1/trailer.mp4", sha256: "a".repeat(64), byteCount: 10, mimeType: "video/mp4" as const };
     const sourceRevision = publicationSourceRevision(1, source);
@@ -82,8 +84,39 @@ const run = async (): Promise<void> => {
     assert.equal(sentInstagramCaption.includes("#legacy31"), false, "draft hashtags are not retained after the episode is saved");
     assert.equal(sentInstagramCaption.startsWith("Final saved title"), true, "delivery uses metadata refreshed after the draft was saved");
     assert.equal(calls.some((call) => call === "facebook:publish"), false);
+
+    const futureEpisode = episodeRepository.create(episodeSchema.parse({
+      episodeId: 2, title: "Final scheduled title", summary: "Final scheduled summary", pubDate: new Date("2099-01-01T00:00:00.000Z"),
+      explicit: "no", authors: [], guests: [], tags: [], citations: [],
+      musicCredits: [JSON.stringify({ name: "Scheduled fixture", links: [{ url: "https://example.test/scheduled" }] })],
+      coverCredits: [], launchNotificationState: "idle",
+    }));
+    const futureTrailerPath = path.join(process.env.MEDIA_EPISODES_DIR!, "2", "trailer.mp4");
+    await fs.promises.mkdir(path.dirname(futureTrailerPath), { recursive: true });
+    await fs.promises.writeFile(futureTrailerPath, Buffer.from("fake scheduled trailer"));
+    const futureSource = { mediaReference: "episodes/2/trailer.mp4", sha256: "b".repeat(64), byteCount: 10, mimeType: "video/mp4" as const };
+    const futureRevision = publicationSourceRevision(2, futureSource);
+    episodePublicationRepository.createOrGet({
+      episodeId: 2, sourceRevision: futureRevision, source: futureSource, destinations: ["instagram_reel", "facebook_native_video"],
+      metadata: { title: futureEpisode.title, summary: futureEpisode.summary, captionMentions: [], hashtags: ["#scheduled"], renderedCaption: "Final scheduled title\n\nFinal scheduled summary\n\n#scheduled" },
+      preflight,
+    });
+    const beforeReleaseCalls = calls.length;
+    const directBeforeRelease = await deliverEpisodePublication(futureEpisode);
+    assert.equal(directBeforeRelease.delivered, false, "direct launch delivery is blocked before the scheduled release");
+    await dispatchEpisodeReplacementPublication(2, futureRevision, fake);
+    assert.equal(calls.length, beforeReleaseCalls, "no Meta provider method is called before pubDate");
+    assert.equal(episodePublicationRepository.listDueSocialEffects(new Date("2098-12-31T23:59:59.000Z")).some((item) => item.episodeId === 2), false, "future social effects are not due to the worker");
+
+    getDb().prepare("UPDATE episodes SET pub_date = ? WHERE episode_id = ?").run("2026-01-01T00:00:00.000Z", 2);
+    assert.equal(episodePublicationRepository.listDueSocialEffects(new Date("2026-01-01T00:00:01.000Z")).filter((item) => item.episodeId === 2).length >= 2, true, "social effects become due only after pubDate");
+    await dispatchEpisodeReplacementPublication(2, futureRevision, fake);
+    assert.equal(calls.length > beforeReleaseCalls, true, "Meta delivery begins only after the scheduled release");
+    assert.equal(calls.includes("facebook:upload"), true, "Facebook receives the final trailer only after pubDate");
+    assert.equal(sentInstagramCaption.startsWith("Final scheduled title"), true, "released Meta delivery retains final title metadata");
   } finally {
-    config.meta.instagramEnabled = previous;
+    config.meta.instagramEnabled = previous.instagramEnabled;
+    config.meta.facebookReelEnabled = previous.facebookReelEnabled;
     globalThis.fetch = originalFetch;
   }
   console.log(`Fake publication delivery passed: ${calls.join(",")}`);
