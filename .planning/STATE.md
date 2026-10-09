@@ -129,6 +129,7 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261003-4no | Prevent Instagram hashtag overflow on new and retried publication effects | 2026-10-03 | 305cc3e | [261003-4no](./quick/261003-4no-prevent-instagram-hashtag-overflow-on-ne/) |
+| 261009-fq7 | Corrigir publicação social antecipada e metadados Draft em episódios agendados | 2026-10-09 | a9f9bc0 | [261009-fq7](../../dragaocareca-ecosystem/.planning/quick/261009-fq7-corrigir-publica-o-antecipada-de-faceboo/) |
 
 ### Roadmap Evolution
 
