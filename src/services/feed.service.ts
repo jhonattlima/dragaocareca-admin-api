@@ -134,17 +134,27 @@ const replaceXmlAttribute = (
   `$1${value}$2`,
 );
 
+const legacyGuidValue = (xmlSnapshot: string): string | null => {
+  const match = xmlSnapshot.match(/<guid(?:\s+[^>]*)?>([\s\S]*?)<\/guid>/iu);
+  return match?.[1]?.trim() || null;
+};
+
+const preserveLegacyGuid = (xmlSnapshot: string, guid: string | null): string => {
+  if (!guid) return xmlSnapshot;
+  return xmlSnapshot.replace(/(<guid(?:\s+[^>]*)?>)[\s\S]*?(<\/guid>)/iu, `$1${guid}$2`);
+};
+
 const normalizeLegacySnapshotMedia = (xmlSnapshot: string, episodeId: number): string => {
   const canonical = imageUrl(undefined, episodeId);
   const audio = audioUrl(undefined, episodeId);
   // XML snapshots are the only source for the historical RSS identity. Do not
   // globally replace old media URLs: doing so also changes <guid> text.
-  return replaceXmlAttribute(
+  return preserveLegacyGuid(replaceXmlAttribute(
     replaceXmlAttribute(xmlSnapshot, "enclosure", "url", audio),
     "itunes:image",
     "href",
     canonical,
-  );
+  ), legacyGuidValue(xmlSnapshot));
 };
 
 const episodeGuid = (episode: Pick<EpisodeRow, "episodeId" | "fileName">): { value: string; isPermalink: boolean } => (
