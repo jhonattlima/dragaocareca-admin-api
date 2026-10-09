@@ -116,6 +116,27 @@ const run = async (): Promise<void> => {
     assert.equal(retriedEffect?.remoteId, "media-retry", "the successful retry persists one remote identity");
     assert.equal(calls.filter((call) => call === "instagram:retry-create").length, 1, "a retry never creates a second Instagram container");
 
+    const failedContainerSource = { mediaReference: "episodes/1/trailer.mp4", sha256: "d".repeat(64), byteCount: 12, mimeType: "video/mp4" as const };
+    const failedContainerRevision = publicationSourceRevision(1, failedContainerSource);
+    const [failedContainerEffect] = episodePublicationRepository.createOrGet({
+      episodeId: 1, sourceRevision: failedContainerRevision, source: failedContainerSource, destinations: ["instagram_reel"],
+      metadata: { title: "Failed container fixture", summary: "Recreate only after a terminal Meta status", captionMentions: [], hashtags: [], renderedCaption: "Failed container fixture" },
+      preflight,
+    });
+    const failedContainerKey = `episode:1:${failedContainerRevision}:instagram_reel`;
+    episodePublicationRepository.updateCheckpoint(failedContainerKey, { stage: "processing", providerId: "container-dead", uploadId: null, updatedAt: new Date().toISOString() }, "failed");
+    const terminalContainerProvider: MetaPublicationProvider = {
+      ...fake,
+      async createInstagramContainer() { calls.push("instagram:terminal-create"); return result("container-fresh"); },
+      async getInstagramContainer(id) { calls.push(`instagram:terminal-status:${id}`); return result(id, id === "container-dead" ? "ERROR" : "FINISHED"); },
+      async publishInstagramContainer(id) { calls.push(`instagram:terminal-publish:${id}`); return result("media-fresh"); },
+    };
+    await deliverInstagramReel(1, failedContainerEffect, terminalContainerProvider);
+    const recreatedEffect = episodePublicationRepository.list(1, failedContainerRevision).find((effect) => effect.destination === "instagram_reel");
+    assert.equal(recreatedEffect?.lifecycle, "published", "a terminal Meta container is replaced by a fresh container");
+    assert.equal(recreatedEffect?.remoteId, "media-fresh", "the replacement container persists the published Reel identity");
+    assert.deepEqual(calls.slice(-4), ["instagram:terminal-status:container-dead", "instagram:terminal-create", "instagram:terminal-status:container-fresh", "instagram:terminal-publish:container-fresh"], "only a confirmed terminal container is replaced");
+
     const futureEpisode = episodeRepository.create(episodeSchema.parse({
       episodeId: 2, title: "Final scheduled title", summary: "Final scheduled summary", pubDate: new Date("2099-01-01T00:00:00.000Z"),
       explicit: "no", authors: [], guests: [], tags: [], citations: [],

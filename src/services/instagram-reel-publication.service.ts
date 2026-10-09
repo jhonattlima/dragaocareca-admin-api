@@ -37,9 +37,23 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
       currentCheckpoint = checkpoint("provider_created", result);
       episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
     }
-    const processing = await provider.getInstagramContainer(identity);
+    let processing = await provider.getInstagramContainer(identity);
     if (processing.status === "ERROR" || processing.status === "ERROR_OCCURRED") {
-      throw Object.assign(new Error("Instagram container processing failed at Meta."), { category: "provider" as const });
+      // An ERROR container can never be published, but it also cannot have
+      // produced a Reel.  Discard only that provider checkpoint and create a
+      // new container from the immutable staged trailer in this same attempt.
+      // This is deliberately different from a 400 while processing, which
+      // retains the existing container and waits.
+      identity = null;
+      currentCheckpoint = { stage: "none", providerId: null, uploadId: null, updatedAt: new Date().toISOString() };
+      episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing", ["Instagram container failed at Meta; creating a fresh container."]);
+    }
+    if (!identity) {
+      const result = await provider.createInstagramContainer({ mediaUrl: `${config.meta.providerMediaBaseUrl}/${episodeId}/trailer.mp4`, caption: renderStoredSocialCaption(effect.metadata) });
+      identity = result.id;
+      currentCheckpoint = checkpoint("provider_created", result);
+      episodePublicationRepository.updateCheckpoint(key, currentCheckpoint, "processing");
+      processing = await provider.getInstagramContainer(identity);
     }
     if (processing.status && !["FINISHED", "PUBLISHED"].includes(processing.status)) {
       const attempts = episodePublicationRepository.recordAttempt(key, new Date(Date.now() + 60_000).toISOString(), ["Instagram container is still processing; retry scheduled."]);

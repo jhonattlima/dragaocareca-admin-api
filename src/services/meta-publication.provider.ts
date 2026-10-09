@@ -53,10 +53,11 @@ const request = async (path: string, init: RequestInit = {}): Promise<ProviderRe
 
 export const metaPublicationProvider: MetaPublicationProvider = {
   createInstagramContainer: async (input) => request(`${config.meta.instagramAccountId}/media`, { method: "POST", body: new URLSearchParams({ media_type: "REELS", video_url: input.mediaUrl, caption: input.caption, access_token: await pagePublicationToken() }) }),
-  // Reel container status fields are not consistently available across Graph
-  // API versions. Return the persisted identity and let media_publish be the
-  // authoritative readiness check (transient processing errors are retried).
-  getInstagramContainer: async (id) => ({ id }),
+  // Meta accepts `status_code` for Reel containers.  Reading it before
+  // `media_publish` lets us distinguish a still-processing container from one
+  // that Meta has permanently rejected, so a dead container is never retried
+  // forever.
+  getInstagramContainer: async (id) => request(`${id}?fields=id,status_code&access_token=${encodeURIComponent(await pagePublicationToken())}`),
   publishInstagramContainer: async (id) => request(`${config.meta.instagramAccountId}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: id, access_token: await pagePublicationToken() }) }),
   uploadFacebookVideo: async (input) => {
     const token = await pagePublicationToken();
