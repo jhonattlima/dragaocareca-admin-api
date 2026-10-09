@@ -120,9 +120,9 @@ const episodeDescription = (episode: Pick<EpisodeRow, "summary" | "authors" | "g
   return `${escapeHtml(supportCallout)}${body}${footer}${credits}`;
 };
 
-// The last current-path GUID emitted before the stable GUID policy is episode
-// 364. Snapshot-backed items preserve their historical HostGator GUIDs.
-const FIRST_NUMERIC_GUID_EPISODE_ID = 365;
+// Episode 364 is the deliberate cutover test for the stable GUID policy.
+// Snapshot-backed items preserve their historical HostGator GUIDs.
+const FIRST_NUMERIC_GUID_EPISODE_ID = 364;
 
 const replaceXmlAttribute = (
   xml: string,
