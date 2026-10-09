@@ -9,6 +9,18 @@ const keyFor = (effect: PublicationEffectProjection, episodeId: number): string 
 const checkpoint = (stage: "provider_created" | "processing" | "publish_complete" | "remote_identity", result: ProviderResult) => ({ stage, providerId: result.id, uploadId: null, updatedAt: new Date().toISOString() });
 const MAX_PROVIDER_ATTEMPTS = 12;
 
+const isPendingContainerPublish = (
+  category: string,
+  providerCode: string | null,
+  providerStatus: string | null,
+  checkpointState: PublicationEffectProjection["checkpoint"],
+): boolean =>
+  category === "provider"
+  && providerCode === "100"
+  && providerStatus === "400"
+  && checkpointState.providerId !== null
+  && ["provider_created", "processing"].includes(checkpointState.stage);
+
 export const deliverInstagramReel = async (episodeId: number, effect: PublicationEffectProjection, provider: MetaPublicationProvider = metaPublicationProvider): Promise<void> => {
   if (!config.meta.instagramEnabled || effect.eligibility !== "eligible") return;
   const key = keyFor(effect, episodeId);
@@ -48,8 +60,13 @@ export const deliverInstagramReel = async (episodeId: number, effect: Publicatio
     const providerStatus = error && typeof error === "object" && "providerStatus" in error ? String(error.providerStatus) : null;
     const providerMessage = error instanceof Error ? error.message : null;
     const diagnostic = [providerCode ? `code=${providerCode}` : null, providerStatus ? `http=${providerStatus}` : null, providerMessage].filter(Boolean).join(" ").slice(0, 320);
-    const attempts = episodePublicationRepository.recordAttempt(key, category === "transient" ? new Date(Date.now() + 60_000).toISOString() : null, [category === "transient" ? "Temporary Instagram provider failure; retry scheduled." : `Instagram delivery blocked: ${category}.`]);
-    episodePublicationRepository.updateCheckpoint(key, { ...currentCheckpoint, updatedAt: new Date().toISOString() }, category === "transient" && attempts < MAX_PROVIDER_ATTEMPTS ? "failed" : category === "transient" ? "uncertain" : "blocked", [diagnostic || (category === "transient" && attempts < MAX_PROVIDER_ATTEMPTS ? "Temporary provider failure; bounded retry scheduled." : `Instagram delivery requires operator action (${category}).`)]);
+    // Meta can report code 100 / HTTP 400 while a freshly created Reel
+    // container is still becoming publishable. A provider ID proves that this
+    // is not an invalid creation request; retain it and retry media_publish
+    // instead of permanently blocking the effect.
+    const retryable = category === "transient" || isPendingContainerPublish(category, providerCode, providerStatus, currentCheckpoint);
+    const attempts = episodePublicationRepository.recordAttempt(key, retryable ? new Date(Date.now() + 60_000).toISOString() : null, [retryable ? "Instagram container is still processing; retry scheduled." : `Instagram delivery blocked: ${category}.`]);
+    episodePublicationRepository.updateCheckpoint(key, { ...currentCheckpoint, updatedAt: new Date().toISOString() }, retryable && attempts < MAX_PROVIDER_ATTEMPTS ? "failed" : retryable ? "uncertain" : "blocked", [diagnostic || (retryable && attempts < MAX_PROVIDER_ATTEMPTS ? "Instagram container is still processing; retry scheduled." : `Instagram delivery requires operator action (${category}).`)]);
   }
 };
 

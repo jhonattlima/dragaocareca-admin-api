@@ -85,6 +85,37 @@ const run = async (): Promise<void> => {
     assert.equal(sentInstagramCaption.startsWith("Final saved title"), true, "delivery uses metadata refreshed after the draft was saved");
     assert.equal(calls.some((call) => call === "facebook:publish"), false);
 
+    const retrySource = { mediaReference: "episodes/1/trailer.mp4", sha256: "c".repeat(64), byteCount: 11, mimeType: "video/mp4" as const };
+    const retryRevision = publicationSourceRevision(1, retrySource);
+    const [retryEffect] = episodePublicationRepository.createOrGet({
+      episodeId: 1, sourceRevision: retryRevision, source: retrySource, destinations: ["instagram_reel"],
+      metadata: { title: "Retry fixture", summary: "Persist the container", captionMentions: [], hashtags: [], renderedCaption: "Retry fixture\n\nPersist the container" },
+      preflight,
+    });
+    let retryPublishCalls = 0;
+    const retryingInstagram: MetaPublicationProvider = {
+      ...fake,
+      async createInstagramContainer() { calls.push("instagram:retry-create"); return result("container-retry"); },
+      async getInstagramContainer() { calls.push("instagram:retry-status"); return result("container-retry"); },
+      async publishInstagramContainer() {
+        calls.push("instagram:retry-publish");
+        retryPublishCalls += 1;
+        if (retryPublishCalls === 1) throw Object.assign(new Error("Invalid parameter"), { category: "provider", providerCode: 100, providerStatus: 400 });
+        return result("media-retry");
+      },
+    };
+    await deliverInstagramReel(1, retryEffect, retryingInstagram);
+    let retriedEffect = episodePublicationRepository.list(1, retryRevision).find((effect) => effect.destination === "instagram_reel");
+    assert.equal(retriedEffect?.lifecycle, "failed", "a persisted Instagram container that Meta is still processing must be retryable");
+    assert.equal(retriedEffect?.attempts, 1, "a not-ready publish response records one bounded retry");
+    assert.equal(retriedEffect?.checkpoint.providerId, "container-retry", "the retry keeps the original Meta container");
+    assert.equal(episodePublicationRepository.requeueSocialEffectForFixture(`episode:1:${retryRevision}:instagram_reel`), true, "fixture can make the due retry immediate without network or clock changes");
+    await deliverInstagramReel(1, episodePublicationRepository.list(1, retryRevision).find((effect) => effect.destination === "instagram_reel")!, retryingInstagram);
+    retriedEffect = episodePublicationRepository.list(1, retryRevision).find((effect) => effect.destination === "instagram_reel");
+    assert.equal(retriedEffect?.lifecycle, "published", "the existing Instagram container is published by the retry");
+    assert.equal(retriedEffect?.remoteId, "media-retry", "the successful retry persists one remote identity");
+    assert.equal(calls.filter((call) => call === "instagram:retry-create").length, 1, "a retry never creates a second Instagram container");
+
     const futureEpisode = episodeRepository.create(episodeSchema.parse({
       episodeId: 2, title: "Final scheduled title", summary: "Final scheduled summary", pubDate: new Date("2099-01-01T00:00:00.000Z"),
       explicit: "no", authors: [], guests: [], tags: [], citations: [],
