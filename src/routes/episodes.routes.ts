@@ -722,6 +722,10 @@ episodesRouter.delete("/:episodeId/trailer-video", requireAuth, async (req, res,
       res.status(404).json({ message: "Episode not found" });
       return;
     }
+    if (episode.isDraft) {
+      res.status(409).json({ message: "Save Episode before committing trailer publication metadata." });
+      return;
+    }
     const jobs = youtubeTrailerJobRepository.findByEpisodeId(episodeId);
     await cleanupYoutubeTrailerVideos(jobs);
     await Promise.all([
@@ -932,7 +936,13 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTra
       res.status(400).json({ message: "Save publication metadata must contain a title and up to three hashtags." });
       return;
     }
-    const publicationMetadata = { title: body.data.title, summary: episode.summary ?? "", hashtags: body.data.hashtags };
+    // The browser may still hold an old draft title. Commit only the canonical
+    // row saved by the episode transaction, never caller-provided metadata.
+    const publicationMetadata = {
+      title: episode.title,
+      summary: episode.summary ?? "",
+      hashtags: (episode.instagramHashtags ?? []).slice(0, 3),
+    };
     try {
       assembleYoutubeTrailerTitle(publicationMetadata);
     } catch (error) {
@@ -942,7 +952,10 @@ episodesRouter.post("/:episodeId/youtube-trailer-jobs/commit", noStoreYoutubeTra
     const requested = youtubeTrailerJobRepository.requestPublication(current, publicationMetadata);
     const snapshot = requested ?? current;
     if (snapshot.status === "ready" || snapshot.publicationStatus === "public_confirmed") {
-      await publishYoutubeTrailer(episodeId, snapshot.jobId, body.data);
+      await publishYoutubeTrailer(episodeId, snapshot.jobId, {
+        title: publicationMetadata.title,
+        hashtags: publicationMetadata.hashtags,
+      });
     }
     res.status(snapshot.status === "ready" ? 200 : 202).json(toYoutubeTrailerJobStatusDto(snapshot));
   } catch (error) {
