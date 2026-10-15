@@ -141,9 +141,8 @@ const cleanupManifestFixture = async (manifestPath: string, expectedMode: "hold-
         assert.deepEqual(journals.map(({ episode_id, candidate_id, phase }) => ({ episode_id, candidate_id, phase })), [{ episode_id: episodeIds[0], candidate_id: candidateIds[0], phase: "committed" }]);
         assert.equal(manifest.relatedRows.find((row: any) => row.table === "trailer_promotion_journals").keys[0].journal_id, journals[0].journal_id);
       }
-      const effects = database.prepare("SELECT episode_id, destination FROM episode_publication_effects ORDER BY destination").all() as Array<{ episode_id: number; destination: string }>;
-      assert.equal(effects.every((row) => row.episode_id === episodeIds[0] && ["facebook_native_video", "instagram_reel"].includes(row.destination)), true);
-      if (strict) assert.deepEqual(effects.map(({ episode_id, destination }) => ({ episode_id, destination })), [{ episode_id: episodeIds[0], destination: "facebook_native_video" }, { episode_id: episodeIds[0], destination: "instagram_reel" }]);
+      const effects = database.prepare("SELECT episode_id, destination FROM episode_publication_effects ORDER BY destination").all();
+      assert.deepEqual(effects, [], "candidate approval must leave no social delivery effect");
       assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT journal_id, episode_id, candidate_id, phase, new_sha256 FROM trailer_promotion_journals ORDER BY journal_id").all())), manifest.relatedRows.find((row: any) => row.table === "trailer_promotion_journals").keys);
       assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT intent_id, episode_id, source_revision FROM episode_publication_intents ORDER BY intent_id").all())), manifest.relatedRows.find((row: any) => row.table === "episode_publication_intents").keys);
       assert.deepEqual(JSON.parse(JSON.stringify(database.prepare("SELECT effect_key, intent_id, episode_id, destination, source_revision, lifecycle FROM episode_publication_effects ORDER BY destination").all())), manifest.relatedRows.find((row: any) => row.table === "episode_publication_effects").keys);
@@ -242,8 +241,8 @@ const main = async (): Promise<void> => {
       { table: "trailer_candidate_attempts", keys: candidateIds.map((candidate_id, index) => ({ attempt_id: attemptIds[index], candidate_id, attempt_number: 1, status: "ready" })) },
       { table: "trailer_candidate_decisions", keys: [{ candidate_id: candidateIds[0], episode_id: episodeIds[0], decision: "approved", expected_version: 1, expected_source_fingerprint: sourceFingerprints[0] }] },
       { table: "trailer_promotion_journals", keys: [{ journal_id: journalId, episode_id: episodeIds[0], candidate_id: candidateIds[0], phase: "committed", new_sha256: hash(outputBytes[0]) }] },
-      { table: "episode_publication_intents", keys: [{ intent_id: `episode:${episodeIds[0]}:${approvedSourceRevision}`, episode_id: episodeIds[0], source_revision: approvedSourceRevision }] },
-      { table: "episode_publication_effects", keys: ["facebook_native_video", "instagram_reel"].map((destination) => ({ effect_key: `episode:${episodeIds[0]}:${approvedSourceRevision}:${destination}`, intent_id: `episode:${episodeIds[0]}:${approvedSourceRevision}`, episode_id: episodeIds[0], destination, source_revision: approvedSourceRevision, lifecycle: "published" })) },
+      { table: "episode_publication_intents", keys: [] },
+      { table: "episode_publication_effects", keys: [] },
     ],
     mode: hold ? "hold-for-admin-smoke" : "default-cleanup",
   };
@@ -318,9 +317,6 @@ const main = async (): Promise<void> => {
       import("../database/sqlite.js"),
       import("../database/repositories/episode-promotion.repository.js"), import("../database/repositories/episode-publication.repository.js"),
     ]);
-    const publication = require("../services/episode-publication.service.js") as {
-      dispatchEpisodeReplacementPublication: typeof import("../services/episode-publication.service.js").dispatchEpisodeReplacementPublication;
-    };
     assert.equal(config.auth.bypassInDev, false, "the verifier must exercise normal bearer-token authentication");
     assert.deepEqual([
       config.meta.userAccessToken, config.meta.pageAccessToken, config.meta.systemUserAccessToken,
@@ -332,17 +328,6 @@ const main = async (): Promise<void> => {
     config.promotion.enabled = false;
     config.promotion.legacyLaunchEnabled = false;
 
-    const originalDispatch = publication.dispatchEpisodeReplacementPublication;
-    const fakeProvider = {
-      async createInstagramContainer() { fakeProviderCalls += 1; return { id: "fixture-instagram-container", status: "IN_PROGRESS" }; },
-      async getInstagramContainer() { fakeProviderCalls += 1; return { id: "fixture-instagram-container", status: "FINISHED" }; },
-      async publishInstagramContainer() { fakeProviderCalls += 1; return { id: "fixture-instagram-media", status: "FINISHED", permalink: "https://example.test/fake/instagram" }; },
-      async uploadFacebookVideo() { fakeProviderCalls += 1; return { id: "fixture-facebook-video", status: "PROCESSING" }; },
-      async getFacebookVideo() { fakeProviderCalls += 1; return { id: "fixture-facebook-video", status: "ready" }; },
-      async publishFacebookVideo() { fakeProviderCalls += 1; return { id: "fixture-facebook-video", status: "FINISHED", permalink: "https://example.test/fake/facebook" }; },
-    };
-    publication.dispatchEpisodeReplacementPublication = async (episodeId: number, sourceRevision: string) =>
-      originalDispatch(episodeId, sourceRevision, fakeProvider as any);
     const router = episodesRouter as unknown as Router;
     const token = signAccessToken({ email: operatorEmail });
     const authHeaders = { authorization: `Bearer ${token}` };
@@ -455,12 +440,10 @@ const main = async (): Promise<void> => {
     const canonicalPath = media.getEpisodeMediaFinalPath(episodeIds[0], "trailerVideo");
     assert.deepEqual(await fs.promises.readFile(canonicalPath), outputBytes[0], "canonical file must exactly match the approved manifest candidate");
     assert.equal(hash(await fs.promises.readFile(canonicalPath)), approvedEntry.candidate.outputSha256);
-    assert.equal(fakeProviderCalls > 0, true, "approved replacement must reach fake-only destination adapters");
+    assert.equal(fakeProviderCalls, 0, "approved candidate must not reach any external destination adapter");
     assert.equal(networkCalls, 0, "the composite verifier makes no outbound network calls");
     const effects = publicationRepoModule.episodePublicationRepository.list(episodeIds[0]);
-    assert.equal(effects.length, 2);
-    assert.deepEqual(effects.map((effect: any) => effect.destination).sort(), ["facebook_native_video", "instagram_reel"]);
-    assert.equal(fakeProviderCalls > 0, true, "real provider adapters are not available to this fixture");
+    assert.equal(effects.length, 0, "approval must not create social delivery rows");
     const promotionEffectsBeforeReplay = promotionRepoModule.episodePromotionRepository.findPromotionIntent(`episode:${episodeIds[0]}`)?.effects.length ?? 0;
     const fakeProviderCallsBeforeReplay = fakeProviderCalls;
     const replay = await invoke(router, "post", "/:episodeId/trailer-candidates/:candidateId/decision", new Request({
@@ -468,7 +451,7 @@ const main = async (): Promise<void> => {
     }, approvalBody, authHeaders));
     assert.equal(replay.statusCode, 200);
     assert.equal(replay.jsonBody.status, "replayed");
-    assert.equal(publicationRepoModule.episodePublicationRepository.list(episodeIds[0]).length, 2, "replay must not duplicate destination effects");
+    assert.equal(publicationRepoModule.episodePublicationRepository.list(episodeIds[0]).length, 0, "replay remains publication-free");
     assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM trailer_candidate_decisions WHERE candidate_id = ?").get(candidateIds[0])?.count ?? 0, 1,
       "exactly one approval decision row must exist");
     assert.equal(getDb().prepare("SELECT COUNT(*) AS count FROM trailer_candidate_decisions WHERE candidate_id = ?").get(candidateIds[1])?.count ?? 0, 0,

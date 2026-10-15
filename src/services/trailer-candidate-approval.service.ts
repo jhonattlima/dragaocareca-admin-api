@@ -5,15 +5,10 @@ import { config } from "../config/env";
 import { trailerCandidateRepository, type TrailerCandidateRow } from "../database/repositories/trailer-candidate.repository";
 import { trailerPromotionJournalRepository, type TrailerPromotionJournal } from "../database/repositories/trailer-promotion-journal.repository";
 import { episodeRepository, withImmediateTransaction } from "../database/repositories/episode.repository";
-import { episodePromotionRepository } from "../database/repositories/episode-promotion.repository";
 import { getDb, nowIso } from "../database/sqlite";
 import { getEpisodeMediaFinalPath, getEpisodeMediaRelativePath, getEpisodeMediaStagingPath } from "./episode-media-layout.service";
-import { getPromotionRequestFingerprint, buildEpisodePromotionRequest, type PromotionTransport } from "./episode-promotion.service";
-import { dispatchPromotionAfterCommit } from "./episode-promotion-save.service";
 import { trailerCandidateStoragePath, trailerCandidateSourcesStillCurrent } from "./trailer-candidate.service";
 import { withEpisodeSourceMutationLock } from "./episode-source-mutation-lock.service";
-import { createEpisodeReplacementPublicationInTransaction, dispatchEpisodeReplacementPublication } from "./episode-publication.service";
-import type { MetaPublicationProvider } from "./meta-publication.provider";
 import { obsoleteYoutubeTrailerJobsForCurrentSource, cleanupYoutubeTrailerVideos } from "./youtube-trailer-job.service";
 
 export type TrailerCandidateDecision = "approve" | "reject";
@@ -24,8 +19,6 @@ export type TrailerCandidateDecisionInput = {
   expectedSourceFingerprint: string;
   expectedVersion: number;
   actorEmail: string;
-  transport?: PromotionTransport;
-  metaProvider?: MetaPublicationProvider;
   faultAt?: "after_journal" | "after_backup" | "after_install" | "during_commit" | "after_commit";
 };
 export type TrailerCandidateDecisionResult =
@@ -103,36 +96,10 @@ const commitFinalization = (journal: TrailerPromotionJournal): void => {
     });
     if (!updated) throw new Error("Episode metadata could not be finalized");
 
-    if (journal.candidateId) {
-      const candidate = trailerCandidateRepository.findById(journal.candidateId);
-      if (!candidate) throw new Error("Approved candidate is unavailable");
-      const decision = getDb().prepare("SELECT decision FROM trailer_candidate_decisions WHERE candidate_id = ?").get(journal.candidateId) as { decision: string } | undefined;
-      if (decision?.decision !== "approved") throw new Error("Candidate approval record is unavailable");
-      const request = buildEpisodePromotionRequest({
-        episodeId: episode.episodeId,
-        title: episode.title,
-        episodeNumber: episode.episodeNumber,
-        publicDownloadUrl: `${config.feed.audioBase.replace(/\/+$/, "")}/episodes/${episode.episodeId}/audio.mp3`,
-        imageUrl: `${config.feed.imageBase}${episode.coverFileName ?? `episodes/${episode.episodeId}/cover.jpeg`}`,
-        trailerMediaReference: getEpisodeMediaRelativePath(episode.episodeId, "trailerVideo"),
-        trailerSha256: journal.newSha256,
-        trailerByteCount: candidate.outputBytes ?? 1,
-      });
-      episodePromotionRepository.upsertPromotionIntent({
-        request,
-        requestFingerprint: getPromotionRequestFingerprint(request),
-        withinTransaction: true,
-      });
-      createEpisodeReplacementPublicationInTransaction({
-        episode: updated,
-        source: {
-          mediaReference: getEpisodeMediaRelativePath(episode.episodeId, "trailerVideo"),
-          sha256: journal.newSha256,
-          byteCount: candidate.outputBytes ?? 1,
-          mimeType: "video/mp4",
-        },
-      });
-    }
+    // Candidate approval only promotes private media. The draft can carry a
+    // placeholder title, so creating publication snapshots here would make
+    // that transient metadata externally deliverable. The final Save owns
+    // every promotion and social-publication snapshot.
     getDb().prepare("UPDATE trailer_promotion_journals SET phase = 'committed', updated_at = ? WHERE journal_id = ?").run(nowIso(), journal.journalId);
   });
 };
@@ -312,15 +279,12 @@ const decideTrailerCandidateExclusive = async (input: TrailerCandidateDecisionIn
     persistDecisionAndJournal(candidate, actorEmail, "approve", journalId, old?.sha256 ?? null, old !== null);
     if (input.faultAt === "after_journal") throw new Error("Injected trailer promotion failure after journal commit");
     await reconcileTrailerPromotionJournal(journalId, input.faultAt);
-    const requestId = `episode:${candidate.episodeId}`;
-    await dispatchPromotionAfterCommit(requestId, input.transport);
     const sourceRevision = (await import("../schemas/episode-publication.js")).publicationSourceRevision(candidate.episodeId, {
       mediaReference: getEpisodeMediaRelativePath(candidate.episodeId, "trailerVideo"),
       sha256: candidate.outputSha256 as string,
       byteCount: candidate.outputBytes as number,
       mimeType: "video/mp4",
     });
-    await dispatchEpisodeReplacementPublication(candidate.episodeId, sourceRevision, input.metaProvider);
     return { status: "approved", candidateId: candidate.candidateId, episodeId: candidate.episodeId, version: candidate.version, sourceFingerprint: candidate.sourceFingerprint, sourceRevision };
   } catch (error) {
     const journal = trailerPromotionJournalRepository.findByCandidate(candidate.candidateId);

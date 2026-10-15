@@ -161,18 +161,16 @@ const main = async (): Promise<void> => {
     assert.equal(await fs.promises.readFile(finalPath, "utf8"), `candidate-output-${target.episodeId}`);
     assert.equal(episodeRepository.findByEpisodeId(target.episodeId)?.trailerVideoFileName, `episodes/${target.episodeId}/trailer.mp4`);
     assert.equal((getDb().prepare("SELECT actor_email, decision FROM trailer_candidate_decisions WHERE candidate_id = ?").get(target.candidateId) as any).actor_email, "dev-bypass@local");
-    const notification = episodePromotionRepository.findPromotionIntent(`episode:${target.episodeId}`);
-    assert.ok(notification);
-    assert.equal(notification?.effects.filter((effect: any) => effect.sourceRevision === notification.notification.sourceRevision).length, 2);
-    const replacementEffects = episodePublicationRepository.list(target.episodeId);
-    assert.equal(replacementEffects.length, 0, "disabled destinations must not receive publication rows");
-    assert.equal(transportCalls, 0, "the feature-disabled verifier must not dispatch a live handoff");
+    assert.equal(episodePromotionRepository.findPromotionIntent(`episode:${target.episodeId}`), null, "draft candidate approval must not create a Telegram promotion intent");
+    assert.equal(episodePublicationRepository.list(target.episodeId).length, 0, "draft candidate approval must not create social publication effects");
+    assert.equal(transportCalls, 0, "candidate approval must not dispatch a Telegram handoff");
+    assert.deepEqual(metaCalls, { instagram: 0, facebook: 0 }, "candidate approval must not call a Meta provider");
     const replay = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
       episodeId: target.episodeId, candidateId: target.candidateId, decision: "approve",
       expectedSourceFingerprint: target.sourceFingerprint, expectedVersion: target.version, actorEmail: "operator@example.test",
     });
     assert.equal(replay.status, "replayed");
-    assert.equal(transportCalls, 0);
+    assert.equal(transportCalls, 0, "approval replay must remain media-only");
     config.meta.instagramEnabled = false;
     config.meta.facebookReelEnabled = false;
 
@@ -258,58 +256,6 @@ const main = async (): Promise<void> => {
     });
     assert.deepEqual(wrongFingerprint, { status: "conflict", code: "fingerprint_mismatch" });
 
-    config.meta.instagramEnabled = true;
-    config.meta.facebookReelEnabled = true;
-    const fakeDispatchCandidate = await createReadyCandidate(981004, "cover-fake", "audio-fake");
-    const fakeDispatch = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
-      episodeId: fakeDispatchCandidate.episodeId, candidateId: fakeDispatchCandidate.candidateId, decision: "approve",
-      expectedSourceFingerprint: fakeDispatchCandidate.sourceFingerprint, expectedVersion: fakeDispatchCandidate.version,
-      actorEmail: "operator@example.test",
-      metaProvider: {
-        async createInstagramContainer() { metaCalls.instagram += 1; return { id: "fake-instagram-container" }; },
-        async getInstagramContainer() { metaCalls.instagram += 1; return { id: "fake-instagram-container", status: "FINISHED" }; },
-        async publishInstagramContainer() { metaCalls.instagram += 1; return { id: "fake-instagram-published", permalink: "https://example.test/ig" }; },
-        async uploadFacebookVideo() { metaCalls.facebook += 1; return { id: "fake-facebook-upload" }; },
-        async getFacebookVideo() { metaCalls.facebook += 1; return { id: "fake-facebook-upload", status: "upload_complete" }; },
-        async publishFacebookVideo() { metaCalls.facebook += 1; return { id: "fake-facebook-published", permalink: "https://example.test/fb" }; },
-      },
-      transport: {
-        async sendPromotion(_request, effects) {
-          transportCalls += 1;
-          return { contract_version: "episode-promotion.v1", notification_id: `episode:${fakeDispatchCandidate.episodeId}`, status: "complete", effects: effects.map((effect) => ({ destination: effect.destination, status: "complete", acknowledged_at: new Date().toISOString() })) };
-        },
-      },
-    });
-    assert.equal(fakeDispatch.status, "approved");
-    assert.equal(transportCalls, 1, "the fake Telegram handoff is dispatched exactly once after commit");
-    assert.deepEqual(metaCalls, { instagram: 3, facebook: 2 });
-    const fakeMetaEffects = episodePublicationRepository.list(fakeDispatchCandidate.episodeId);
-    assert.deepEqual(fakeMetaEffects.map((effect: any) => effect.destination).sort(), ["facebook_native_video", "instagram_reel"]);
-    assert.equal(new Set(fakeMetaEffects.map((effect: any) => effect.sourceRevision)).size, 1);
-    assert.equal(fakeMetaEffects.every((effect: any) => effect.lifecycle === "published"), true, "both enabled fake destinations complete the approved revision");
-    config.meta.instagramEnabled = true;
-    config.meta.facebookReelEnabled = false;
-    const instagramOnly = await createReadyCandidate(981009, "cover-ig", "audio-ig");
-    const instagramOnlyApproval = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
-      episodeId: instagramOnly.episodeId, candidateId: instagramOnly.candidateId, decision: "approve",
-      expectedSourceFingerprint: instagramOnly.sourceFingerprint, expectedVersion: instagramOnly.version,
-      actorEmail: "operator@example.test",
-      metaProvider: {
-        async createInstagramContainer() { return { id: "fake-ig-only-container" }; },
-        async getInstagramContainer() { return { id: "fake-ig-only-container", status: "FINISHED" }; },
-        async publishInstagramContainer() { return { id: "fake-ig-only-published" }; },
-        async uploadFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-        async getFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-        async publishFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-      },
-    });
-    assert.equal(instagramOnlyApproval.status, "approved");
-    assert.deepEqual(episodePublicationRepository.list(instagramOnly.episodeId).map((effect: any) => effect.destination), ["instagram_reel"]);
-    config.meta.instagramEnabled = false;
-    config.meta.facebookReelEnabled = false;
-
-    config.meta.instagramEnabled = true;
-    config.meta.facebookReelEnabled = true;
     const afterCommit = await createReadyCandidate(981010, "cover-after-commit", "audio-after-commit");
     const afterCommitFinal = media.getEpisodeMediaFinalPath(afterCommit.episodeId, "trailerVideo");
     await fs.promises.mkdir(path.dirname(afterCommitFinal), { recursive: true });
@@ -323,30 +269,16 @@ const main = async (): Promise<void> => {
     assert.deepEqual(interruptedAfterCommit, { status: "conflict", code: "finalization_blocked" });
     assert.equal(await fs.promises.readFile(afterCommitFinal, "utf8"), `candidate-output-${afterCommit.episodeId}`);
     assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE candidate_id = ?").get(afterCommit.candidateId)?.phase, "committed");
-    assert.deepEqual(metaCalls, providerCallsBeforeCommitCrash, "no Meta dispatcher may run before the approval commit returns");
-    assert.equal(episodePublicationRepository.listDueSocialEffects().filter((row: any) => row.episodeId === afterCommit.episodeId).length, 2, "eligible replacement effects remain restart-dispatchable after commit");
+    assert.deepEqual(metaCalls, providerCallsBeforeCommitCrash, "no Meta dispatcher may run from candidate approval");
+    assert.equal(episodePublicationRepository.list(afterCommit.episodeId).length, 0, "a committed draft candidate creates no social effect");
     await (await import("../services/trailer-candidate-approval.service.js")).recoverTrailerPromotionJournals();
     const afterCommitBackups = (await fs.promises.readdir(path.dirname(afterCommitFinal))).filter((name) => name.startsWith(".trailer.mp4.backup-"));
     assert.equal(afterCommitBackups.length, 0, "startup cleanup removes the old file only after the approval transaction commits");
-    const { dispatchEpisodeReplacementPublication } = await import("../services/episode-publication.service.js");
-    const restartDelivery = await dispatchEpisodeReplacementPublication(afterCommit.episodeId, episodePublicationRepository.list(afterCommit.episodeId)[0].sourceRevision, {
-      async createInstagramContainer() { metaCalls.instagram += 1; return { id: "restart-ig-container" }; },
-      async getInstagramContainer() { metaCalls.instagram += 1; return { id: "restart-ig-container", status: "FINISHED" }; },
-      async publishInstagramContainer() { metaCalls.instagram += 1; return { id: "restart-ig-published" }; },
-      async uploadFacebookVideo() { metaCalls.facebook += 1; return { id: "restart-fb-upload" }; },
-      async getFacebookVideo() { metaCalls.facebook += 1; return { id: "restart-fb-upload", status: "upload_complete" }; },
-      async publishFacebookVideo() { metaCalls.facebook += 1; return { id: "restart-fb-published" }; },
-    });
-    assert.equal(restartDelivery.every((effect: any) => effect.lifecycle === "published"), true);
-    const effectsAfterRestartDelivery = getDb().prepare("SELECT COUNT(*) AS count FROM episode_publication_effects WHERE episode_id = ?").get(afterCommit.episodeId)?.count;
-    assert.equal(effectsAfterRestartDelivery, 2);
     const replayAfterCommit = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
       episodeId: afterCommit.episodeId, candidateId: afterCommit.candidateId, decision: "approve",
       expectedSourceFingerprint: afterCommit.sourceFingerprint, expectedVersion: afterCommit.version, actorEmail: "operator@example.test",
     });
     assert.equal(replayAfterCommit.status, "replayed");
-    config.meta.instagramEnabled = false;
-    config.meta.facebookReelEnabled = false;
 
     const { recoverTrailerPromotionJournals } = await import("../services/trailer-candidate-approval.service.js");
     const recoveryCases = [
@@ -425,8 +357,6 @@ const main = async (): Promise<void> => {
     assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE episode_id = ? AND candidate_id IS NULL").get(manualEpisodeId)?.phase, "committed", "manual upload must share the durable finalization journal");
     assert.equal(episodePublicationRepository.list(manualEpisodeId).length, 0, "manual upload keeps its existing no-dispatch semantics");
 
-    config.meta.instagramEnabled = true;
-    config.meta.facebookReelEnabled = false;
     const concurrent = await createReadyCandidate(981011, "cover-concurrent", "audio-concurrent");
     const concurrentFinal = media.getEpisodeMediaFinalPath(concurrent.episodeId, "trailerVideo");
     const concurrentStage = media.getEpisodeMediaStagingPath(concurrent.episodeId, "trailerVideo");
@@ -434,38 +364,18 @@ const main = async (): Promise<void> => {
     await fs.promises.writeFile(concurrentFinal, "old-concurrent-canonical");
     await fs.promises.mkdir(path.dirname(concurrentStage), { recursive: true });
     await fs.promises.writeFile(concurrentStage, "manual-wins-after-approval");
-    let markInstagramStarted: () => void = () => undefined;
-    const instagramStarted = new Promise<void>((resolve) => { markInstagramStarted = resolve; });
-    let releaseInstagram: () => void = () => undefined;
-    const instagramRelease = new Promise<void>((resolve) => { releaseInstagram = resolve; });
-    const concurrentApproval = (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
+    const concurrentApproval = await (await import("../services/trailer-candidate-approval.service.js")).decideTrailerCandidate({
       episodeId: concurrent.episodeId, candidateId: concurrent.candidateId, decision: "approve",
       expectedSourceFingerprint: concurrent.sourceFingerprint, expectedVersion: concurrent.version,
       actorEmail: "operator@example.test",
-      metaProvider: {
-        async createInstagramContainer() { markInstagramStarted(); await instagramRelease; return { id: "concurrent-ig-container" }; },
-        async getInstagramContainer() { return { id: "concurrent-ig-container", status: "FINISHED" }; },
-        async publishInstagramContainer() { return { id: "concurrent-ig-published" }; },
-        async uploadFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-        async getFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-        async publishFacebookVideo() { throw new Error("disabled Facebook destination was called"); },
-      },
     });
-    await instagramStarted;
-    let manualCompleted = false;
-    const concurrentManual = trailerVideoService.replaceEpisodeTrailerVideo(concurrent.episodeId, concurrentStage)
-      .then((value: any) => { manualCompleted = true; return value; });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(manualCompleted, false, "manual replacement must wait while candidate approval owns the episode finalization lock");
+    assert.equal(concurrentApproval.status, "approved");
     assert.equal(await fs.promises.readFile(concurrentFinal, "utf8"), `candidate-output-${concurrent.episodeId}`);
-    releaseInstagram();
-    assert.equal((await concurrentApproval).status, "approved");
-    assert.equal((await concurrentManual)?.trailerVideoFileName, `episodes/${concurrent.episodeId}/trailer.mp4`);
+    assert.equal((await trailerVideoService.replaceEpisodeTrailerVideo(concurrent.episodeId, concurrentStage))?.trailerVideoFileName, `episodes/${concurrent.episodeId}/trailer.mp4`);
     assert.equal(await fs.promises.readFile(concurrentFinal, "utf8"), "manual-wins-after-approval", "serialized manual replacement must not be overwritten by the older approval");
     assert.equal(getDb().prepare("SELECT phase FROM trailer_promotion_journals WHERE episode_id = ? AND candidate_id IS NULL").get(concurrent.episodeId)?.phase, "committed");
-    assert.equal(episodePublicationRepository.list(concurrent.episodeId).length, 1, "only the approved replacement creates a Meta effect; manual finalization adds none");
-    config.meta.instagramEnabled = false;
-    assert.equal(transportCalls, 1, "rejection, stale, replay, and invalid decisions must not dispatch extra effects");
+    assert.equal(episodePublicationRepository.list(concurrent.episodeId).length, 0, "candidate and manual replacement remain publication-free before Save");
+    assert.equal(transportCalls, 0, "rejection, stale, replay, and invalid decisions must not dispatch external effects");
     assert.equal((await fs.promises.readdir(fixture.root)).some((name) => name.includes("production")), false);
     console.log("trailer candidate approval passed: authenticated CAS, output/source validation, canonical replacement, journal restart recovery, replay, rejection isolation, stale conflicts, and fake-only after-commit handoff");
   } finally {
