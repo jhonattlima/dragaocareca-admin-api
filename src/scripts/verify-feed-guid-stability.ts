@@ -41,11 +41,17 @@ const legacy = {
 };
 const current = { ...baseEpisode(364), title: "Current item", fileName: "episode_364.mp3" };
 const future = { ...baseEpisode(365), title: "Future item", fileName: "episode_365.mp3" };
+const structuredGuest = {
+  ...baseEpisode(366),
+  title: "Structured guest item",
+  guests: [JSON.stringify({ name: "Pedro Vaal", links: [{ label: "Instagram", url: "https://www.instagram.com/pedrovaal" }] })],
+};
 
-const xml = buildFeedXml([legacy, current, future]);
+const xml = buildFeedXml([legacy, current, future, structuredGuest]);
 const legacyItem = itemFor(xml, legacy.title);
 const currentItem = itemFor(xml, current.title);
 const futureItem = itemFor(xml, future.title);
+const structuredGuestItem = itemFor(xml, structuredGuest.title);
 
 assert.deepEqual(guidFor(legacyItem), { value: legacyGuid, isPermalink: null });
 assert.match(legacyItem, /<enclosure url="https?:\/\/[^"]+\/media\/episodes\/356\/audio\.mp3"/u);
@@ -55,5 +61,8 @@ assert.deepEqual(guidFor(currentItem), { value: "364", isPermalink: "false" });
 
 assert.deepEqual(guidFor(futureItem), { value: "365", isPermalink: "false" });
 assert.match(futureItem, /<enclosure url="https?:\/\/[^"]+\/media\/episodes\/365\/audio\.mp3"/u);
+
+assert.match(structuredGuestItem, /Pedro Vaal:\s*<a href="https:\/\/www\.instagram\.com\/pedrovaal">\[Instagram\]<\/a>/u);
+assert.equal(structuredGuestItem.includes("&quot;name&quot;"), false, "structured guest JSON never leaks into the feed description");
 
 console.log("Feed GUID stability verified.");

@@ -91,12 +91,37 @@ const structuredMusicCredit = (value: string): { name: string; links: Array<[str
   }
 };
 
+const structuredGuest = (value: string): { name: string; links: Array<[string, string]> } | null => {
+  const fallbackName = value.trim();
+  if (!fallbackName) return null;
+
+  try {
+    const parsed = JSON.parse(value) as { name?: unknown; links?: unknown };
+    if (typeof parsed.name !== "string" || !parsed.name.trim()) return { name: fallbackName, links: [] };
+    const links = Array.isArray(parsed.links) ? parsed.links.flatMap((link) => {
+      if (!link || typeof link !== "object") return [];
+      const item = link as { label?: unknown; url?: unknown };
+      const label = typeof item.label === "string" && item.label.trim() ? item.label.trim() : "link";
+      const rawUrl = typeof item.url === "string" ? item.url.trim() : "";
+      // Contact catalogs may contain host/path without a scheme (e.g. instagram.com/name).
+      const url = /^https?:\/\//iu.test(rawUrl) ? rawUrl : rawUrl ? `https://${rawUrl.replace(/^\/\//u, "")}` : "";
+      return url ? [[label, url] as [string, string]] : [];
+    }) : [];
+    return { name: parsed.name.trim(), links };
+  } catch {
+    return { name: fallbackName, links: [] };
+  }
+};
+
 const episodeDescription = (episode: Pick<EpisodeRow, "summary" | "authors" | "guests" | "coverCredits" | "musicCredits">): string => {
   const supportCallout = `🐉 Guilda do Dragão Careca 🐉: Torne-se um integrante da nossa guilda! Descubra sobre os cargos e recompensas: ${config.public.supportersLink}`;
   const body = episode.summary?.trim() ? `<p>${escapeHtml(episode.summary.trim()).replace(/\r?\n/g, "<br>")}</p>` : "";
-  const guests = episode.guests.map((name) => {
-    const contact = AUTHOR_CONTACTS[name];
-    return `${escapeHtml(name)}${contact ? `: ${linksHtml(contact.links)}` : ""}`;
+  const guests = episode.guests.flatMap((value) => {
+    const guest = structuredGuest(value);
+    if (!guest) return [];
+    const contact = AUTHOR_CONTACTS[guest.name];
+    const links = guest.links.length > 0 ? guest.links : contact?.links ?? [];
+    return [`${escapeHtml(guest.name)}${links.length > 0 ? `: ${linksHtml(links)}` : ""}`];
   });
   const covers = episode.coverCredits.map((name) => {
     const contact = AUTHOR_CONTACTS[name];
