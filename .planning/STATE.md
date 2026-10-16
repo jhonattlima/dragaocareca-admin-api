@@ -4,9 +4,9 @@ milestone: v1.4
 milestone_name: Trailer Video Publishing
 status: Awaiting next milestone
 stopped_at: Completed 17-05-PLAN.md
-last_updated: "2026-08-21T12:43:08.113Z"
-last_activity: 2026-08-21
-last_activity_desc: Milestone v1.4 completed and archived
+last_updated: "2026-10-16T20:26:28.448Z"
+last_activity: 2026-10-16
+last_activity_desc: Completed fast task: corrigir renderização de convidados estruturados no feed RSS
 progress:
   total_phases: 4
   completed_phases: 4
@@ -131,6 +131,7 @@ Recent decisions affecting current work:
 | 261003-4no | Prevent Instagram hashtag overflow on new and retried publication effects | 2026-10-03 | 305cc3e | [261003-4no](./quick/261003-4no-prevent-instagram-hashtag-overflow-on-ne/) |
 | 261009-fq7 | Corrigir publicação social antecipada e metadados Draft em episódios agendados | 2026-10-09 | a9f9bc0 | [261009-fq7](../../dragaocareca-ecosystem/.planning/quick/261009-fq7-corrigir-publica-o-antecipada-de-faceboo/) |
 | 261009-lr9 | Corrigir recuperação de container Instagram ainda em processamento | 2026-10-09 | a9b811e | [261009-lr9](../../dragaocareca-ecosystem/.planning/quick/261009-lr9-corrigir-entrega-ausente-do-instagram-ap/) |
+| 4 | corrigir renderização de convidados estruturados no feed RSS | 2026-10-16 | 56bf472 | — |
 
 ### Roadmap Evolution
 
