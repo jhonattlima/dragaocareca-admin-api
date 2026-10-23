@@ -375,6 +375,66 @@ const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
   assert.equal(overlapProvider.events.filter((event) => event === "begin-session").length, 1, "worker startup must not overlap one source transfer");
 };
 
+const verifyPublicationRetryDoesNotBlockPrivateTransfer = async (fixture: Fixture): Promise<void> => {
+  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+    import("../database/sqlite.js"),
+    import("../services/youtube-trailer-job.service.js"),
+    import("../workers/youtube-trailer-job.worker.js"),
+  ]);
+  const oldEpisodeId = 40;
+  const transferEpisodeId = 41;
+  const laterTransferEpisodeId = 42;
+  // Earlier lifecycle cases deliberately leave recoverable rows behind. This
+  // regression has a dedicated queue so it can prove its ordering without
+  // inheriting another scenario's FIFO candidates.
+  getDb().prepare("UPDATE youtube_trailer_jobs SET status = 'obsolete' WHERE status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested')").run();
+  for (const episodeId of [oldEpisodeId, transferEpisodeId, laterTransferEpisodeId]) {
+    getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(episodeId, `Queue fixture ${episodeId}`, "2026-08-04T00:00:00.000Z");
+    const trailerPath = path.join(fixture.mediaRoot, "episodes", String(episodeId), "trailer.mp4");
+    await fs.promises.mkdir(path.dirname(trailerPath), { recursive: true });
+    await fs.promises.writeFile(trailerPath, Buffer.from(`video-${episodeId}`));
+  }
+
+  const oldReady = await createYoutubeTrailerJob(oldEpisodeId, {
+    title: "Old retry",
+    summary: "Old retry summary",
+    hashtags: ["#one", "#two", "#three", "#four"],
+  });
+  getDb().prepare(`
+    UPDATE youtube_trailer_jobs
+    SET status = 'ready', provider_video_id = 'fake-private-video-1', provider_privacy_status = 'private',
+      provider_upload_status = 'processed', provider_processing_status = 'succeeded',
+      publication_requested_at = ?, revision = revision + 1
+    WHERE episode_id = ? AND job_id = ?
+  `).run(new Date(Date.now() - 60_000).toISOString(), oldEpisodeId, oldReady.jobId);
+
+  const transfer = await createYoutubeTrailerJob(transferEpisodeId);
+  const provider = new FakeYoutubeTrailerUploadProvider();
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  assert.equal(getYoutubeTrailerJob(transferEpisodeId, transfer.jobId)?.status, "processing", "a queued private transfer must win over an older requested publication retry");
+  assert.equal(getYoutubeTrailerJob(oldEpisodeId, oldReady.jobId)?.status, "ready", "the older publication retry must not run before the private transfer");
+
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  assert.equal(getYoutubeTrailerJob(transferEpisodeId, transfer.jobId)?.status, "ready", "private processing must still complete normally before publication retries");
+
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  const failedPublication = getYoutubeTrailerJob(oldEpisodeId, oldReady.jobId);
+  assert.equal(failedPublication?.publicationStatus, "failed", "a publication exception before provider access must persist as a retryable failure");
+  assert.equal(failedPublication?.errorCategory, "network", "the persisted failure must use an operator-safe category");
+  assert.equal(failedPublication?.errorMessage, "YouTube trailer publication retry failed.", "the persisted failure must not retain the raw metadata/provider error");
+  const serialized = JSON.stringify(toYoutubeTrailerJobStatusDto(failedPublication!));
+  for (const sensitive of ["errorMessage", "#four"]) {
+    assert.equal(serialized.includes(sensitive), false, `public job status must not expose ${sensitive}`);
+  }
+
+  const laterTransfer = await createYoutubeTrailerJob(laterTransferEpisodeId);
+  await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
+  assert.ok(
+    ["transferring", "processing"].includes(getYoutubeTrailerJob(laterTransferEpisodeId, laterTransfer.jobId)?.status ?? ""),
+    "a failed publication retry must not head-of-line block a later private transfer"
+  );
+};
+
 const verifyProtectedRouteAndOpenApiFocus = async (fixture: Fixture): Promise<void> => {
   const [{ config }, { swaggerSpec }, { getDb }, routeModule] = await Promise.all([
     import("../config/env.js"),
@@ -486,10 +546,12 @@ const main = async (): Promise<void> => {
     if (focus === "worker") {
       await verifyWorkerFocus();
       await verifyRealWorkerFocus(fixture);
+      await verifyPublicationRetryDoesNotBlockPrivateTransfer(fixture);
     }
     if (!focus) {
       await verifyWorkerFocus();
       await verifyRealWorkerFocus(fixture);
+      await verifyPublicationRetryDoesNotBlockPrivateTransfer(fixture);
       await verifyMetadataAndSafeOutput(fixture);
       await verifyProtectedRouteAndOpenApiFocus(fixture);
       await verifyFailureRetryAndPublicationBoundary();

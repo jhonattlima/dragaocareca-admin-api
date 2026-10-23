@@ -482,6 +482,26 @@ export const youtubeTrailerJobRepository = {
     `).all(referenceTime.toISOString()) as SqliteYoutubeTrailerJobRow[]).map((row) => mapRow(row) as YoutubeTrailerJobRow);
   },
 
+  listTransferCandidates(referenceTime = new Date()): YoutubeTrailerJobRow[] {
+    return (getDb().prepare(`
+      SELECT * FROM youtube_trailer_jobs
+      WHERE status IN ('queued', 'claimed', 'transferring', 'processing', 'cancel_requested')
+        AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
+      ORDER BY datetime(created_at) ASC, job_id ASC
+    `).all(referenceTime.toISOString()) as SqliteYoutubeTrailerJobRow[]).map((row) => mapRow(row) as YoutubeTrailerJobRow);
+  },
+
+  listPublicationCandidates(referenceTime = new Date()): YoutubeTrailerJobRow[] {
+    return (getDb().prepare(`
+      SELECT * FROM youtube_trailer_jobs
+      WHERE status = 'ready'
+        AND publication_requested_at IS NOT NULL
+        AND publication_status IN ('not_started', 'pending', 'metadata_accepted', 'playlist_confirmed', 'failed')
+        AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
+      ORDER BY datetime(created_at) ASC, job_id ASC
+    `).all(referenceTime.toISOString()) as SqliteYoutubeTrailerJobRow[]).map((row) => mapRow(row) as YoutubeTrailerJobRow);
+  },
+
   obsoletePriorSource(episodeId: number, currentSource: Pick<YoutubeTrailerSource, "sourceFileName" | "sourceSha256" | "sourceBytes">): YoutubeTrailerJobRow[] {
     const rows = (getDb().prepare(`
       SELECT * FROM youtube_trailer_jobs WHERE episode_id = ? AND status IN (${activeStatuses})
