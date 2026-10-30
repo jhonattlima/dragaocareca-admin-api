@@ -35,8 +35,16 @@ export const assembleYoutubeTrailerTitle = (input: YoutubeTrailerPublicationInpu
   if (input.hashtags.length > 3) throw invalidMetadata("Trailer hashtags are limited to three values.");
   const hashtags = input.hashtags.map((tag) => tag.trim());
   if (new Set(hashtags.map((tag) => tag.normalize("NFKC").toLocaleLowerCase("en-US"))).size !== hashtags.length) throw invalidMetadata("Trailer hashtags must be unique.");
-  const title = `${input.title.trim()} ${hashtags.join(" ")}`.trim();
-  if ([...title].length > 100 || /[<>\u0000-\u001F\u007F]/u.test(title)) throw invalidMetadata("Trailer title and hashtags must be at most 100 characters.");
+  const suffix = hashtags.join(" ");
+  const availableTitleCodePoints = 100 - [...suffix].length - (suffix ? 1 : 0);
+  if (availableTitleCodePoints < 1) throw invalidMetadata("Trailer hashtags leave no room for a title.");
+  // Episode titles are canonical feed data and may be longer than YouTube's
+  // 100-character title limit once the selected hashtags are appended. Keep
+  // the operator-selected hashtags and trim only the title prefix, rather
+  // than allowing a durable publication job to fail after the episode saves.
+  const titlePrefix = [...input.title.trim()].slice(0, availableTitleCodePoints).join("").trimEnd();
+  if (!titlePrefix) throw invalidMetadata("Trailer title is invalid.");
+  const title = `${titlePrefix} ${suffix}`.trim();
   return title;
 };
 

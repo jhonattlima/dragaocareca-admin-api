@@ -214,7 +214,11 @@ const verifyLifecycleFocus = async (fixture: Fixture): Promise<void> => {
   });
   assert.equal(typeof publication.assembleYoutubeTrailerTitle, "function", "start and publication must share the assembled-title validator");
   assert.equal(publication.assembleYoutubeTrailerTitle({ title: "a".repeat(97), hashtags: ["#é"] }), `${"a".repeat(97)} #é`);
-  assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "a".repeat(98), hashtags: ["#é"] }), /100 characters/);
+  assert.equal(
+    publication.assembleYoutubeTrailerTitle({ title: "a".repeat(98), hashtags: ["#é"] }),
+    `${"a".repeat(97)} #é`,
+    "long episode titles must be safely shortened while preserving selected hashtags",
+  );
   assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["bad tag"] }), /hashtags are invalid/);
   assert.throws(() => publication.assembleYoutubeTrailerTitle({ title: "Trailer - Episode", hashtags: ["#same", "#same"] }), /unique/);
   const durable = jobs.youtubeTrailerJobRepository.createOrReuse({
