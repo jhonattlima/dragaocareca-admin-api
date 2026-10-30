@@ -433,20 +433,20 @@ const publicationFailureCategory = (error: unknown): string => {
   return "provider";
 };
 
-const recordPublicationRetryFailure = (candidate: YoutubeTrailerJobRow, error: unknown): void => {
+const recordPublicationRetryFailure = (candidate: YoutubeTrailerJobRow, error: unknown): boolean => {
   const current = youtubeTrailerJobRepository.findByJobId(candidate.episodeId, candidate.jobId);
-  if (!current || current.status !== "ready" || !current.publicationRequestedAt || !current.providerVideoId) return;
-  const claimed = youtubeTrailerJobRepository.claimPublication(sourceForJob(current), current.jobId, current.revision, randomUUID());
-  if (!claimed?.publicationLeaseId) return;
+  if (!current || current.status !== "ready" || !current.publicationRequestedAt || !current.providerVideoId) return false;
+  const claimed = current.publicationLeaseId
+    ? current
+    : youtubeTrailerJobRepository.claimPublication(sourceForJob(current), current.jobId, current.revision, randomUUID());
+  if (!claimed?.publicationLeaseId) return false;
   const category = publicationFailureCategory(error);
-  const persisted = youtubeTrailerJobRepository.updatePublication(
+  const persisted = youtubeTrailerJobRepository.deferPublicationRetry(
     { ...sourceForJob(claimed), jobId: claimed.jobId, revision: claimed.revision, leaseId: claimed.publicationLeaseId },
     {
-      publicationStatus: "failed",
-      errorCategory: category,
-      errorMessage: "YouTube trailer publication retry failed.",
-      errorAt: new Date().toISOString(),
-      retentionStatus: "not_started",
+      category,
+      message: current.errorMessage ?? "YouTube trailer publication retry failed.",
+      nextAttemptAt: calculateRetryAt(current.retryCount),
     }
   );
   if (persisted) {
@@ -457,6 +457,7 @@ const recordPublicationRetryFailure = (candidate: YoutubeTrailerJobRow, error: u
       category,
     });
   }
+  return Boolean(persisted);
 };
 
 const processPrivateTransferCandidate = async (candidate: YoutubeTrailerJobRow, provider: YoutubeTrailerUploadProvider): Promise<void> => {
@@ -475,10 +476,10 @@ const processPrivateTransferCandidate = async (candidate: YoutubeTrailerJobRow, 
   }
 };
 
-const processPublicationCandidate = async (candidate: YoutubeTrailerJobRow, provider: YoutubeTrailerUploadProvider): Promise<void> => {
+const processPublicationCandidate = async (candidate: YoutubeTrailerJobRow, provider: YoutubeTrailerUploadProvider): Promise<boolean> => {
   const metadata = metadataForJob(candidate);
   const episode = episodeRepository.findByEpisodeId(candidate.episodeId);
-  if (!episode || !candidate.providerVideoId) return;
+  if (!episode || !candidate.providerVideoId) return false;
   try {
     const result = await publishYoutubeTrailer(
       candidate.episodeId,
@@ -496,9 +497,11 @@ const processPublicationCandidate = async (candidate: YoutubeTrailerJobRow, prov
         stage: "publication-retry",
         category: result.error.category ?? "provider",
       });
+      return recordPublicationRetryFailure(candidate, { category: result.error.category ?? "provider" });
     }
+    return false;
   } catch (error) {
-    recordPublicationRetryFailure(candidate, error);
+    return recordPublicationRetryFailure(candidate, error);
   }
 };
 
@@ -508,7 +511,17 @@ export const processNextYoutubeTrailerJob = async ({ provider = createLiveYoutub
 
   const publicationCandidate = youtubeTrailerJobRepository.listPublicationCandidates()[0];
   if (!publicationCandidate) return;
-  await processPublicationCandidate(publicationCandidate, provider);
+  const publicationFailed = await processPublicationCandidate(publicationCandidate, provider);
+
+  // A failed public transition is retried later with backoff. Give one later
+  // ready job a chance in this same worker round so an old provider outage
+  // cannot hold every newer trailer behind it.
+  if (publicationFailed) {
+    const nextPublication = youtubeTrailerJobRepository.listPublicationCandidates()[0];
+    if (nextPublication && nextPublication.jobId !== publicationCandidate.jobId) {
+      await processPublicationCandidate(nextPublication, provider);
+    }
+  }
 
   // A transfer can have been queued while the publication retry was running.
   // Let it win the same worker round instead of allowing a failed retry to

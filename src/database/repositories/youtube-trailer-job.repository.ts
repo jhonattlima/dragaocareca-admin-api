@@ -325,7 +325,7 @@ export const youtubeTrailerJobRepository = {
   requestPublication(job: YoutubeTrailerJobRow, metadata?: { title: string; summary: string; hashtags: string[] }): YoutubeTrailerJobRow | null {
     const now = nowIso();
     const metadataJson = metadata ? JSON.stringify(metadata) : job.metadataSnapshotJson;
-    const updated = getDb().prepare(`UPDATE youtube_trailer_jobs SET publication_requested_at = ?, metadata_snapshot_json = ?, metadata_digest = NULL, revision = revision + 1, updated_at = ? WHERE episode_id = ? AND job_id = ? AND revision = ?`).run(now, metadataJson, now, job.episodeId, job.jobId, job.revision);
+    const updated = getDb().prepare(`UPDATE youtube_trailer_jobs SET publication_requested_at = ?, metadata_snapshot_json = ?, metadata_digest = NULL, retry_count = 0, next_attempt_at = NULL, revision = revision + 1, updated_at = ? WHERE episode_id = ? AND job_id = ? AND revision = ?`).run(now, metadataJson, now, job.episodeId, job.jobId, job.revision);
     return updated.changes === 1 ? selectOne("episode_id = ? AND job_id = ?", job.episodeId, job.jobId) : null;
   },
 
@@ -451,6 +451,33 @@ export const youtubeTrailerJobRepository = {
     }
     if (fields.length === 0) return youtubeTrailerJobRepository.findByJobId(lease.episodeId, lease.jobId);
     return updateWithPublicationLease(lease, fields.map(([name]) => `${name} = ?`).join(", "), fields.map(([, value]) => value));
+  },
+
+  deferPublicationRetry(lease: YoutubeTrailerPublicationLease, error: { category: string; message: string; nextAttemptAt: string }): YoutubeTrailerJobRow | null {
+    const now = nowIso();
+    const result = getDb().prepare(`
+      UPDATE youtube_trailer_jobs
+      SET publication_status = 'failed', error_category = ?, error_message = ?, error_at = ?,
+        retry_count = retry_count + 1, next_attempt_at = ?, publication_lease_id = NULL,
+        publication_lease_claimed_at = NULL, revision = revision + 1, updated_at = ?
+      WHERE job_id = ? AND episode_id = ? AND source_file_name = ? AND source_sha256 = ? AND source_bytes = ?
+        AND revision = ? AND publication_lease_id = ? AND status = 'ready'
+    `).run(
+      error.category,
+      error.message,
+      now,
+      error.nextAttemptAt,
+      now,
+      lease.jobId,
+      lease.episodeId,
+      lease.sourceFileName,
+      lease.sourceSha256,
+      lease.sourceBytes,
+      lease.revision,
+      lease.leaseId,
+    );
+    if (result.changes !== 1) return null;
+    return selectAfterPublicationCas(lease);
   },
 
   retry(source: YoutubeTrailerSource, jobId: string, expectedRevision: number, nextAttemptAt: string | null): YoutubeTrailerJobRow | null {

@@ -222,8 +222,9 @@ const verifyWorkerFocus = async (): Promise<void> => {
 };
 
 const verifyMetadataAndSafeOutput = async (fixture: Fixture): Promise<void> => {
-  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+  const [{ getDb }, { youtubeTrailerJobRepository }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
     import("../database/sqlite.js"),
+    import("../database/repositories/youtube-trailer-job.repository.js"),
     import("../services/youtube-trailer-job.service.js"),
     import("../workers/youtube-trailer-job.worker.js"),
   ]);
@@ -376,8 +377,9 @@ const verifyRealWorkerFocus = async (fixture: Fixture): Promise<void> => {
 };
 
 const verifyPublicationRetryDoesNotBlockPrivateTransfer = async (fixture: Fixture): Promise<void> => {
-  const [{ getDb }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
+  const [{ getDb }, { youtubeTrailerJobRepository }, { createYoutubeTrailerJob, getYoutubeTrailerJob, toYoutubeTrailerJobStatusDto }, { runYoutubeTrailerJobWorkerOnce }] = await Promise.all([
     import("../database/sqlite.js"),
+    import("../database/repositories/youtube-trailer-job.repository.js"),
     import("../services/youtube-trailer-job.service.js"),
     import("../workers/youtube-trailer-job.worker.js"),
   ]);
@@ -422,10 +424,30 @@ const verifyPublicationRetryDoesNotBlockPrivateTransfer = async (fixture: Fixtur
   assert.equal(failedPublication?.publicationStatus, "failed", "a publication exception before provider access must persist as a retryable failure");
   assert.equal(failedPublication?.errorCategory, "network", "the persisted failure must use an operator-safe category");
   assert.equal(failedPublication?.errorMessage, "YouTube trailer publication retry failed.", "the persisted failure must not retain the raw metadata/provider error");
+  assert.equal(failedPublication?.retryCount, 1, "a failed publication must advance its durable retry count");
+  assert.ok(failedPublication?.nextAttemptAt && Date.parse(failedPublication.nextAttemptAt) > Date.now(), "a failed publication must be deferred before another retry");
   const serialized = JSON.stringify(toYoutubeTrailerJobStatusDto(failedPublication!));
   for (const sensitive of ["errorMessage", "#four"]) {
     assert.equal(serialized.includes(sensitive), false, `public job status must not expose ${sensitive}`);
   }
+
+  const laterPublicationEpisodeId = 43;
+  getDb().prepare("INSERT INTO episodes (episode_id, title, pub_date) VALUES (?, ?, ?)").run(laterPublicationEpisodeId, "Later publication fixture", "2026-08-04T00:00:00.000Z");
+  const laterPublicationPath = path.join(fixture.mediaRoot, "episodes", String(laterPublicationEpisodeId), "trailer.mp4");
+  await fs.promises.mkdir(path.dirname(laterPublicationPath), { recursive: true });
+  await fs.promises.writeFile(laterPublicationPath, Buffer.from("later-publication"));
+  const laterPublication = await createYoutubeTrailerJob(laterPublicationEpisodeId, { title: "Later publication", summary: "Later publication summary" });
+  getDb().prepare(`
+    UPDATE youtube_trailer_jobs
+    SET status = 'ready', provider_video_id = 'fake-private-video-2', provider_privacy_status = 'private',
+      provider_upload_status = 'processed', provider_processing_status = 'succeeded', publication_requested_at = ?
+    WHERE episode_id = ? AND job_id = ?
+  `).run(new Date().toISOString(), laterPublicationEpisodeId, laterPublication.jobId);
+  assert.equal(
+    youtubeTrailerJobRepository.listPublicationCandidates()[0]?.jobId,
+    laterPublication.jobId,
+    "a deferred old publication must not block a newer ready publication",
+  );
 
   const laterTransfer = await createYoutubeTrailerJob(laterTransferEpisodeId);
   await runYoutubeTrailerJobWorkerOnce({ provider, recoverInterrupted: false });
