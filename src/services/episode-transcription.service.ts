@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "../config/env";
+import { runGroqAudioRequest } from "./groq-audio-retry.service";
 import { episodeRepository, type EpisodeRow } from "../database/repositories/episode.repository";
 import {
   getEpisodeMediaDraftTranscriptPath,
@@ -427,12 +428,12 @@ const runCloudTranscription = async (
     form.append("language", config.transcription.language);
     form.append("response_format", "verbose_json");
     form.append("temperature", "0");
-    const response = await fetch(`${config.summary.groqApiBaseUrl.replace(/\/+$/, "")}/audio/transcriptions`, {
+    const response = await runGroqAudioRequest(() => fetch(`${config.summary.groqApiBaseUrl.replace(/\/+$/, "")}/audio/transcriptions`, {
       method: "POST",
       headers: { authorization: `Bearer ${config.summary.groqApiKey.trim()}` },
       body: form,
       signal: AbortSignal.timeout(config.transcription.timeoutMs),
-    });
+    }));
     const body = (await response.json().catch(() => ({}))) as GroqTranscriptionResponse;
     if (!response.ok) throw new Error(`Groq transcription failed (${response.status}): ${body.error?.message ?? "unknown error"}`);
     console.info(`[transcription] provider=groq chunk=${path.basename(wavPath)} chars=${body.text?.length ?? 0}`);
