@@ -334,6 +334,39 @@ const runPassCase = async (): Promise<void> => {
   await cleanupEpisodeWorkspace(episodeId);
 };
 
+const runExcessHighlightsNormalizationCase = async (): Promise<void> => {
+  const episodeId = makeEpisodeId();
+  const transcript = transcriptFixture(episodeId);
+  const rawSummary =
+    "🎧 No episódio de hoje do Dragão Careca:\n\nQue assuntos fazem uma conversa sobre RPG e cultura pop render boas histórias?\n\nNeste episódio, a guilda conversa sobre RPG, jogos independentes e cultura pop, reunindo referências concretas que aparecem durante o papo. Entre franquias, nomes próprios e temas recorrentes da comunidade, os participantes conectam jogos e narrativas sem transformar cada menção em assunto principal. É uma conversa para quem procura referências nerds e histórias compartilhadas pela guilda.\n\n📜 Destaques do episódio:\n• jogos independentes e cultura pop\n• referências de RPG citadas pelos convidados\n• temas que voltam nas conversas da comunidade\n• franquias citadas durante o papo\n• histórias compartilhadas pela guilda\n• este sexto destaque precisa ser removido\n\n🎮 Se você gosta de RPG, jogos e cultura pop, este episódio é pra você.";
+  const summaryConfig = await createRuntimeConfig();
+  const capture: RuntimeCapture = { requestBody: null };
+  const service = createEpisodeSummaryService({
+    summaryConfig,
+    runtime: createRuntime(rawSummary, capture),
+  });
+
+  await cleanupEpisodeWorkspace(episodeId);
+  await writeTranscriptFixture(episodeId, transcript);
+
+  const queueResult = await service.queueDraftEpisodeSummary(episodeId);
+  assert(queueResult.queued, "expected excess-highlights summary queue to start");
+  await waitForStatus(service, episodeId);
+
+  const status = service.getEpisodeDraftSummaryStatus(episodeId);
+  assert(status.status === "done", `expected normalized summary to be done, got ${status.status}`);
+  const snapshot = getEpisodeDraftSummary(episodeId);
+  const summaryText = snapshot.summaryText;
+  if (!summaryText) {
+    throw new Error("normalized summary snapshot missing text");
+  }
+  assert(countHighlightItems(summaryText) === 5, "expected excess highlights to be capped at five");
+  assert(!summaryText.includes("este sexto destaque precisa ser removido"), "expected only excess highlight to be removed");
+  assertSummaryQuality(summaryText, transcript);
+
+  await cleanupEpisodeWorkspace(episodeId);
+};
+
 const runFailCase = async (testCase: QualityCase): Promise<void> => {
   const episodeId = makeEpisodeId();
   const transcript = transcriptFixture(episodeId);
@@ -367,6 +400,7 @@ const runFailCase = async (testCase: QualityCase): Promise<void> => {
 
 const main = async (): Promise<void> => {
   await runPassCase();
+  await runExcessHighlightsNormalizationCase();
 
   const failingCases: QualityCase[] = [
     {

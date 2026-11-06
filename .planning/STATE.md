@@ -1,17 +1,18 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Trailer Video Publishing
 status: Awaiting next milestone
 stopped_at: Completed 17-05-PLAN.md
-last_updated: "2026-10-16T20:26:28.448Z"
+last_updated: "2026-11-06T01:28:23.942Z"
 last_activity: 2026-10-16
-last_activity_desc: Completed fast task: corrigir renderização de convidados estruturados no feed RSS
+last_activity_desc: "Completed fast task: corrigir renderização de convidados estruturados no feed RSS"
+state_head: 121e4c27696772bc518893bc53b8f6364f5070d2
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 20
-  completed_plans: 20
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+milestone_name: Trailer Video Publishing
 current_phase: 18
 current_phase_name: Episode hashtag authoring
 current_plan: 4
@@ -132,6 +133,7 @@ Recent decisions affecting current work:
 | 261009-fq7 | Corrigir publicação social antecipada e metadados Draft em episódios agendados | 2026-10-09 | a9f9bc0 | [261009-fq7](../../dragaocareca-ecosystem/.planning/quick/261009-fq7-corrigir-publica-o-antecipada-de-faceboo/) |
 | 261009-lr9 | Corrigir recuperação de container Instagram ainda em processamento | 2026-10-09 | a9b811e | [261009-lr9](../../dragaocareca-ecosystem/.planning/quick/261009-lr9-corrigir-entrega-ausente-do-instagram-ap/) |
 | 4 | corrigir renderização de convidados estruturados no feed RSS | 2026-10-16 | 56bf472 | — |
+| 5 | Normalizar destaques excedentes na geração de summary | 2026-11-06 | 121e4c2 | — |
 
 ### Roadmap Evolution
 

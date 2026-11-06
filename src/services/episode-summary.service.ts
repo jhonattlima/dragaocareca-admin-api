@@ -286,6 +286,40 @@ const countHighlightItems = (summary: string): number =>
 const hasHighlightsSection = (summary: string): boolean =>
   /(?:^|\n)[^\n]*Destaques(?:\s+do episódio)?\s*:\s*(?:\n|$)/i.test(summary);
 
+const capHighlightItems = (summary: string): { summary: string; removedItems: number } => {
+  const lines = summary.split("\n");
+  const headerIndex = lines.findIndex((line) => /Destaques(?:\s+do episódio)?\s*:/i.test(line));
+  if (headerIndex < 0) {
+    return { summary, removedItems: 0 };
+  }
+
+  let highlightCount = 0;
+  let sectionStarted = false;
+  let sectionEnded = false;
+  let removedItems = 0;
+  const cappedLines = lines.filter((line, index) => {
+    if (index <= headerIndex) return true;
+    if (!sectionEnded && /^(?:-|•)\s+\S.+$/.test(line)) {
+      sectionStarted = true;
+      highlightCount += 1;
+      if (highlightCount > 5) {
+        removedItems += 1;
+        return false;
+      }
+      return true;
+    }
+
+    // The closing line is optional, but only contiguous bullet lines belong to
+    // Destaques. Never remove bullets from another part of the description.
+    if (sectionStarted && line.trim()) {
+      sectionEnded = true;
+    }
+    return true;
+  });
+
+  return { summary: cappedLines.join("\n"), removedItems };
+};
+
 const validateSummaryDraft = (summary: string): void => {
   const sentenceCount = countSentences(getEditorialSummaryBody(summary));
   if (summary.length < 550 || summary.length > 1500) {
@@ -458,7 +492,7 @@ const buildGeminiSummaryPromptText = (input: {
     "- O feed abre com um emoji e uma linha curta como `🎧 No episódio de hoje do Dragão Careca:`.",
     "- Em seguida há um gancho editorial curto e isolado, em forma de pergunta ou afirmação, que resume a tensão ou a curiosidade real do tema.",
     "- O corpo apresenta o formato do episódio e 2 a 4 assuntos centrais em 2 ou 3 parágrafos naturais, com humor leve quando ele estiver sustentado pelo transcript.",
-    "- Depois vem uma seção com emoji e o título `Destaques do episódio:`, seguida de 3 a 6 linhas iniciadas por `• `.",
+    "- Depois vem uma seção com emoji e o título `Destaques do episódio:`, seguida de 3 a 5 linhas iniciadas por `• `.",
     "- O fechamento costuma indicar para qual público o episódio é relevante (`Se você gosta de...`) e pode terminar com uma pergunta à comunidade iniciada por `📢`.",
     "- Reproduza essa estrutura, ritmo e tom, mas nunca copie frases, temas, nomes, perguntas ou chamadas de episódios anteriores.",
     "- O transcript atual é a única fonte de fatos. A chamada final é opcional e não pode afirmar que algo aconteceu ou existirá se isso não estiver no transcript.",
@@ -466,7 +500,7 @@ const buildGeminiSummaryPromptText = (input: {
     "FORMATO OBRIGATÓRIO DO VALOR summary:",
     "- Entre 550 e 1500 caracteres.",
     "- De 3 a 8 frases completas antes da seção de destaques.",
-    "- Inclua uma seção `Destaques do episódio:` com 3 a 6 linhas, cada uma iniciada por `• `.",
+    "- Inclua uma seção `Destaques do episódio:` com 3 a 5 linhas, cada uma iniciada por `• `.",
     "- Use quebras de linha entre a abertura, os parágrafos, a seção e os itens.",
     `- promptVersion=${input.promptVersion}; episodeId=${input.episodeId}.`,
     "",
@@ -1173,6 +1207,13 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
         await writeDraftState(episodeId, currentAfterRuntime);
 
         let normalizedSummary = normalizeSummaryDraftText(rawOutput);
+        const initialCap = capHighlightItems(normalizedSummary);
+        normalizedSummary = initialCap.summary;
+        if (initialCap.removedItems > 0) {
+          console.info(
+            `[summary] capped excess highlights episode=${episodeId} version=${version} attempt=initial removed=${initialCap.removedItems}`
+          );
+        }
         logSummaryCandidate(episodeId, version, "initial", rawOutput, normalizedSummary);
         try {
           validateSummaryDraft(normalizedSummary);
@@ -1220,6 +1261,13 @@ const createEpisodeSummaryService = (deps: EpisodeSummaryServiceDeps = {}) => {
             });
           }
           normalizedSummary = normalizeSummaryDraftText(repairedOutput);
+          const repairCap = capHighlightItems(normalizedSummary);
+          normalizedSummary = repairCap.summary;
+          if (repairCap.removedItems > 0) {
+            console.info(
+              `[summary] capped excess highlights episode=${episodeId} version=${version} attempt=repair removed=${repairCap.removedItems}`
+            );
+          }
           logSummaryCandidate(episodeId, version, "repair", repairedOutput, normalizedSummary);
           validateSummaryDraft(normalizedSummary);
         }
