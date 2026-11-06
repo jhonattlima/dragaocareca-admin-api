@@ -282,7 +282,7 @@ export const config = {
   },
   transcription: {
     enabled: (process.env.EPISODE_TRANSCRIPTION_ENABLED ?? "false").toLowerCase() === "true",
-    provider: process.env.EPISODE_TRANSCRIPTION_PROVIDER ?? "gemini",
+    provider: process.env.EPISODE_TRANSCRIPTION_PROVIDER ?? "groq",
     language: process.env.EPISODE_TRANSCRIPTION_LANGUAGE ?? "pt",
     timeoutMs: Number(process.env.EPISODE_TRANSCRIPTION_TIMEOUT_MS ?? 7200000),
     pollIntervalMs: Number(process.env.EPISODE_TRANSCRIPTION_POLL_INTERVAL_MS ?? 300000),

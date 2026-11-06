@@ -57,7 +57,7 @@
 
 **Episode AI Worker Flow:**
 1. Audio upload queues transcription through `src/services/episode-transcription.service.ts`
-2. Gemini is the default transcription provider; failures fall back to Groq
+2. Groq Whisper is the default transcription provider. Sequential audio chunks persist text checkpoints and retry deadlines under the private generated root; interrupted episode drafts resume through the worker. Gemini remains available as an explicit legacy setting, but production uses Groq for audio.
 3. The completed transcript is written to the episode folder as `transcript.txt`
 4. `episode.state.json` records the transcript state and queues the sequential summary job
 5. `EPISODE_SUMMARY_PRIMARY_PROVIDER` selects Gemini first and `EPISODE_SUMMARY_PROVIDER` supplies the fallback/configured provider, writes draft `summary.txt`, and records `aiSummary` state including the actual provider used

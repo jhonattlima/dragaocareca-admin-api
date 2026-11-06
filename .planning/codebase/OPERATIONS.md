@@ -14,20 +14,20 @@ Use `scripts/bootstrap-vps.sh` for the full bootstrap or `scripts/install-vps-de
 
 ## Episode AI configuration
 
-Episode transcription tries Gemini first and falls back to Groq. Faster Whisper and local Whisper CLI transcription are no longer installed. Keep provider secrets outside version control.
+Episode and trailer transcription use Groq Whisper directly. Episode audio is processed in sequential five-minute chunks. Completed text and quota retry deadlines are persisted under `data/generated/transcription-checkpoints` (next to the configured private trailer-candidates root). Keys bind the SHA-256 of the audio, model, language and chunk duration, so a replaced source cannot reuse old text. WAV chunks remain temporary and are removed after each attempt. Keep provider secrets outside version control.
 
 ```bash
 EPISODE_TRANSCRIPTION_ENABLED=true
-EPISODE_TRANSCRIPTION_PROVIDER=gemini
+EPISODE_TRANSCRIPTION_PROVIDER=groq
 EPISODE_TRANSCRIPTION_LANGUAGE=pt
 EPISODE_TRANSCRIPTION_TIMEOUT_MS=7200000
 
-# Optional alternative transcription providers
-GEMINI_API_KEY=replace-with-secret
-EPISODE_TRANSCRIPTION_GEMINI_MODEL=gemini-3.6-flash
+GROQ_API_KEY=replace-with-secret
+EPISODE_TRANSCRIPTION_GROQ_MODEL=whisper-large-v3-turbo
 
 # Summary and hashtag authoring are separate from speech transcription
 EPISODE_SUMMARY_ENABLED=true
+GEMINI_API_KEY=replace-with-secret
 EPISODE_SUMMARY_PRIMARY_PROVIDER=gemini
 EPISODE_SUMMARY_PROVIDER=groq
 YOUTUBE_HASHTAG_PRIMARY_PROVIDER=gemini
@@ -37,7 +37,7 @@ EPISODE_SUMMARY_GEMINI_THINKING_LEVEL=low
 EPISODE_SUMMARY_PROMPT_VERSION=4
 ```
 
-The xAI key and provider selection are server-side only. WhisperX remains only for optional timed-caption alignment of edited trailer transcripts. Keep transcription and summary generation sequential on the 4 GB VPS.
+Provider keys and selection are server-side only. WhisperX remains only for optional timed-caption alignment of edited trailer transcripts. Keep speech requests sequential on the 4 GB VPS. HTTP 429 leaves an episode draft `pending`, with its progress and a quota-wait message; the worker polls at most every 30 seconds and respects the durable retry deadline. Restart recovery scans existing pending/processing drafts and continues their checkpoints without blocking HTTP startup. Permanent failures stay `error` for operator correction. Text-only checkpoints are retained for reuse; they contain no WAV/MP3 copies. This change preserves the existing optional waveform-only trailer fallback when trailer transcription fails.
 
 ## Runtime contract
 
@@ -83,6 +83,7 @@ npm run build
 npm run verify:public-episodes
 npm run verify:summary-runtime-contract
 npm run verify:summary-quality-contract
+npm run verify:transcription-checkpoints
 npm run verify:meta-connection
 npm run verify:episode-publication-delivery
 ```

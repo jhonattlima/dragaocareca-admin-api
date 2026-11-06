@@ -8,7 +8,7 @@ An admin and public API service for Dragao Careca. It manages podcast episodes, 
 
 - Latest shipped milestone: **v1.4 Trailer Video Publishing** on 2026-08-21
 - Current milestone: None — ready to plan the next cycle
-- Episode and trailer transcripts try Gemini first and fall back to Groq; WhisperX remains only for timed trailer-caption alignment. Summary generation remains an independent remote-provider workflow.
+- Episode and trailer transcripts use Groq Whisper directly by default. Episode transcription persists content-bound text checkpoints and resumes after quota waits/restarts; Gemini remains the primary summary provider. WhisperX remains only for timed trailer-caption alignment.
 - Next planning step: define the next milestone with `$gsd-new-milestone`.
 
 ## Core Value

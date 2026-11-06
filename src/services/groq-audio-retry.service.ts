@@ -1,6 +1,18 @@
 const maximumWaitMs = 10 * 60_000;
 const maximumRetries = 5;
 
+export const groqAudioRetryDelayMs = (response: Response, message = ""): number => {
+  const header = response.headers.get("retry-after") ?? "";
+  const seconds = Number(header);
+  const dateDelay = Date.parse(header) - Date.now();
+  const messageSeconds = message.match(/try again in\s+(\d+(?:\.\d+)?)s/i)?.[1];
+  const retryMs = header.trim() && Number.isFinite(seconds) && seconds >= 0
+    ? seconds * 1000
+    : Number.isFinite(dateDelay) && dateDelay > 0 ? dateDelay
+    : messageSeconds ? Number(messageSeconds) * 1000 : 60_000;
+  return Math.max(1000, Math.ceil(retryMs) + 1000);
+};
+
 export const runGroqAudioRequest = async (
   request: () => Promise<Response>,
   wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
@@ -12,12 +24,7 @@ export const runGroqAudioRequest = async (
     if (response.status !== 429 || attempt >= maximumRetries) return response;
 
     const body = await response.clone().json().catch(() => ({})) as { error?: { message?: string } };
-    const headerSeconds = Number.parseFloat(response.headers.get("retry-after") ?? "");
-    const messageSeconds = body.error?.message?.match(/try again in\s+(\d+(?:\.\d+)?)s/i)?.[1];
-    const retryMs = Number.isFinite(headerSeconds) && headerSeconds >= 0
-      ? headerSeconds * 1000
-      : messageSeconds ? Number(messageSeconds) * 1000 : 60_000;
-    const delayMs = Math.max(1000, Math.ceil(retryMs) + 1000);
+    const delayMs = groqAudioRetryDelayMs(response, body.error?.message);
     if (waitedMs + delayMs > maximumWaitMs) return response;
 
     await response.body?.cancel();
