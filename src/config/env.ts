@@ -161,6 +161,10 @@ export const parseHashtagAuthoringConfig = (env: HashtagAuthoringEnv = process.e
 
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
+  episodeAudio: {
+    album: process.env.EPISODE_AUDIO_ALBUM ?? "Season 4",
+    timeZone: process.env.EPISODE_AUDIO_TIME_ZONE ?? "America/Sao_Paulo",
+  },
   trailerCandidateRenderEnabled: (process.env.TRAILER_CANDIDATE_RENDER_ENABLED ?? "false").toLowerCase() === "true",
   // Temporary operator opt-in for live visual validation only. This bypasses
   // the Portuguese quality/capacity gates and must never be treated as approval.

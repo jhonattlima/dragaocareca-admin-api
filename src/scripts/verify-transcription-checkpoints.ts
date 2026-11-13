@@ -25,8 +25,7 @@ const main = async (): Promise<void> => {
     const changedLanguage = await openTranscriptionCheckpoint({ ...options, language: "en" });
     assert.equal(changedLanguage.getChunk(0), undefined);
     const otherAudio = path.join(root, "other.mp3");
-    await fs.copyFile(audioPath, otherAudio);
-    await fs.appendFile(otherAudio, "changed");
+    await execute("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "301", otherAudio]);
     assert.notEqual((await openTranscriptionCheckpoint({ ...options, audioPath: otherAudio })).key, first.key);
 
     process.env.NODE_ENV = "development";
@@ -108,7 +107,7 @@ const main = async (): Promise<void> => {
         assert.equal(requests, 6);
       } finally { stopWorker(); }
     } finally { globalThis.fetch = originalFetch; }
-    await fs.appendFile(audioPath, "changed");
+    await fs.copyFile(otherAudio, audioPath);
     await assert.rejects(first.assertSourceUnchanged(), /Audio changed/);
     console.log("Transcription checkpoint and Groq resume verification passed.");
   } finally { await fs.rm(root, { recursive: true, force: true }); }

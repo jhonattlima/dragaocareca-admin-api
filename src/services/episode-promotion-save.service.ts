@@ -23,6 +23,7 @@ export type EpisodePromotionSaveInput = {
   payload: EpisodeInput;
   mediaUpdates?: Parameters<typeof episodeRepository.updateMedia>[1];
   transport?: PromotionTransport;
+  onCommitted?: () => void;
 };
 
 export type EpisodePromotionSaveResult = {
@@ -118,6 +119,8 @@ export const saveEpisodeAndQueuePromotion = async (
     }
     return { episode: finalEpisode, intent };
   });
+
+  input.onCommitted?.();
 
   if (!committed.intent) {
     if (committed.episode.isDraft) {

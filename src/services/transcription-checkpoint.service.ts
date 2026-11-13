@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execute = promisify(execFile);
 
 export class TranscriptionDeferredError extends Error {
   constructor(public readonly retryAt: number) {
@@ -10,9 +14,14 @@ export class TranscriptionDeferredError extends Error {
 }
 
 export const audioSha256 = async (audioPath: string): Promise<string> => {
-  const hash = createHash("sha256");
-  for await (const bytes of fs.createReadStream(audioPath)) hash.update(bytes);
-  return hash.digest("hex");
+  // Hash encoded audio packets, excluding ID3 tags and attached pictures.
+  // Save Episode may rewrite those while speech processing is in flight.
+  const { stdout } = await execute("ffmpeg", ["-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe", "-i", audioPath,
+    "-map", "0:a:0", "-c:a", "copy", "-f", "hash", "-hash", "sha256", "-"],
+  { timeout: 120_000, maxBuffer: 1024 * 1024 });
+  const digest = stdout.trim().match(/^SHA256=([a-f0-9]{64})$/i)?.[1];
+  if (!digest) throw new Error("Cannot fingerprint encoded audio");
+  return digest.toLowerCase();
 };
 
 type Checkpoint = {
@@ -30,7 +39,7 @@ export const openTranscriptionCheckpoint = async (input: {
 }) => {
   const audioDigest = await audioSha256(input.audioPath);
   const key = createHash("sha256").update(JSON.stringify({
-    version: 1, audioDigest, model: input.model, language: input.language, chunkSeconds: input.chunkSeconds,
+    version: 2, audioDigest, model: input.model, language: input.language, chunkSeconds: input.chunkSeconds,
   })).digest("hex");
   const directory = path.join(input.root, key);
   const filePath = path.join(directory, "progress.json");

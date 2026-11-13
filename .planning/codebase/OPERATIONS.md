@@ -12,6 +12,19 @@
 
 Use `scripts/bootstrap-vps.sh` for the full bootstrap or `scripts/install-vps-deps.sh` for worker dependencies only.
 
+## Embedded episode MP3 metadata
+
+`Save Episode` (create and edit) writes ID3v2.4 tags to the main MP3 after staged media promotion and before save/publication. Title uses `DC {episodeNumber} - {type if present} - {title}`; this does not change the canonical title used by the feed. Artist combines participant names and structured/plain guest names, removes duplicates and sorts in Portuguese. Track uses episodeNumber, never episodeId. Genre is `Podcast`; Album Artist is `Dragão Careca`. The uploaded JPEG is embedded as the single Front Cover picture. The release date is stored in the date/TDRC field as YYYY-MM-DD; players may label/display its year separately.
+
+```bash
+EPISODE_AUDIO_ALBUM=Season 4
+EPISODE_AUDIO_TIME_ZONE=America/Sao_Paulo
+```
+
+Change the album env value for the next season. Tagging copies encoded audio without re-encoding, verifies the tags/cover/audio fingerprint, replaces the MP3 atomically and updates the saved duration/byte count. Failed persistence restores the previous MP3; delivery failures after the DB commit retain the new tags. Hidden `.audio-before-tags-*.mp3` files are rollback hardlinks; a process crash can retain one for recovery. No historical batch rewrite runs at deployment. Missing legacy audio remains editable; an existing audio requires JPEG cover and episodeNumber. Temporary files require room for one MP3 plus cover on the same filesystem.
+
+Speech checkpoint identity now hashes encoded audio packets rather than whole-file ID3 bytes, so metadata edits preserve in-flight speech progress. Checkpoint format v2 regenerates older cached identities as needed; existing final transcripts remain intact. Verify with `npm run verify:episode-audio-tags` and `npm run verify:transcription-checkpoints`.
+
 ## Episode AI configuration
 
 Episode and trailer transcription use Groq Whisper directly. Episode audio is processed in sequential five-minute chunks. Completed text and quota retry deadlines are persisted under `data/generated/transcription-checkpoints` (next to the configured private trailer-candidates root). Keys bind the SHA-256 of the audio, model, language and chunk duration, so a replaced source cannot reuse old text. WAV chunks remain temporary and are removed after each attempt. Keep provider secrets outside version control.

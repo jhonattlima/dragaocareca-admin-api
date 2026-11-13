@@ -57,6 +57,7 @@ import {
 } from "../services/youtube-trailer-job.service";
 import { assembleYoutubeTrailerTitle, publishYoutubeTrailer } from "../services/youtube-trailer-publication.service";
 import { extractEpisodeAudioMetadata } from "../services/episode-audio-metadata.service";
+import { withEpisodeAudioTags } from "../services/episode-audio-tags.service";
 import { buildCanonicalEpisodeTitle } from "../services/episode-title.service";
 import { episodeSourceMutationLockMiddleware, withEpisodeSourceMutationLock } from "../services/episode-source-mutation-lock.service";
 import type { EpisodeTrailerVideoUploadResponse } from "../schemas/episode-draft-state";
@@ -1648,7 +1649,11 @@ episodesRouter.post("/", requireAuth, async (req, res, next) => {
     // Persist the promotion outbox whenever final trailer media exists.  The
     // transport flag only controls delivery, so an operational toggle cannot
     // silently lose the immediate trailer/early-access intent from Save.
-    const promotionResult = await saveEpisodeAndQueuePromotion({ episodeId: created.episodeId, payload, mediaUpdates });
+    const promotionResult = await withEpisodeSourceMutationLock(created.episodeId, () =>
+      withEpisodeAudioTags(created.episodeId, payload, async (metadata, onCommitted) => {
+        if (metadata) Object.assign(payload, metadata);
+        return saveEpisodeAndQueuePromotion({ episodeId: created.episodeId, payload, mediaUpdates, onCommitted });
+      }));
     if (!promotionResult && config.promotion.legacyLaunchEnabled) {
       await queueLaunchNotification(created.episodeId);
     }
@@ -1705,7 +1710,10 @@ episodesRouter.put("/:episodeId", requireAuth, episodeSourceMutationLockMiddlewa
       await queueEpisodeTranscription(routeId);
     }
     // See create: retain an outbox intent even while delivery is disabled.
-    const promotionResult = await saveEpisodeAndQueuePromotion({ episodeId: routeId, payload, mediaUpdates });
+    const promotionResult = await withEpisodeAudioTags(routeId, payload, async (metadata, onCommitted) => {
+      if (metadata) Object.assign(payload, metadata);
+      return saveEpisodeAndQueuePromotion({ episodeId: routeId, payload, mediaUpdates, onCommitted });
+    });
     if (!promotionResult) {
       episodeRepository.update(routeId, payload);
       if (config.promotion.legacyLaunchEnabled) {
