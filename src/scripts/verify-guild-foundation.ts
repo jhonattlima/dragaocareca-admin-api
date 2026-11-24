@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { getGuildSchemaState, guildTables, migrateGuildFoundation } from "../database/migrations/guild-foundation";
 
 async function main() {
+  const originalWorkingDirectory = process.cwd();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dc-guild-foundation-"));
   const filename = path.join(directory, "fixture.sqlite");
   const db = new DatabaseSync(filename);
@@ -54,6 +55,14 @@ async function main() {
       assert.equal(failing.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND substr(name,1,6)='guild_'").get()!.count,0);
       assert.equal(failing.prepare("SELECT id FROM episodes").get()!.id,7);
     } finally { failing.close(); }
+    // Isolate config from developer .env files and supply only synthetic feed metadata.
+    process.chdir(directory);
+    Object.assign(process.env, {
+      FEED_BASE_LINK: "https://fixture.invalid", FEED_AUDIO_BASE: "https://fixture.invalid/audio",
+      FEED_IMAGE_BASE: "https://fixture.invalid/images", FEED_TITLE: "Fixture podcast",
+      FEED_DESCRIPTION: "Synthetic verification fixture", FEED_SITE: "https://fixture.invalid",
+      DISABLE_BACKGROUND_WORKERS: "true",
+    });
     process.env.NODE_ENV="development";
     process.env.AUTH_BYPASS="false";
     process.env.SQLITE_PATH=path.join(directory,"unused.sqlite");
@@ -98,6 +107,7 @@ async function main() {
     console.log("Guild foundation verified: 34 tables, repeatable migration, rollback, constraints, read-only routes, privacy and auth boundaries.");
   } finally {
     if(server) await new Promise<void>((resolve,reject)=>server!.close(error=>error?reject(error):resolve()));
+    process.chdir(originalWorkingDirectory);
     db.close(); fs.rmSync(directory,{recursive:true,force:true});
   }
 }
