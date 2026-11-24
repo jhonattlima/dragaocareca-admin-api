@@ -1,4 +1,5 @@
 import swaggerJsdoc from "swagger-jsdoc";
+import { guildOpenApiPaths } from "./guild.openapi";
 import {
   getPromotionContractProjection,
   PROMOTION_CONTRACT_SOURCE_REVISION,
@@ -642,6 +643,7 @@ export const swaggerSpec = swaggerJsdoc({
       },
     },
     paths: {
+      ...guildOpenApiPaths,
       "/internal/promotions": {
         post: {
           tags: ["Internal Promotion"],

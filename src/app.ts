@@ -7,6 +7,7 @@ import { ZodError } from "zod";
 import { config } from "./config/env";
 import { swaggerSpec } from "./docs/openapi";
 import { authRouter } from "./routes/auth.routes";
+import { guildRouter } from "./routes/guild.routes";
 import { assetsRouter } from "./routes/assets.routes";
 import { episodesRouter, redactTrailerPreviewGrantFromUrl } from "./routes/episodes.routes";
 import { feedRouter } from "./routes/feed.routes";
@@ -146,6 +147,7 @@ app.get("/docs.json", (_req, res) => {
   res.json(swaggerSpec);
 });
 
+app.use("/v1/guild", guildRouter);
 app.use("/v1/auth", authRouter);
 app.use("/v1/assets", assetsRouter);
 app.use("/v1/public/episodes", publicEpisodesRouter);

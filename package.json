@@ -40,7 +40,9 @@
     "verify:transcription-checkpoints": "npm run build && NODE_ENV=development node dist/scripts/verify-transcription-checkpoints.js",
     "import:episodes": "tsx src/scripts/import-legacy-episodes.ts",
     "spotify:metrics": "npm run build && NODE_ENV=development node dist/scripts/spotify-metrics.js",
-    "verify:spotify-episode-resolution": "npm run build && NODE_ENV=development SPOTIFY_EPISODE_CLIENT_ID=offline SPOTIFY_EPISODE_CLIENT_SECRET=offline SPOTIFY_EPISODE_SHOW_ID=offline SQLITE_PATH=/tmp/dragaocareca-spotify-episode-resolution.sqlite node dist/scripts/verify-spotify-episode-resolution.js"
+    "verify:spotify-episode-resolution": "npm run build && NODE_ENV=development SPOTIFY_EPISODE_CLIENT_ID=offline SPOTIFY_EPISODE_CLIENT_SECRET=offline SPOTIFY_EPISODE_SHOW_ID=offline SQLITE_PATH=/tmp/dragaocareca-spotify-episode-resolution.sqlite node dist/scripts/verify-spotify-episode-resolution.js",
+    "migrate:guild": "tsx src/scripts/migrate-guild.ts",
+    "verify:guild-foundation": "npm run build && node dist/scripts/verify-guild-foundation.js"
   },
   "keywords": [],
   "author": "",
