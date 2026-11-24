@@ -1,6 +1,6 @@
 # Guild foundation — schema and read contracts
 
-2026-11-24. Implemented locally; not deployed and not applied to a live database. No PocketBase records, credentials or files have been imported.
+2026-11-24. Deployed to production at API revision `ad8a7f9171f294f1428357caa7e7839f911028b2`; migration `001-guild-foundation` applied. No PocketBase records, credentials or files have been imported. All 29 pre-existing tables and 16,234 rows were fingerprinted unchanged across the stopped-service migration. API healthy; public HTTPS reads and admin authentication verified. Protected VPS backup/evidence: `/srv/dragaocareca/backups/guild-foundation/20261124T192858Z`.
 
 ## Ownership and boundaries
 
@@ -47,3 +47,11 @@ Responses use `Cache-Control:no-store`. Missing or incompatible schema returns50
 `npm run verify:guild-foundation` builds and tests a disposable SQLite and local HTTP server, with no external service or real data. Coverage: repeatable migration, dry-run preservation, rollback on partial state/checksum refusal, unchanged pre-existing episode fixture, FKs, unique daily games/events/reversals, rating steps, same-film discussion replies, public DTO privacy, inactive badges, authentication order, pagination, unavailable schema and absence of mutation routes. `npm run typecheck` is also required.
 
 Schema constraints do not implement domain workflows: XP balance updates, reversal value/member checks, same-event first-discovery consistency, blood donation intervals, idempotent per-move processing, upload lifecycle, login rate limiting, push workers and full role policies remain later transactional services. Do not seed fake successes or enable workers to compensate for their absence. Load testing with ten active players is meaningful after actual gameplay exists, not against read-only scaffolding.
+
+## Production rollout evidence
+
+The final image reused the exact previous production runtime/dependencies (`sha256:16fe49b0900468c24aec35bb87d379045af27336a6a9ed0771647f88228a2335`) because dependency manifests and native assets were unchanged. Typecheck/build/disposable verification passed inside that runtime (Node22.23.5). A normal build was stopped before deployment when floating base tags triggered unrelated runtime/dependency rebuilds. The derivative build fixed build-stage dist ownership; the verifier was corrected in `ad8a7f9` to supply synthetic config and avoid local dotenv dependency.
+
+SQLite backup was rehearsed with the migration applied twice (second run no-op). The API was stopped for final backup/migration/fingerprint comparison and restarted. New image: `sha256:e10510ebce6b86b86ffe9111c02cc2876086d160858796d055b2f7f93de9b6c4`. All 34 tables exist; business tables remain empty. No application env files, media, bot, site-v2 or other services were changed. Operational API revision pin/rollback metadata was updated to avoid a later deploy selecting the older release.
+
+When running operational scripts via SSH standard input, commands that attach stdin must explicitly use `</dev/null` or non-interactive mode. The one-off Compose migration consumed the remaining streamed script; comparison/restart/smoke steps were resumed explicitly. Existing data matched; no whole-database restoration was needed. Use the saved final script/procedure, not an interactive Compose command that can consume a streamed shell script.

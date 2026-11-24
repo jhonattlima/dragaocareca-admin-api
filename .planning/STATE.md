@@ -201,3 +201,5 @@ Resume file: None
 ## Guild foundation — 2026-11-24
 
 Creation-only Guild migration and eight read endpoints implemented locally; see [implementation record](implementation/GUILD-FOUNDATION.md) and [contracts/operations](../docs/features/guild-foundation.md). Games, achievements and XP progression are separate modules; achievement scope distinguishes Guild-wide/game-specific badges. Verified with `npm run typecheck` and `npm run verify:guild-foundation` against disposable fixtures. No production migration, import, member auth, gameplay/reward mutation, provider calls or deployment performed. Existing milestone history above is retained; this foundation does not mark full Guild migration complete.
+
+Production update 2026-11-24: foundation deployed at `ad8a7f9`, schema applied after rehearsal and backup. All 29 previous tables/16,234 rows confirmed unchanged; new business tables empty; API healthy and public/admin boundary checked. Initial member auth, gameplay/rewards and legacy data import remain pending. See `docs/features/guild-foundation.md` for rollout/recovery evidence.
